@@ -39,16 +39,16 @@ annotation go to stderr.
 Plain dump serializes `Catalog`; `--plugin <name>` negotiates Info and serializes
 a `PluginRequest` with its Generate payload, filtered namespace annotations,
 JSON options, host version and configured output directory. It does not invoke
-Generate. Built-in replay requires a registered generator; none is registered
-before `ratel-gen-go` is available. Output goes to stdout, so shell redirection
-creates the replay file:
+Generate. The built-in `go` generator (`ratel-gen-go`) is registered, so its
+request replays too. Output goes to stdout, so shell redirection creates the
+replay file:
 
 ```sh
 ratel dump --format json > catalog.json
-ratel dump --plugin go-external > request.binpb
+ratel dump --plugin go > request.binpb
 ```
 
-The second command requires a plugin named `go-external` in `ratel.yaml`.
+The second command requires the plugin `go` (`builtin: true`) in `ratel.yaml`.
 
 Exit codes: `0` success; `1` diagnostics with severity `ERROR`, a failed
 migration step, a checksum mismatch or detected drift; `2` usage error.
@@ -88,7 +88,7 @@ plugins:
     builtin: true
     out: internal/db
     options:
-      package: db
+      import_path: github.com/acme/app/internal/db
 
 migrate:
   lock_timeout: 100ms         # first attempt; the retry schedule grows it

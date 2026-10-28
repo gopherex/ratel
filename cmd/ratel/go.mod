@@ -7,6 +7,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-cmp v0.7.0
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/jinzhu/inflection v1.0.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0

@@ -6,15 +6,22 @@ import (
 	"path/filepath"
 
 	"github.com/gopherex/ratel/ir"
+	sdk "github.com/gopherex/ratel/plugin"
 	"github.com/gopherex/ratel/plugin/pluginpb"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/annotate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
+	"github.com/gopherex/ratel/cmd/ratel/internal/gengo"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 	"github.com/gopherex/ratel/cmd/ratel/internal/query"
 )
+
+// generators are the built-in output plugins, by their configured name.
+func generators() map[string]sdk.Generator {
+	return map[string]sdk.Generator{gengo.Name: gengo.Generator{}}
+}
 
 // project is the shared pipeline result: schema catalog plus inferred queries.
 type project struct {

@@ -79,7 +79,7 @@ func dumpCatalog(configPath, name string, format sdk.Format, stdout, stderr io.W
 		return err
 	}
 
-	runner := host.New(nil)
+	runner := host.New(generators())
 	defer runner.Close(context.Background())
 
 	request, err := runner.Prepare(context.Background(), entry, input)

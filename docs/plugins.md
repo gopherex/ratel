@@ -98,7 +98,8 @@ release its run-local compilation cache. WASI instances are fresh per exchange;
 compiled code is shared until the host closes. The `generate` command's output
 writer owns the manifest and filesystem safety checks, including symlink handling. `Run` rejects
 unsafe paths, duplicate files and file/directory collisions before returning.
-No built-in generator is registered until `ratel-gen-go` implements the interface.
+The host registers one built-in generator, `go` (`cmd/ratel/internal/gengo`,
+`ratel-gen-go`).
 
 Exec plugins inherit the host environment and filesystem permissions: they are
 trusted executables, not a sandbox. WASI plugins receive no filesystem mounts,
