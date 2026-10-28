@@ -21,7 +21,10 @@ func (b *builder) dispatch(stmt statement) error {
 	case node.GetCreateEnumStmt() != nil:
 		return b.add(mapped.MapCreateEnum(node.GetCreateEnumStmt()), "enums", stmt.schema)
 	case node.GetCreateDomainStmt() != nil:
-		return b.add(mapped.MapCreateDomain(node.GetCreateDomainStmt()), "domains", stmt.schema)
+		domain := mapped.MapCreateDomain(node.GetCreateDomainStmt())
+		nameDomainConstraints(domain)
+
+		return b.add(domain, "domains", stmt.schema)
 	case node.GetCompositeTypeStmt() != nil:
 		return b.add(mapped.MapCompositeType(node.GetCompositeTypeStmt()), "composites", stmt.schema)
 	case node.GetCreateRangeStmt() != nil:

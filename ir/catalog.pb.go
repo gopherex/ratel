@@ -511,7 +511,7 @@ func (x *BuiltinCast) GetFunction() *QualifiedName {
 type Catalog struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Name            string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                              // database name
-	DatabaseVersion string                 `protobuf:"bytes,2,opt,name=database_version,json=databaseVersion,proto3" json:"database_version,omitempty"` // e.g. "PostgreSQL 16.2"
+	DatabaseVersion string                 `protobuf:"bytes,2,opt,name=database_version,json=databaseVersion,proto3" json:"database_version,omitempty"` // PostgreSQL major the shape is for, e.g. "18"
 	DefaultSchema   string                 `protobuf:"bytes,3,opt,name=default_schema,json=defaultSchema,proto3" json:"default_schema,omitempty"`       // usually "public"
 	SearchPath      []string               `protobuf:"bytes,4,rep,name=search_path,json=searchPath,proto3" json:"search_path,omitempty"`
 	Extensions      []*Extension           `protobuf:"bytes,5,rep,name=extensions,proto3" json:"extensions,omitempty"` // database-wide, ordered by object id

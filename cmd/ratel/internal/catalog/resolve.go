@@ -3,6 +3,7 @@ package catalog
 import (
 	"cmp"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,8 +95,22 @@ func (b *builder) applyComments() error {
 
 func (b *builder) attach(pending attachment) error {
 	reference := &ir.ObjectRef{Kind: ir.ObjectKind_OBJECT_KIND_TABLE, Name: pending.table}
-	entry, exists := b.objects[objectKey(reference)]
+	if _, exists := b.objects[objectKey(reference)]; exists {
+		return b.attachTable(pending)
+	}
 
+	view := &ir.ObjectRef{Kind: ir.ObjectKind_OBJECT_KIND_MATERIALIZED_VIEW, Name: pending.table}
+	if materialized, found := b.objects[objectKey(view)]; found {
+		return b.attachViewIndex(materialized, pending)
+	}
+
+	return refusal("RTL-C03", metadata(pending.message), "undeclared table "+ObjectID(reference))
+}
+
+func (b *builder) attachTable(pending attachment) error {
+	reference := &ir.ObjectRef{Kind: ir.ObjectKind_OBJECT_KIND_TABLE, Name: pending.table}
+
+	entry, exists := b.objects[objectKey(reference)]
 	if !exists {
 		return refusal("RTL-C03", metadata(pending.message), "undeclared table "+ObjectID(reference))
 	}
@@ -116,7 +131,7 @@ func (b *builder) attach(pending attachment) error {
 	case *ir.Index:
 		if value.GetName() == "" {
 			schema := table.GetName().GetParts()[0]
-			value.Name = b.uniqueRelationName(schema, indexDefaultName(table, value))
+			value.Name = b.uniqueRelationName(schema, pending.table.GetParts()[1], indexColumns(value), "idx")
 		}
 
 		ref := &ir.ObjectRef{
@@ -146,6 +161,45 @@ func (b *builder) attach(pending attachment) error {
 			Name: &ir.QualifiedName{Parts: append(slices.Clone(pending.table.GetParts()), value.GetName())},
 		})
 	}
+
+	return nil
+}
+
+// attachViewIndex attaches an index to a materialized view, the only
+// non-table relation that takes one.
+func (b *builder) attachViewIndex(entry declaration, pending attachment) error {
+	var (
+		view  *ir.MaterializedView
+		index *ir.Index
+	)
+
+	switch value := entry.message.(type) {
+	case *ir.MaterializedView:
+		view = value
+	default:
+		return refusal("RTL-C03", entry.meta, "target is not a materialized view")
+	}
+
+	switch value := pending.message.(type) {
+	case *ir.Index:
+		index = value
+	default:
+		return refusal("RTL-C03", metadata(pending.message), "target is not a table")
+	}
+
+	schema := pending.table.GetParts()[0]
+	if index.GetName() == "" {
+		index.Name = b.uniqueRelationName(schema, pending.table.GetParts()[1], indexColumns(index), "idx")
+	}
+
+	ref := &ir.ObjectRef{
+		Kind: ir.ObjectKind_OBJECT_KIND_INDEX, Name: &ir.QualifiedName{Parts: []string{schema, index.GetName()}},
+	}
+	if err := b.register(ref, index, index.GetMeta(), "relation"); err != nil {
+		return err
+	}
+
+	view.Indexes = append(view.GetIndexes(), index)
 
 	return nil
 }
@@ -269,24 +323,80 @@ func constraintColumns(constraint *ir.Constraint) []string {
 	}
 }
 
-func constraintName(table *ir.Table, constraint *ir.Constraint) string {
-	parts := []string{table.GetName().GetParts()[1]}
-	parts = append(parts, constraintColumns(constraint)...)
-
-	suffix := strings.TrimPrefix(strings.ToLower(constraint.GetType().String()), "constraint_type_")
+// constraintName chooses the name PostgreSQL gives an unnamed constraint from
+// the table, a column addition and the label.
+func constraintName(table *ir.Table, constraint *ir.Constraint, used func(string) bool) string {
+	relation := table.GetName().GetParts()[1]
 
 	switch constraint.GetType() {
 	case ir.ConstraintType_CONSTRAINT_TYPE_PRIMARY_KEY:
-		suffix = "pkey"
-		parts = parts[:1]
+		return chooseName(relation, "", "pkey", used)
 	case ir.ConstraintType_CONSTRAINT_TYPE_FOREIGN_KEY:
-		suffix = "fkey"
+		return chooseName(relation, nameAddition(constraintColumns(constraint)), "fkey", used)
 	case ir.ConstraintType_CONSTRAINT_TYPE_UNIQUE:
-		suffix = "key"
+		return chooseName(relation, nameAddition(constraintColumns(constraint)), "key", used)
+	case ir.ConstraintType_CONSTRAINT_TYPE_NOT_NULL:
+		return chooseName(relation, constraint.GetNotNullColumn(), "not_null", used)
+	case ir.ConstraintType_CONSTRAINT_TYPE_EXCLUSION:
+		return chooseName(relation, nameAddition(exclusionColumns(constraint.GetExclusion())), "excl", used)
 	default:
+		// A check names its column only when it references exactly one.
+		columns := referencedColumns(constraint.GetCheck().GetExpression())
+		if len(columns) == 1 {
+			return chooseName(relation, columns[0], "check", used)
+		}
+
+		return chooseName(relation, "", "check", used)
+	}
+}
+
+func exclusionColumns(exclusion *ir.ExclusionConstraint) []string {
+	columns := make([]string, 0, len(exclusion.GetElements()))
+	for _, element := range exclusion.GetElements() {
+		columns = append(columns, cmp.Or(element.GetColumn(), expressionColumnName(element.GetExpr())))
 	}
 
-	return strings.Join(append(parts, suffix), "_")
+	return columns
+}
+
+// expressionColumnName is FigureIndexColname: a function call is named after
+// the function, any other expression "expr".
+func expressionColumnName(expression *ir.Expr) string {
+	function := expression.GetFunctionCall().GetName().GetParts()
+	if len(function) > 0 {
+		return function[len(function)-1]
+	}
+
+	return "expr"
+}
+
+// referencedColumns lists the distinct columns an expression references, in
+// first-reference order.
+func referencedColumns(expression *ir.Expr) []string {
+	var columns []string
+
+	var walk func(protoreflect.Message)
+	walk = func(message protoreflect.Message) {
+		switch reference := message.Interface().(type) {
+		case *ir.ColumnRef:
+			if !slices.Contains(columns, reference.GetColumn()) {
+				columns = append(columns, reference.GetColumn())
+			}
+		default:
+		}
+
+		_ = children(message, func(child protoreflect.Message, _ string) error {
+			walk(child)
+
+			return nil
+		})
+	}
+
+	if expression != nil {
+		walk(expression.ProtoReflect())
+	}
+
+	return columns
 }
 
 func (b *builder) columnExists(table *ir.Table, name string, meta *ir.Metadata) error {
@@ -393,7 +503,7 @@ func (b *builder) resolveTree(message proto.Message, scope string, meta *ir.Meta
 			return err
 		}
 	case *ir.FunctionCall:
-		if err := b.resolveCall(value, scope, meta); err != nil {
+		if err := b.resolveCall(value, scope, meta, ctes != nil); err != nil {
 			return err
 		}
 	case *ir.SelectStmt:
@@ -430,7 +540,9 @@ func (b *builder) resolveType(value *ir.TypeRef, scope string, meta *ir.Metadata
 	}
 
 	if value.GetUdt() == nil {
-		if _, exists := b.types.TypeForName(value.GetPgName()); exists {
+		// pgx knows a subset of builtins; the snapshot of the target major has
+		// the rest (regclass, oid aliases, extension-free system types).
+		if _, known := b.types.TypeForName(value.GetPgName()); known || b.snapshot[value.GetPgName()] {
 			return nil
 		}
 
@@ -507,7 +619,10 @@ func (b *builder) resolveForeignKey(value *ir.ForeignKey, scope string, meta *ir
 	return nil
 }
 
-func (b *builder) resolveCall(call *ir.FunctionCall, scope string, meta *ir.Metadata) error {
+// resolveCall binds a call to one routine. Inside a query body, column types
+// come from the query's own scope, which query inference resolves; there an
+// overload left ambiguous by untyped arguments keeps no target.
+func (b *builder) resolveCall(call *ir.FunctionCall, scope string, meta *ir.Metadata, query bool) error {
 	parts := call.GetName().GetParts()
 	if len(parts) == 0 {
 		return refusal("RTL-C03", meta, "undeclared function")
@@ -519,24 +634,9 @@ func (b *builder) resolveCall(call *ir.FunctionCall, scope string, meta *ir.Meta
 		return b.sequenceCall(call, scope, meta)
 	}
 
-	var candidates []*ir.Function
-
-	for _, entry := range b.objects {
-		switch function := entry.message.(type) {
-		case *ir.Function:
-			if matchesCall(function, call, scope) {
-				candidates = append(candidates, function)
-			}
-		default:
-		}
-	}
-
-	for _, schema := range b.builtins {
-		for _, function := range schema.GetFunctions() {
-			if matchesCall(function, call, pgCatalog) {
-				candidates = append(candidates, function)
-			}
-		}
+	candidates := b.bestCandidates(call, scope)
+	if query && len(candidates) > 1 {
+		return nil
 	}
 
 	if len(candidates) != 1 {
@@ -551,7 +651,51 @@ func (b *builder) resolveCall(call *ir.FunctionCall, scope string, meta *ir.Meta
 	return nil
 }
 
-func matchesCall(function *ir.Function, call *ir.FunctionCall, scope string) bool {
+// bestCandidates returns the routines that take the call with the highest
+// match score.
+func (b *builder) bestCandidates(call *ir.FunctionCall, scope string) []*ir.Function {
+	candidates, best := make([]*ir.Function, 0, 1), 0
+
+	consider := func(function *ir.Function, scope string) {
+		score, ok := b.matchCall(function, call, scope)
+
+		switch {
+		case !ok || score < best:
+		case score > best || len(candidates) == 0:
+			candidates, best = append(candidates[:0], function), score
+		default:
+			candidates = append(candidates, function)
+		}
+	}
+
+	for _, entry := range b.objects {
+		switch function := entry.message.(type) {
+		case *ir.Function:
+			consider(function, scope)
+		default:
+		}
+	}
+
+	for _, schema := range b.builtins {
+		for _, function := range schema.GetFunctions() {
+			consider(function, pgCatalog)
+		}
+	}
+
+	return candidates
+}
+
+// Argument match scores, after PostgreSQL's func_select_candidate: an exact
+// type beats a domain over it, which beats an implicit cast.
+const (
+	coercedArgument = iota
+	domainArgument
+	exactArgument
+)
+
+// matchCall scores a candidate for the call; ok is false when its arity or an
+// argument type rules it out.
+func (b *builder) matchCall(function *ir.Function, call *ir.FunctionCall, scope string) (int, bool) {
 	parts := call.GetName().GetParts()
 
 	prefix := slices.Clone(parts)
@@ -561,46 +705,174 @@ func matchesCall(function *ir.Function, call *ir.FunctionCall, scope string) boo
 
 	candidate := function.GetName().GetParts()
 	if len(candidate) == 0 || !slices.Equal(candidate[:len(candidate)-1], prefix) {
-		return false
+		return 0, false
 	}
 
-	var arguments []*ir.Argument
+	inputs, fits := callInputs(function, len(call.GetArguments()))
+	if !fits {
+		return 0, false
+	}
+
+	score := 0
+
+	for index, expected := range inputs {
+		points, ok := b.matchArgument(expected, call.GetArguments()[index])
+		if !ok {
+			return 0, false
+		}
+
+		score += points
+	}
+
+	return score, true
+}
+
+// callInputs lists the input types a call with count arguments binds to,
+// filling trailing defaults and expanding a variadic element; fits is false
+// when the arity does not fit.
+func callInputs(function *ir.Function, count int) ([]*ir.TypeRef, bool) {
+	var inputs []*ir.TypeRef
 
 	for _, argument := range function.GetArguments() {
 		if argument.GetMode() != ir.ArgMode_ARG_MODE_OUT {
-			arguments = append(arguments, argument)
+			inputs = append(inputs, argument.GetType())
 		}
 	}
 
-	if len(arguments) != len(call.GetArguments()) {
-		return false
-	}
+	minimum := len(inputs) - int(function.GetDefaultArguments())
 
-	for index, argument := range arguments {
-		if !matchesArgument(argument.GetType(), call.GetArguments()[index]) {
-			return false
+	if element := function.GetVariadicElement(); element != nil {
+		inputs = inputs[:len(inputs)-1]
+		minimum = min(minimum, len(inputs))
+
+		for len(inputs) < count {
+			inputs = append(inputs, element)
 		}
 	}
 
-	return true
+	if count < minimum || count > len(inputs) {
+		return nil, false
+	}
+
+	return inputs[:count], true
 }
 
-func matchesArgument(expected *ir.TypeRef, actual *ir.Expr) bool {
-	name := expected.GetPgName()
-	if actual.GetCast() != nil {
-		return name == actual.GetCast().GetTargetType().GetPgName()
+func (b *builder) matchArgument(expected *ir.TypeRef, actual *ir.Expr) (int, bool) {
+	given := b.argumentType(actual)
+
+	switch {
+	case given == nil:
+		return coercedArgument, true
+	case strings.HasPrefix(expected.GetPgName(), "any"):
+		return coercedArgument, acceptsPolymorphic(expected.GetPgName(), b.baseType(given))
+	case sameType(given, expected):
+		return exactArgument, true
+	default:
 	}
 
-	switch actual.GetLiteral().GetValue().(type) {
-	case *ir.Literal_IntValue:
-		return name == smallInteger || name == integer || name == bigInteger
-	case *ir.Literal_StringValue:
-		return name == "text" || name == "varchar" || name == "bpchar"
-	case *ir.Literal_BoolValue:
-		return name == "bool"
+	base := b.baseType(given)
+
+	switch {
+	case base == nil:
+		return 0, false
+	case sameType(base, expected):
+		return domainArgument, true
+	case base.GetUdt() == nil && expected.GetUdt() == nil && b.casts[base.GetPgName()+":"+expected.GetPgName()]:
+		return coercedArgument, true
 	default:
-		return true
+		return 0, false
 	}
+}
+
+// acceptsPolymorphic reports whether a polymorphic parameter takes the type,
+// by the family the pseudo-type names.
+func acceptsPolymorphic(parameter string, given *ir.TypeRef) bool {
+	switch parameter {
+	case "anyarray", "anycompatiblearray":
+		return given.GetElement() != nil
+	case "anynonarray", "anycompatiblenonarray":
+		return given.GetElement() == nil
+	case "anyenum":
+		return given.GetKind() == ir.TypeKind_TYPE_KIND_ENUM
+	case "anyrange", "anycompatiblerange":
+		return given.GetKind() == ir.TypeKind_TYPE_KIND_RANGE || strings.HasSuffix(given.GetPgName(), "range")
+	case "anymultirange", "anycompatiblemultirange":
+		return strings.HasSuffix(given.GetPgName(), "multirange")
+	default:
+		return given != nil
+	}
+}
+
+func sameType(left, right *ir.TypeRef) bool {
+	if left.GetUdt() != nil || right.GetUdt() != nil {
+		return left.GetUdt() != nil && right.GetUdt() != nil && objectKey(left.GetUdt()) == objectKey(right.GetUdt())
+	}
+
+	return left.GetPgName() == right.GetPgName()
+}
+
+// argumentType is the type of an argument before coercion; nil is unknown:
+// an untyped string literal, NULL, or an expression this resolver does not
+// type, which PostgreSQL also coerces to the candidate.
+func (b *builder) argumentType(actual *ir.Expr) *ir.TypeRef {
+	if cast := actual.GetCast(); cast != nil {
+		return b.resolvedType(cast.GetTargetType(), defaultSchema)
+	}
+
+	if target := actual.GetColumnRef().GetTarget(); target != nil {
+		entry := b.objects[objectKey(target)]
+		switch column := entry.message.(type) {
+		case *ir.Column:
+			return b.resolvedType(column.GetType(), entry.scope)
+		default:
+			return nil
+		}
+	}
+
+	switch value := actual.GetLiteral().GetValue().(type) {
+	case *ir.Literal_IntValue:
+		if value.IntValue >= math.MinInt32 && value.IntValue <= math.MaxInt32 {
+			return &ir.TypeRef{Kind: ir.TypeKind_TYPE_KIND_SCALAR, PgName: integer}
+		}
+
+		return &ir.TypeRef{Kind: ir.TypeKind_TYPE_KIND_SCALAR, PgName: bigInteger}
+	case *ir.Literal_FloatValue, *ir.Literal_NumericValue:
+		return &ir.TypeRef{Kind: ir.TypeKind_TYPE_KIND_SCALAR, PgName: "numeric"}
+	case *ir.Literal_BoolValue:
+		return &ir.TypeRef{Kind: ir.TypeKind_TYPE_KIND_SCALAR, PgName: "bool"}
+	default:
+		return nil
+	}
+}
+
+// resolvedType resolves a copy, so typing an argument never depends on
+// whether the walk has reached the declaring object yet.
+func (b *builder) resolvedType(typ *ir.TypeRef, scope string) *ir.TypeRef {
+	clone := proto.CloneOf(typ)
+	if b.resolveType(clone, scope, nil) != nil {
+		return nil
+	}
+
+	return clone
+}
+
+// baseType unwraps domains to their base type; nil when one is undeclared.
+func (b *builder) baseType(typ *ir.TypeRef) *ir.TypeRef {
+	for range len(b.objects) + 1 {
+		if typ.GetKind() != ir.TypeKind_TYPE_KIND_DOMAIN {
+			return typ
+		}
+
+		entry := b.objects[objectKey(typ.GetUdt())]
+		switch domain := entry.message.(type) {
+		case *ir.DomainType:
+			typ = b.resolvedType(domain.GetBaseType(), entry.scope)
+		default:
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func (b *builder) sequenceCall(call *ir.FunctionCall, scope string, meta *ir.Metadata) error {

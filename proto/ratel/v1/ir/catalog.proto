@@ -78,7 +78,7 @@ message BuiltinCast {
 // (actual state).
 message Catalog {
   string name = 1;              // database name
-  string database_version = 2;  // e.g. "PostgreSQL 16.2"
+  string database_version = 2;  // PostgreSQL major the shape is for, e.g. "18"
   string default_schema = 3;    // usually "public"
   repeated string search_path = 4;
   repeated Extension extensions = 5;  // database-wide, ordered by object id

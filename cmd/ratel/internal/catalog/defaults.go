@@ -3,8 +3,6 @@ package catalog
 import (
 	"math"
 	"slices"
-	"strconv"
-	"unicode/utf8"
 
 	pg "github.com/pganalyze/pg_query_go/v6"
 
@@ -120,8 +118,8 @@ func (b *builder) expandColumns(table *ir.Table) error {
 		}
 
 		schema := table.GetName().GetParts()[0]
-		base := table.GetName().GetParts()[1] + "_" + column.GetName() + "_seq"
-		sequence.Name = &ir.QualifiedName{Parts: []string{schema, b.uniqueRelationName(schema, base)}}
+		name := b.uniqueRelationName(schema, table.GetName().GetParts()[1], column.GetName(), "seq")
+		sequence.Name = &ir.QualifiedName{Parts: []string{schema, name}}
 		sequence.OwnedBy = &ir.ObjectRef{
 			Kind: ir.ObjectKind_OBJECT_KIND_COLUMN,
 			Name: &ir.QualifiedName{Parts: append(append([]string{}, table.GetName().GetParts()...), column.GetName())},
@@ -137,8 +135,9 @@ func (b *builder) expandColumns(table *ir.Table) error {
 		if column.GetIdentity() != nil {
 			column.GetIdentity().Sequence = reference
 		} else {
+			// Spelled as PostgreSQL deparses it: pg_catalog is implicit.
 			column.DefaultExpr = &ir.Expr{Node: &ir.Expr_FunctionCall{FunctionCall: &ir.FunctionCall{
-				Name: &ir.QualifiedName{Parts: []string{pgCatalog, "nextval"}},
+				Name: &ir.QualifiedName{Parts: []string{"nextval"}},
 				Arguments: []*ir.Expr{{Node: &ir.Expr_Literal{Literal: &ir.Literal{
 					Value: &ir.Literal_StringValue{StringValue: ObjectID(reference)},
 				}}}},
@@ -205,25 +204,13 @@ func serialType(name string) string {
 	}
 }
 
-func (b *builder) uniqueRelationName(schema, base string) string {
-	const maxIdentifierBytes = 63
-
-	for suffix := 0; ; suffix++ {
-		tail := ""
-		if suffix > 0 {
-			tail = strconv.Itoa(suffix)
-		}
-
-		name := base[:min(len(base), maxIdentifierBytes-len(tail))]
-		for !utf8.ValidString(name) {
-			name = name[:len(name)-1]
-		}
-
-		name += tail
+// uniqueRelationName chooses a relation name free in the schema, as
+// PostgreSQL's ChooseRelationName does for indexes and owned sequences.
+func (b *builder) uniqueRelationName(schema, name1, name2, label string) string {
+	return chooseName(name1, name2, label, func(name string) bool {
 		reference := &ir.ObjectRef{Name: &ir.QualifiedName{Parts: []string{schema, name}}}
+		_, exists := b.namespaces["relation/"+ObjectID(reference)]
 
-		if _, exists := b.namespaces["relation/"+ObjectID(reference)]; !exists {
-			return name
-		}
-	}
+		return exists
+	})
 }

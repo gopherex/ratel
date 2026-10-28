@@ -68,24 +68,14 @@ func attachmentKey(value attachment) string {
 	return priority + ObjectID(&ir.ObjectRef{Name: value.table}) + semanticKey(value.message)
 }
 
-func indexDefaultName(table *ir.Table, index *ir.Index) string {
-	parts := []string{table.GetName().GetParts()[1]}
-
+// indexColumns is the column addition PostgreSQL names an unnamed index from.
+func indexColumns(index *ir.Index) string {
+	columns := make([]string, 0, len(index.GetElements()))
 	for _, element := range index.GetElements() {
-		name := element.GetColumn()
-		if name == "" {
-			name = "expr"
-
-			function := element.GetExpr().GetFunctionCall().GetName().GetParts()
-			if len(function) > 0 {
-				name = function[len(function)-1]
-			}
-		}
-
-		parts = append(parts, name)
+		columns = append(columns, cmp.Or(element.GetColumn(), expressionColumnName(element.GetExpr())))
 	}
 
-	return strings.Join(append(parts, "idx"), "_")
+	return nameAddition(columns)
 }
 
 func nameConstraints(table *ir.Table) {
@@ -101,20 +91,30 @@ func nameConstraints(table *ir.Table) {
 		}
 	}
 
-	slices.SortStableFunc(unnamed, func(left, right *ir.Constraint) int {
-		return cmp.Compare(semanticKey(left), semanticKey(right))
-	})
-
+	// Declaration order, as PostgreSQL numbers duplicates: elements of the
+	// CREATE TABLE first, then attached constraints in their sorted order.
 	for _, constraint := range unnamed {
-		base := constraintName(table, constraint)
-		name := base
+		constraint.Name = constraintName(table, constraint, func(name string) bool { return used[name] })
+		used[constraint.GetName()] = true
+	}
+}
 
-		for suffix := 1; used[name]; suffix++ {
-			name = base + strconv.Itoa(suffix)
+// nameDomainConstraints names unnamed domain checks "<domain>_check", as
+// PostgreSQL does.
+func nameDomainConstraints(domain *ir.DomainType) {
+	used := make(map[string]bool)
+
+	for _, constraint := range domain.GetConstraints() {
+		used[constraint.GetName()] = constraint.GetName() != ""
+	}
+
+	parts := domain.GetName().GetParts()
+
+	for _, constraint := range domain.GetConstraints() {
+		if constraint.GetName() == "" {
+			constraint.Name = chooseName(parts[len(parts)-1], "", "check", func(name string) bool { return used[name] })
+			used[constraint.GetName()] = true
 		}
-
-		constraint.Name = name
-		used[name] = true
 	}
 }
 

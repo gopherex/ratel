@@ -30,6 +30,8 @@ func TestCatalog(t *testing.T) {
 		{"UnnamedIndexes", testUnnamedIndexes},
 		{"Resolution", testResolution},
 		{"BuiltinSnapshot", testBuiltinSnapshot},
+		{"Overloads", testOverloads},
+		{"Names", testNames},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
