@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package ratel.v1.plugin;
+
+import "ratel/v1/ir/catalog.proto";
+import "ratel/v1/ir/common.proto";
+import "ratel/v1/ir/query.proto";
+
+option go_package = "github.com/gopherex/ratel/plugin/pluginpb;pluginpb";
+
+// The output-plugin protocol (docs/plugins.md). One request message on stdin,
+// one response message on stdout: binary protobuf, or protojson with
+// --format=json. No length prefix, no gRPC.
+
+// PluginRequest is the single request of an exchange. protocol_version is
+// the version the request was encoded with; it is 0 in the Info exchange,
+// which negotiates the version.
+message PluginRequest {
+  uint32 protocol_version = 1;
+  oneof request {
+    InfoRequest info = 2;
+    GenerateRequest generate = 3;
+  }
+}
+
+// InfoRequest states the protocol versions the host accepts.
+message InfoRequest {
+  uint32 min_protocol_version = 1;
+  uint32 max_protocol_version = 2;
+}
+
+// InfoResponse states the plugin's identity and the protocol versions it
+// accepts.
+message InfoResponse {
+  string name = 1;
+  string version = 2;
+  uint32 min_protocol_version = 3;
+  uint32 max_protocol_version = 4;
+  string annotation_namespace = 5;  // equal to the plugin name
+  // Human-readable description of the plugin options the host passes as
+  // opaque bytes in GenerateRequest.options.
+  string options_description = 6;
+}
+
+// GenerateRequest asks the plugin to turn the catalog and the queries into
+// output files. The plugin writes nothing to disk itself; it returns files.
+message GenerateRequest {
+  uint32 protocol_version = 1;  // negotiated: highest version in both ranges
+  ratel.v1.ir.Catalog catalog = 2;
+  repeated ratel.v1.ir.Query queries = 3;
+  bytes options = 4;  // plugin options, opaque to the host
+  string out_dir = 5;
+  string host_version = 6;
+  // Annotations of this plugin's namespace in the parsed form of
+  // docs/input.md, with their source spans.
+  repeated ratel.v1.ir.AnnotationValue annotations = 7;
+}
+
+// File is one output file, relative to GenerateRequest.out_dir.
+message File {
+  string path = 1;  // relative to out_dir; absolute paths and ".." are errors
+  bytes contents = 2;
+  bool executable = 3;  // set the executable bit
+}
+
+// GenerateResponse is the output of a Generate exchange.
+message GenerateResponse {
+  repeated File files = 1;
+}
+
+// PluginResponse is the single response of an exchange.
+message PluginResponse {
+  oneof response {
+    InfoResponse info = 1;
+    GenerateResponse generate = 2;
+  }
+  // Problems outside the response payload; an ERROR severity fails the run.
+  repeated ratel.v1.ir.Diagnostic diagnostics = 3;
+}

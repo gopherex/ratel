@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package ratel.v1.ir;
+
+import "ratel/v1/ir/common.proto";
+
+option go_package = "github.com/gopherex/ratel/ir;ir";
+
+// Type references. pg_name is the canonical PostgreSQL type name ("int4",
+// "varchar", "_int4" for arrays); modifiers keep declared parameters such as
+// varchar(n) and numeric(p,s).
+
+// TypeKind is the broad category of a type reference.
+enum TypeKind {
+  TYPE_KIND_UNSPECIFIED = 0;
+  TYPE_KIND_SCALAR = 1;        // built-in base type: int4, text, uuid, jsonb...
+  TYPE_KIND_ARRAY = 2;         // element[]; see element and array_dimensions
+  TYPE_KIND_ENUM = 3;          // user enum; see udt
+  TYPE_KIND_DOMAIN = 4;        // user domain; see udt
+  TYPE_KIND_COMPOSITE = 5;     // user composite or row type; see udt
+  TYPE_KIND_RANGE = 6;         // range type; see udt
+  TYPE_KIND_PSEUDO = 7;        // void, record, trigger, anyelement...
+  TYPE_KIND_USER_DEFINED = 8;  // any other named user type; see udt
+}
+
+// NumericModifier covers numeric(p, s).
+message NumericModifier {
+  uint32 precision = 1;
+  uint32 scale = 2;
+}
+
+// StringModifier covers varchar(n), char(n), bit(n), varbit(n).
+message StringModifier {
+  uint32 length = 1;
+}
+
+// DateTimeModifier covers timestamp/time [with time zone] and sub-second
+// precision.
+message DateTimeModifier {
+  bool with_timezone = 1;
+  uint32 precision = 2;  // fractional seconds precision, when declared
+}
+
+// IntervalModifier covers interval field restriction and precision, e.g.
+// INTERVAL DAY TO SECOND(3).
+message IntervalModifier {
+  string fields = 1;    // "YEAR", "DAY TO SECOND"...; empty = unrestricted
+  uint32 precision = 2;
+}
+
+// TypeModifier holds the parameters of a parametrized type.
+message TypeModifier {
+  oneof modifier {
+    NumericModifier numeric = 1;
+    StringModifier text = 2;
+    DateTimeModifier date_time = 3;
+    IntervalModifier interval = 4;
+  }
+}
+
+// TypeRef is a reference to a type at a use site (column, argument, cast
+// target...).
+message TypeRef {
+  TypeKind kind = 1;
+  string pg_name = 2;         // canonical PostgreSQL name
+  TypeModifier modifier = 3;  // set for parametrized types
+
+  // For TYPE_KIND_ARRAY: the element type and the number of array dimensions.
+  TypeRef element = 4;
+  uint32 array_dimensions = 5;
+
+  // For ENUM, DOMAIN, COMPOSITE, RANGE and USER_DEFINED: the defining object.
+  ObjectRef udt = 6;
+}

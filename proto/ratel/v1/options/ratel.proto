@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package ratel.v1.options;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/gopherex/ratel/options;options";
+
+// protoc-gen-ratel options (docs/proto-frontend.md). One extension field
+// number, 60120, is used on every descriptor scope. Precedence follows
+// plainjson: the nearest scope wins; unset values inherit.
+
+extend google.protobuf.MessageOptions {
+  optional Table table = 60120;
+}
+extend google.protobuf.FieldOptions {
+  optional Column column = 60120;
+}
+extend google.protobuf.OneofOptions {
+  optional Oneof oneof = 60120;
+}
+extend google.protobuf.FileOptions {
+  optional File file = 60120;
+}
+extend google.protobuf.EnumOptions {
+  optional Enum enum = 60120;
+}
+
+// File options: the schema every table of this file is created in.
+message File {
+  optional string schema = 1;
+}
+
+// Table options on a message marked as a table.
+message Table {
+  optional string name = 1;         // default: snake_case(message name)
+  repeated string primary_key = 2;  // field names
+  repeated Index indexes = 3;
+  repeated Unique uniques = 4;
+  repeated Check checks = 5;
+}
+
+message Index {
+  optional string name = 1;
+  repeated string fields = 2;
+  optional bool unique = 3;
+  optional string where = 4;  // partial index predicate
+}
+
+message Unique {
+  optional string name = 1;
+  repeated string fields = 2;
+}
+
+message Check {
+  string name = 1;
+  string expr = 2;
+}
+
+// Column options on a field of a table message.
+message Column {
+  optional string name = 1;     // default: snake_case(field name)
+  optional string type = 2;     // PostgreSQL type override
+  optional Embed embed = 3;     // inline a message field's columns
+  optional bool serialize = 4;  // store a message field as jsonb
+  optional Ref references = 5;  // foreign key
+  optional string default = 6;  // SQL expression
+  optional string generated = 7; // STORED generated expression
+  optional bool skip = 8;       // no column
+}
+
+message Embed {
+  optional string prefix = 1;  // prefix of the inlined column names
+}
+
+// Ref declares a foreign key to another table message. rel and inverse
+// become @ratel.rel on the emitted foreign key.
+message Ref {
+  string table = 1;
+  repeated string columns = 2;
+  optional string rel = 3;
+  optional string inverse = 4;
+}
+
+// Oneof options.
+message Oneof {
+  optional bool embed = 1;
+}
+
+// Enum options.
+message Enum {
+  // CREATE TYPE ... AS ENUM instead of text + CHECK.
+  optional bool pg_enum = 1;
+}

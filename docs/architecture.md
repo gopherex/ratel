@@ -111,9 +111,11 @@ anything a third-party plugin cannot.
 
 ```
 proto/ratel/v1/{ir,plugin,options}/*.proto   contract source (easyp, see below)
-ir/                                          generated Go for the protos
-ratel.go, query.go, col.go, rel.go, ...      runtime package ratel
+ir/                                          generated Go for the IR protos
+options/                                     generated Go for the ratel.proto options
+plugin/pluginpb/                             generated Go for the plugin protocol
 plugin/                                      Go SDK for output plugins
+ratel.go, query.go, col.go, rel.go, ...      runtime package ratel
 rateltest/                                   user test helpers (own module)
 cmd/ratel/                                   host CLI module
 cmd/protoc-gen-ratel/                        proto frontend module

@@ -8,7 +8,7 @@ The proto frontend never talks to ratel directly.
 
 ## Options
 
-Options live in `proto/ratel/v1/options/ratel.proto`, package `ratel.v1`. One
+Options live in `proto/ratel/v1/options/ratel.proto`, package `ratel.v1.options`. One
 extension field number, **60120**, is used on every descriptor scope
 (`FileOptions`, `MessageOptions`, `FieldOptions`, `OneofOptions`,
 `EnumOptions`), as plainjson does with 60040. It does not collide with 60000,

@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package ratel.v1.ir;
+
+import "ratel/v1/ir/common.proto";
+
+option go_package = "github.com/gopherex/ratel/ir;ir";
+
+// The relation graph. Foreign keys remain the lossless source of truth on
+// Table; relations are the navigable edges derived from them for the ORM
+// (docs/ir.md, Relations).
+
+enum RelationKind {
+  RELATION_KIND_UNSPECIFIED = 0;
+  RELATION_KIND_ONE = 1;   // to-one
+  RELATION_KIND_MANY = 2;  // to-many
+}
+
+// RelationEndpoint is one end of a relation: the table and the columns that
+// take part in it.
+message RelationEndpoint {
+  ObjectRef table = 1;
+  repeated string columns = 2;
+}
+
+// Relation is one navigable edge used by the ORM. name and inverse_name are
+// Go-facing names, from @ratel.rel or derived from the foreign key; through
+// is set for many-to-many relations resolved through a join table.
+message Relation {
+  string name = 1;
+  string inverse_name = 2;
+  RelationKind kind = 3;
+  RelationEndpoint from = 4;
+  RelationEndpoint to = 5;
+  ObjectRef through = 6;  // join table of a many-to-many relation
+  ObjectRef fk = 7;       // the foreign-key constraint the relation comes from
+}

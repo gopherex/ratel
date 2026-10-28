@@ -1,0 +1,495 @@
+syntax = "proto3";
+
+package ratel.v1.ir;
+
+import "ratel/v1/ir/common.proto";
+import "ratel/v1/ir/type.proto";
+
+option go_package = "github.com/gopherex/ratel/ir;ir";
+
+// Expressions, the SELECT tree and the write statements. Expressions and
+// statements are mutually recursive (data-modifying CTEs embed statements in
+// expressions), so they share one file.
+//
+// Common shapes are structured; a raw_sql variant is kept next to them so
+// nothing the parser accepted is lost. node_id is the host-assigned
+// deterministic AST id: two objects built from the same source carry the same
+// ids.
+
+// Expr is the recursive expression tree, reused everywhere an expression can
+// appear: defaults, CHECK constraints, generated columns, index expressions,
+// view bodies and all DML clauses.
+message Expr {
+  oneof node {
+    Literal literal = 1;
+    ColumnRef column_ref = 2;
+    ParameterRef parameter = 3;
+    FunctionCall function_call = 4;
+    OperatorExpr operator = 5;
+    CaseExpr case_expr = 6;
+    CastExpr cast = 7;
+    SubqueryExpr subquery = 8;
+    ListExpr list = 9;   // (a, b, c) / row(...)
+    StarExpr star = 10;  // * or t.*
+    string raw_sql = 11; // any construct without a structured shape
+  }
+  string node_id = 12;
+}
+
+// Literal is a constant. Exactly one value field is set; null_value = true is
+// SQL NULL.
+message Literal {
+  oneof value {
+    bool null_value = 1;
+    int64 int_value = 2;
+    double float_value = 3;
+    string numeric_value = 4; // exact decimal carried as text
+    string string_value = 5;
+    bool bool_value = 6;
+    bytes bytea_value = 7;
+  }
+  TypeRef type = 8; // declared or inferred type, when known
+}
+
+// ColumnRef references a column, optionally qualified by a table name or
+// alias.
+message ColumnRef {
+  string qualifier = 1;  // table alias or name; empty if unqualified
+  string column = 2;
+  ObjectRef target = 3;  // resolved column, when resolution succeeded
+}
+
+// ParameterRef is a bind parameter: $N (position) or @name (name).
+message ParameterRef {
+  uint32 position = 1;  // 1-based; 0 if only named
+  string name = 2;      // empty for purely positional parameters
+}
+
+// FunctionCall is a scalar, aggregate or window function invocation.
+message FunctionCall {
+  QualifiedName name = 1;
+  ObjectRef target = 2;              // resolved function, when resolution succeeded
+  repeated Expr arguments = 3;
+  bool distinct = 4;                 // agg(DISTINCT ...)
+  repeated OrderByItem order_by = 5; // aggregate ORDER BY / WITHIN GROUP
+  Expr filter = 6;                   // FILTER (WHERE ...)
+  WindowSpec over = 7;               // OVER (...); set for window functions
+  bool variadic = 8;
+}
+
+// OperatorExpr is any operator application: unary, binary or logical.
+// symbol is the operator token, e.g. "=", "+", "AND", "IS NULL", "@>".
+message OperatorExpr {
+  string symbol = 1;
+  repeated Expr operands = 2;
+}
+
+message CaseWhen {
+  Expr condition = 1;
+  Expr result = 2;
+}
+
+// CaseExpr models simple and searched CASE. For simple CASE, operand is set
+// and each whens[i].condition is the compared value.
+message CaseExpr {
+  Expr operand = 1;            // unset for searched CASE
+  repeated CaseWhen whens = 2;
+  Expr else_result = 3;
+}
+
+// CastExpr is CAST(expr AS type) / expr::type.
+message CastExpr {
+  Expr expr = 1;
+  TypeRef target_type = 2;
+}
+
+enum SubqueryKind {
+  SUBQUERY_KIND_UNSPECIFIED = 0;
+  SUBQUERY_KIND_SCALAR = 1; // (SELECT ...)
+  SUBQUERY_KIND_EXISTS = 2; // EXISTS (SELECT ...)
+  SUBQUERY_KIND_IN = 3;     // expr IN (SELECT ...)
+  SUBQUERY_KIND_ANY = 4;    // expr op ANY (SELECT ...)
+  SUBQUERY_KIND_ALL = 5;    // expr op ALL (SELECT ...)
+}
+
+// SubqueryExpr embeds a query inside an expression. operand and symbol carry
+// the left-hand side and comparison operator of the IN/ANY/ALL forms.
+message SubqueryExpr {
+  SubqueryKind kind = 1;
+  SelectStmt query = 2;
+  Expr operand = 3;
+  string symbol = 4;
+}
+
+// ListExpr is a parenthesized list or row constructor.
+message ListExpr {
+  repeated Expr elements = 1;
+  bool is_row = 2; // true for ROW(...)
+}
+
+// StarExpr is * or qualifier.*.
+message StarExpr {
+  string qualifier = 1; // empty for bare *
+}
+
+// ---------------------------------------------------------------------------
+// SELECT tree
+// ---------------------------------------------------------------------------
+
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  SORT_ORDER_ASC = 1;
+  SORT_ORDER_DESC = 2;
+}
+
+enum NullsOrder {
+  NULLS_ORDER_UNSPECIFIED = 0;
+  NULLS_ORDER_FIRST = 1;
+  NULLS_ORDER_LAST = 2;
+}
+
+message OrderByItem {
+  Expr expr = 1;
+  SortOrder order = 2;
+  NullsOrder nulls = 3;
+  string using_operator = 4; // ORDER BY ... USING op
+  string node_id = 5;
+}
+
+// SelectTarget is one item of a select list or a RETURNING list.
+message SelectTarget {
+  Expr expr = 1;
+  string alias = 2; // AS alias; empty if none
+  string node_id = 3;
+}
+
+enum SetOpKind {
+  SET_OP_KIND_UNSPECIFIED = 0;
+  SET_OP_KIND_UNION = 1;
+  SET_OP_KIND_INTERSECT = 2;
+  SET_OP_KIND_EXCEPT = 3;
+}
+
+// SetOperation combines two queries (UNION / INTERSECT / EXCEPT).
+message SetOperation {
+  SetOpKind kind = 1;
+  bool all = 2; // UNION ALL vs UNION
+  SelectStmt left = 3;
+  SelectStmt right = 4;
+  string node_id = 5;
+}
+
+// SimpleSelect is a single SELECT block, without set operations at this
+// level.
+message SimpleSelect {
+  bool distinct = 1;
+  repeated Expr distinct_on = 2; // DISTINCT ON (...)
+  repeated SelectTarget targets = 3;
+  repeated FromItem from = 4;
+  Expr where = 5;
+  repeated Expr group_by = 6;
+  bool group_by_all = 7;      // GROUP BY ALL
+  Expr having = 8;
+  repeated WindowDef windows = 9;
+  string node_id = 10;
+}
+
+enum CteMaterialization {
+  CTE_MATERIALIZATION_UNSPECIFIED = 0; // planner decides
+  CTE_MATERIALIZATION_MATERIALIZED = 1;
+  CTE_MATERIALIZATION_NOT_MATERIALIZED = 2;
+}
+
+// CommonTableExpr is one WITH entry. SELECT bodies keep query; data-modifying
+// bodies keep statement so parameters and RETURNING survive.
+message CommonTableExpr {
+  string name = 1;
+  repeated string columns = 2; // explicit column name list
+  SelectStmt query = 3;
+  CteMaterialization materialization = 4;
+  Statement statement = 5; // INSERT / UPDATE / DELETE / MERGE body
+  string node_id = 6;
+}
+
+enum LockStrength {
+  LOCK_STRENGTH_UNSPECIFIED = 0;
+  LOCK_STRENGTH_UPDATE = 1;        // FOR UPDATE
+  LOCK_STRENGTH_NO_KEY_UPDATE = 2; // FOR NO KEY UPDATE
+  LOCK_STRENGTH_SHARE = 3;         // FOR SHARE
+  LOCK_STRENGTH_KEY_SHARE = 4;     // FOR KEY SHARE
+}
+
+enum LockWaitPolicy {
+  LOCK_WAIT_POLICY_UNSPECIFIED = 0; // wait (default)
+  LOCK_WAIT_POLICY_NOWAIT = 1;
+  LOCK_WAIT_POLICY_SKIP_LOCKED = 2;
+}
+
+message LockingClause {
+  LockStrength strength = 1;
+  repeated ObjectRef of_tables = 2; // OF table, ...
+  LockWaitPolicy wait = 3;
+}
+
+// SelectStmt is a complete query expression: optional CTEs, a body (simple
+// select, set operation or VALUES), and trailing ORDER/LIMIT/locking.
+message SelectStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+
+  oneof body {
+    SimpleSelect select = 3;
+    SetOperation set_operation = 4;
+    Values values = 5;
+  }
+
+  repeated OrderByItem order_by = 6;
+  Expr limit = 7;   // LIMIT count / FETCH FIRST
+  Expr offset = 8;  // OFFSET
+  LockingClause locking = 9;
+
+  string raw_sql = 10;  // original statement text
+  Metadata meta = 11;
+  string node_id = 12;
+}
+
+// ---------------------------------------------------------------------------
+// FROM items
+// ---------------------------------------------------------------------------
+
+enum JoinType {
+  JOIN_TYPE_UNSPECIFIED = 0;
+  JOIN_TYPE_INNER = 1;
+  JOIN_TYPE_LEFT = 2;
+  JOIN_TYPE_RIGHT = 3;
+  JOIN_TYPE_FULL = 4;
+  JOIN_TYPE_CROSS = 5;
+}
+
+message TableRef {
+  ObjectRef table = 1;
+  QualifiedName name = 2; // carried even when unresolved
+  string alias = 3;
+  bool only = 4; // FROM ONLY t
+}
+
+message SubqueryRef {
+  SelectStmt query = 1;
+  string alias = 2;
+  repeated string column_aliases = 3;
+  bool lateral = 4;
+}
+
+message FunctionRef {
+  Expr call = 1; // table function, e.g. unnest(...) or jsonb_to_recordset(...)
+  string alias = 2;
+  repeated string column_aliases = 3;
+  bool lateral = 4;
+  bool with_ordinality = 5;
+}
+
+message ValuesRef {
+  Values values = 1;
+  string alias = 2;
+  repeated string column_aliases = 3;
+}
+
+message JoinClause {
+  JoinType type = 1;
+  FromItem left = 2;
+  FromItem right = 3;
+  Expr on = 4;               // ON <condition>
+  repeated string using = 5; // USING (col, ...)
+  bool natural = 6;          // NATURAL JOIN
+  string node_id = 7;
+}
+
+message FromItem {
+  oneof source {
+    TableRef table = 1;
+    SubqueryRef subquery = 2;
+    JoinClause join = 3;
+    FunctionRef function = 4;
+    ValuesRef values = 5;
+  }
+  string node_id = 6;
+}
+
+// ---------------------------------------------------------------------------
+// VALUES and windows
+// ---------------------------------------------------------------------------
+
+message ValuesRow {
+  repeated Expr values = 1;
+}
+
+message Values {
+  repeated ValuesRow rows = 1;
+}
+
+// WindowSpec is an inline OVER (...) or a reference to a named window.
+message WindowSpec {
+  string ref_name = 1;          // OVER w (named window); empty if inline
+  repeated Expr partition_by = 2;
+  repeated OrderByItem order_by = 3;
+  string frame = 4;             // raw frame clause, e.g. "ROWS BETWEEN ..."
+}
+
+// WindowDef is a named window of the WINDOW clause.
+message WindowDef {
+  string name = 1;
+  WindowSpec spec = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Statements. SELECT, INSERT, UPDATE, DELETE and MERGE are structured; a
+// RawStatement keeps everything outside that set (it appears only in
+// hand-written migrations).
+// ---------------------------------------------------------------------------
+
+message Statement {
+  oneof statement {
+    SelectStmt select = 1;
+    InsertStmt insert = 2;
+    UpdateStmt update = 3;
+    DeleteStmt delete = 4;
+    MergeStmt merge = 5;
+    RawStatement raw = 6;
+  }
+  Metadata meta = 7;
+  string node_id = 8;
+}
+
+// StatementKind is a best-effort classification of a RawStatement.
+enum StatementKind {
+  STATEMENT_KIND_UNSPECIFIED = 0;
+  STATEMENT_KIND_MERGE = 1;    // MERGE outside the structured set
+  STATEMENT_KIND_TRUNCATE = 2;
+  STATEMENT_KIND_COPY = 3;
+  STATEMENT_KIND_DDL = 4;      // CREATE / ALTER / DROP ...
+  STATEMENT_KIND_TCL = 5;      // BEGIN / COMMIT / ROLLBACK / SAVEPOINT
+  STATEMENT_KIND_UTILITY = 6;  // VACUUM / ANALYZE / SET / EXPLAIN ...
+  STATEMENT_KIND_OTHER = 7;
+}
+
+// RawStatement carries a statement the IR does not model structurally: raw
+// SQL plus a best-effort kind.
+message RawStatement {
+  StatementKind kind = 1;
+  string sql = 2;
+}
+
+// Assignment is column = value in UPDATE SET and ON CONFLICT DO UPDATE SET.
+message Assignment {
+  repeated string columns = 1; // one column, or (a, b) = (...) multi-column
+  Expr value = 2;              // scalar value, or row/subquery for multi-column
+  string node_id = 3;
+}
+
+enum OnConflictAction {
+  ON_CONFLICT_ACTION_UNSPECIFIED = 0;
+  ON_CONFLICT_ACTION_DO_NOTHING = 1;
+  ON_CONFLICT_ACTION_DO_UPDATE = 2;
+}
+
+// OnConflict models INSERT ... ON CONFLICT [target] action.
+message OnConflict {
+  repeated string target_columns = 1;  // ON CONFLICT (col, ...)
+  string target_constraint = 2;        // ON CONFLICT ON CONSTRAINT name
+  Expr index_predicate = 3;            // partial-index predicate
+  OnConflictAction action = 4;
+  repeated Assignment set = 5;         // DO UPDATE SET ...
+  Expr update_where = 6;               // DO UPDATE ... WHERE ...
+}
+
+message InsertStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+  ObjectRef table = 3;
+  QualifiedName table_name = 4;
+  string alias = 5;
+  repeated string columns = 6; // target column list; empty = all columns
+  oneof source {
+    Values values = 7;       // VALUES (...), (...)
+    SelectStmt query = 8;    // INSERT ... SELECT
+    bool default_values = 9; // DEFAULT VALUES
+  }
+  OnConflict on_conflict = 10;
+  repeated SelectTarget returning = 11;  // RETURNING ...
+  bool overriding_system = 12;           // OVERRIDING SYSTEM VALUE
+  string node_id = 13;
+}
+
+message UpdateStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+  ObjectRef table = 3;
+  QualifiedName table_name = 4;
+  string alias = 5;
+  bool only = 6;                     // UPDATE ONLY t
+  repeated Assignment set = 7;
+  repeated FromItem from = 8;        // UPDATE ... FROM ...
+  Expr where = 9;
+  repeated SelectTarget returning = 10;  // RETURNING ...
+  string node_id = 11;
+}
+
+message DeleteStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+  ObjectRef table = 3;
+  QualifiedName table_name = 4;
+  string alias = 5;
+  bool only = 6;                     // DELETE FROM ONLY t
+  repeated FromItem using = 7;       // USING ...
+  Expr where = 8;
+  repeated SelectTarget returning = 9;  // RETURNING ...
+  string node_id = 10;
+}
+
+message MergeStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+  ObjectRef target = 3;
+  QualifiedName target_name = 4;
+  string target_alias = 5;
+  FromItem source = 6;                   // USING <table | subquery | values>
+  Expr on = 7;                           // ON <join condition>
+  repeated MergeWhen whens = 8;
+  repeated SelectTarget returning = 9;   // RETURNING (PostgreSQL 17+)
+  string node_id = 10;
+}
+
+enum MergeMatch {
+  MERGE_MATCH_UNSPECIFIED = 0;
+  MERGE_MATCH_MATCHED = 1;               // WHEN MATCHED
+  MERGE_MATCH_NOT_MATCHED_BY_TARGET = 2; // WHEN NOT MATCHED [BY TARGET]
+  MERGE_MATCH_NOT_MATCHED_BY_SOURCE = 3; // WHEN NOT MATCHED BY SOURCE (PG 17+)
+}
+
+// MergeWhen is one WHEN clause with its optional extra AND condition.
+message MergeWhen {
+  MergeMatch match = 1;
+  Expr condition = 2;  // AND <condition>; unset if none
+  MergeAction action = 3;
+}
+
+enum MergeActionKind {
+  MERGE_ACTION_KIND_UNSPECIFIED = 0;
+  MERGE_ACTION_KIND_INSERT = 1;
+  MERGE_ACTION_KIND_UPDATE = 2;
+  MERGE_ACTION_KIND_DELETE = 3;
+  MERGE_ACTION_KIND_DO_NOTHING = 4;
+}
+
+// MergeAction is the THEN action of a WHEN clause.
+message MergeAction {
+  MergeActionKind kind = 1;
+  repeated Assignment set = 2;         // UPDATE SET ...
+  repeated string insert_columns = 3;  // INSERT (cols)
+  oneof insert_values {
+    Values values = 4;        // INSERT ... VALUES (...)
+    bool default_values = 5;  // INSERT DEFAULT VALUES
+  }
+  bool overriding_system = 6;  // OVERRIDING SYSTEM VALUE
+}

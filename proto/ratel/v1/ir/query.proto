@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package ratel.v1.ir;
+
+import "ratel/v1/ir/common.proto";
+import "ratel/v1/ir/expr.proto";
+import "ratel/v1/ir/type.proto";
+
+option go_package = "github.com/gopherex/ratel/ir;ir";
+
+// Named static queries with their inferred signatures (docs/input.md).
+
+// QueryCommand is the result shape declared after the query name.
+enum QueryCommand {
+  QUERY_COMMAND_UNSPECIFIED = 0;
+  QUERY_COMMAND_ONE = 1;        // :one — one row; no row is ErrNotFound
+  QUERY_COMMAND_MANY = 2;       // :many — zero or more rows
+  QUERY_COMMAND_EXEC = 3;       // :exec — no rows returned
+  QUERY_COMMAND_EXEC_ROWS = 4;  // :execrows — number of affected rows
+  QUERY_COMMAND_COPY_FROM = 5;  // :copyfrom — bulk insert through COPY
+}
+
+// QueryParameter is an inferred bind parameter.
+message QueryParameter {
+  uint32 number = 1;  // positional marker $N in the rewritten SQL
+  string name = 2;    // @name from the source, when the query used names
+  TypeRef type = 3;
+  bool nullable = 4;
+  ObjectRef column = 5;  // column type and nullability were inferred from
+}
+
+// QueryColumn is an inferred output column of a query.
+message QueryColumn {
+  string name = 1;
+  TypeRef type = 2;
+  bool nullable = 3;
+  // Column the value is sourced from; unset for computed expressions. The
+  // runtime result type is chosen by this provenance (docs/runtime.md).
+  ObjectRef source_column = 4;
+  string table_alias = 5;  // table alias or name the column was qualified with
+}
+
+// Query is a named query plus its parsed statement and inferred signature.
+message Query {
+  string name = 1;  // exported Go-style identifier, unique across all query files
+  string sql = 2;   // rewritten SQL with positional $N parameters
+  QueryCommand command = 3;
+  Statement ast = 4;
+  repeated QueryParameter parameters = 5;  // ordered by number
+  repeated QueryColumn columns = 6;        // ordered by output position
+  Metadata meta = 7;  // leading comment, source span, query annotations
+}

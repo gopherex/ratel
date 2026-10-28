@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package ratel.v1.ir;
+
+import "ratel/v1/ir/common.proto";
+import "ratel/v1/ir/relation.proto";
+import "ratel/v1/ir/routine.proto";
+import "ratel/v1/ir/schema.proto";
+
+option go_package = "github.com/gopherex/ratel/ir;ir";
+
+// The database snapshot: schemas with their objects, database-wide
+// extensions, and the relation graph.
+
+// Extension is an installed database extension. Extensions are database-wide
+// objects; the schema is where their objects are installed. The object id of
+// an extension is the extension name alone.
+message Extension {
+  string name = 1;    // e.g. "pgcrypto"; unique within the database
+  string schema = 2;  // schema the extension's objects are installed in
+  string version = 3; // installed version, e.g. "1.5"
+  Metadata meta = 4;
+}
+
+// Schema is a PostgreSQL namespace and the container for its objects.
+message Schema {
+  string name = 1;
+  string owner = 2;  // owning role; roles are referenced by name, not modeled
+  repeated Table tables = 3;                     // ordered by object id
+  repeated View views = 4;                       // ordered by object id
+  repeated MaterializedView materialized_views = 5;
+  repeated Sequence sequences = 6;
+  repeated Function functions = 7;
+  repeated Procedure procedures = 8;
+  repeated Trigger triggers = 9;  // resolved targets of Table.triggers
+  repeated EnumType enums = 10;
+  repeated DomainType domains = 11;
+  repeated CompositeType composites = 12;
+  repeated RangeType ranges = 13;
+  repeated Grant grants = 14;  // grants on objects of this schema
+  Metadata meta = 15;
+}
+
+// Catalog is the whole database snapshot: the single contract between the
+// host and output plugins. Two producers build it: the catalog builder from
+// schema files (desired state) and introspection from a live database
+// (actual state).
+message Catalog {
+  string name = 1;              // database name
+  string database_version = 2;  // e.g. "PostgreSQL 16.2"
+  string default_schema = 3;    // usually "public"
+  repeated string search_path = 4;
+  repeated Extension extensions = 5;  // database-wide, ordered by object id
+  repeated Schema schemas = 6;         // ordered by object id
+  repeated Relation relations = 7;     // spanning all schemas, ordered by object id
+  Metadata meta = 8;
+}

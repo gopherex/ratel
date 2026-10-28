@@ -1,0 +1,237 @@
+syntax = "proto3";
+
+package ratel.v1.ir;
+
+import "ratel/v1/ir/common.proto";
+import "ratel/v1/ir/expr.proto";
+import "ratel/v1/ir/type.proto";
+
+option go_package = "github.com/gopherex/ratel/ir;ir";
+
+// Tables, columns, constraints, indexes, sequences, policies and grants.
+// Triggers live in routine.proto and are referenced from Table by ObjectRef.
+
+enum TablePersistence {
+  TABLE_PERSISTENCE_UNSPECIFIED = 0;
+  TABLE_PERSISTENCE_PERMANENT = 1;
+  TABLE_PERSISTENCE_UNLOGGED = 2;
+  TABLE_PERSISTENCE_TEMPORARY = 3;
+}
+
+message Table {
+  QualifiedName name = 1;
+  string owner = 2;  // owning role; roles are referenced by name, not modeled
+  TablePersistence persistence = 3;
+  repeated Column columns = 4;         // ordered by attribute position
+  repeated Constraint constraints = 5; // ordered by object id
+  repeated Index indexes = 6;          // ordered by object id
+  repeated ObjectRef triggers = 7;     // resolve against the schema's trigger set
+  string partition_by = 8;             // partition key, e.g. "RANGE (created_at)"
+  QualifiedName partition_of = 9;      // parent table, for partitions
+  string partition_bound = 10;         // DEFAULT or FOR VALUES ..., as deparsed by PostgreSQL
+  bool rls_enabled = 11;               // ENABLE ROW LEVEL SECURITY
+  bool rls_forced = 12;                // FORCE ROW LEVEL SECURITY
+  repeated Policy policies = 13;       // ordered by object id
+  Metadata meta = 14;
+}
+
+// IdentityKind: GENERATED ALWAYS / BY DEFAULT AS IDENTITY.
+enum IdentityKind {
+  IDENTITY_KIND_UNSPECIFIED = 0;
+  IDENTITY_KIND_ALWAYS = 1;
+  IDENTITY_KIND_BY_DEFAULT = 2;
+}
+
+message Identity {
+  IdentityKind kind = 1;
+  ObjectRef sequence = 2;  // backing sequence, when it exists as an object
+  Sequence options = 3;    // sequence parameters; not a standalone object
+}
+
+// GeneratedStorage states the storage kind of a generated column explicitly;
+// the stored shape depends on the PostgreSQL major version.
+enum GeneratedStorage {
+  GENERATED_STORAGE_UNSPECIFIED = 0;
+  GENERATED_STORAGE_STORED = 1;   // GENERATED ALWAYS AS (...) STORED
+  GENERATED_STORAGE_VIRTUAL = 2;  // GENERATED ALWAYS AS (...) VIRTUAL (PG 18+)
+}
+
+// GeneratedColumn is a generated column's expression and storage kind.
+message GeneratedColumn {
+  Expr expression = 1;
+  GeneratedStorage storage = 2;
+}
+
+message Column {
+  string name = 1;
+  uint32 position = 2;   // 1-based attribute position
+  TypeRef type = 3;
+  bool nullable = 4;     // false = NOT NULL; the not-null constraint also
+                         // appears as a named Constraint (PG 18 shape)
+  Expr default_expr = 5; // DEFAULT <expr>
+  Identity identity = 6;
+  GeneratedColumn generated = 7;
+  string collation = 8;  // COLLATE "..."; empty = the type's default collation
+  Metadata meta = 9;
+}
+
+enum ReferentialAction {
+  REFERENTIAL_ACTION_UNSPECIFIED = 0;
+  REFERENTIAL_ACTION_NO_ACTION = 1;
+  REFERENTIAL_ACTION_RESTRICT = 2;
+  REFERENTIAL_ACTION_CASCADE = 3;
+  REFERENTIAL_ACTION_SET_NULL = 4;
+  REFERENTIAL_ACTION_SET_DEFAULT = 5;
+}
+
+enum MatchType {
+  MATCH_TYPE_UNSPECIFIED = 0; // MATCH SIMPLE (default)
+  MATCH_TYPE_SIMPLE = 1;
+  MATCH_TYPE_FULL = 2;
+  MATCH_TYPE_PARTIAL = 3;
+}
+
+message PrimaryKey {
+  repeated string columns = 1;
+  string index = 2;  // backing index name, when distinct
+}
+
+message ForeignKey {
+  repeated string columns = 1;            // local columns
+  ObjectRef referenced_table = 2;
+  repeated string referenced_columns = 3; // referenced columns (PK or unique)
+  ReferentialAction on_delete = 4;
+  ReferentialAction on_update = 5;
+  MatchType match_type = 6;
+  // ON DELETE SET NULL/DEFAULT (column-list) target, PostgreSQL 15+.
+  repeated string referenced_action_columns = 7;
+}
+
+message UniqueConstraint {
+  repeated string columns = 1;
+  bool nulls_not_distinct = 2; // NULLS NOT DISTINCT, PostgreSQL 15+
+  string index = 3;            // backing index name, when distinct
+}
+
+message CheckConstraint {
+  Expr expression = 1;
+  bool no_inherit = 2;
+}
+
+message ExclusionElement {
+  oneof target {
+    string column = 1;
+    Expr expr = 2;
+  }
+  string operator = 3; // WITH <op>
+  string opclass = 4;
+}
+
+message ExclusionConstraint {
+  string index_method = 1; // USING gist / spgist
+  repeated ExclusionElement elements = 2;
+  Expr predicate = 3;      // WHERE (...)
+}
+
+enum ConstraintType {
+  CONSTRAINT_TYPE_UNSPECIFIED = 0;
+  CONSTRAINT_TYPE_PRIMARY_KEY = 1;
+  CONSTRAINT_TYPE_FOREIGN_KEY = 2;
+  CONSTRAINT_TYPE_UNIQUE = 3;
+  CONSTRAINT_TYPE_CHECK = 4;
+  CONSTRAINT_TYPE_EXCLUSION = 5;
+  // PostgreSQL 18 stores not-null constraints in pg_constraint; introspection
+  // of 16 and 17 synthesizes the same shape.
+  CONSTRAINT_TYPE_NOT_NULL = 6;
+}
+
+message Constraint {
+  string name = 1;  // name within the table's namespace
+  ConstraintType type = 2;
+  oneof body {
+    PrimaryKey primary_key = 3;
+    ForeignKey foreign_key = 4;
+    UniqueConstraint unique = 5;
+    CheckConstraint check = 6;
+    ExclusionConstraint exclusion = 7;
+    string not_null_column = 8; // the NOT NULL constraint's column
+  }
+  bool deferrable = 9;
+  bool initially_deferred = 10;
+  // False while the constraint is NOT VALID; lets a resumed migration skip a
+  // validation that already finished.
+  bool validated = 11;
+  Metadata meta = 12;
+}
+
+message IndexElement {
+  oneof target {
+    string column = 1;
+    Expr expr = 2; // expression index
+  }
+  string collation = 3;
+  string opclass = 4;
+  SortOrder order = 5;
+  NullsOrder nulls = 6;
+}
+
+message Index {
+  string name = 1;
+  string method = 2;  // btree, hash, gin, gist, spgist, brin
+  bool unique = 3;
+  bool primary = 4;   // the index backs a primary key
+  repeated IndexElement elements = 5;
+  repeated string include = 6;  // INCLUDE (col, ...) covering columns
+  Expr predicate = 7;           // partial index WHERE (...)
+  bool nulls_not_distinct = 8;
+  // pg_index.indisvalid: false for the leftover of an interrupted concurrent
+  // build or a partitioned index not yet fully attached.
+  bool valid = 9;
+  // pg_index.indisready: false while the index exists but is not usable.
+  bool ready = 10;
+  Metadata meta = 11;
+}
+
+message Sequence {
+  QualifiedName name = 1;
+  TypeRef data_type = 2;  // AS smallint / integer / bigint
+  int64 start = 3;
+  int64 increment = 4;
+  int64 min_value = 5;
+  int64 max_value = 6;
+  bool cycle = 7;
+  int64 cache = 8;
+  ObjectRef owned_by = 9;  // OWNED BY column
+  Metadata meta = 10;
+}
+
+// PolicyCommand is the command a row-security policy applies to.
+enum PolicyCommand {
+  POLICY_COMMAND_UNSPECIFIED = 0;
+  POLICY_COMMAND_ALL = 1;
+  POLICY_COMMAND_SELECT = 2;
+  POLICY_COMMAND_INSERT = 3;
+  POLICY_COMMAND_UPDATE = 4;
+  POLICY_COMMAND_DELETE = 5;
+}
+
+// Policy is one row-level-security policy of a table (CREATE POLICY).
+message Policy {
+  string name = 1;            // unique within its table
+  PolicyCommand command = 2;
+  bool restrictive = 3;       // false = PERMISSIVE, the PostgreSQL default
+  repeated string roles = 4;  // roles the policy applies to; empty = PUBLIC
+  Expr using = 5;             // USING (...); unset when absent
+  Expr with_check = 6;        // WITH CHECK (...); unset when absent
+  Metadata meta = 7;
+}
+
+// Grant is one privilege grant on an object (GRANT ... ON object TO role).
+// Column-level grants are not modeled.
+message Grant {
+  ObjectRef object = 1;             // the object the privileges are granted on
+  repeated string privileges = 2;   // privilege keywords, e.g. "SELECT", "ALL"
+  repeated string roles = 3;        // grantee role names
+  bool with_grant_option = 4;
+  Metadata meta = 5;
+}

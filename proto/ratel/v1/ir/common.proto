@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package ratel.v1.ir;
+
+option go_package = "github.com/gopherex/ratel/ir;ir";
+
+// Identity, provenance, diagnostics and the annotation vocabulary shared by
+// the whole catalog IR.
+//
+// Determinism (docs/ir.md, invariant 1): every repeated field in this package
+// has a defined order - by object id, by attribute position, by sort order or
+// by source order - so the same input produces byte-identical serialization.
+
+// QualifiedName identifies an object by its identifier parts, ordered from
+// the outermost container inward: ["app"] for a schema, ["app", "users"] for
+// a table, ["app", "users", "id"] for a column. For functions and procedures
+// the last part is the argument type list (canonical PostgreSQL names joined
+// by ",", e.g. "int4,text"), which distinguishes overloads. The object id
+// string is the parts joined by ".", each part double-quoted unless it is a
+// lower-case simple identifier.
+message QualifiedName {
+  repeated string parts = 1;
+}
+
+// ObjectKind discriminates what an ObjectRef points at.
+enum ObjectKind {
+  OBJECT_KIND_UNSPECIFIED = 0;
+  OBJECT_KIND_SCHEMA = 1;
+  OBJECT_KIND_TABLE = 2;
+  OBJECT_KIND_VIEW = 3;
+  OBJECT_KIND_MATERIALIZED_VIEW = 4;
+  OBJECT_KIND_COLUMN = 5;
+  OBJECT_KIND_CONSTRAINT = 6;
+  OBJECT_KIND_INDEX = 7;
+  OBJECT_KIND_SEQUENCE = 8;
+  OBJECT_KIND_FUNCTION = 9;
+  OBJECT_KIND_PROCEDURE = 10;
+  OBJECT_KIND_TRIGGER = 11;
+  OBJECT_KIND_ENUM_TYPE = 12;
+  OBJECT_KIND_DOMAIN_TYPE = 13;
+  OBJECT_KIND_COMPOSITE_TYPE = 14;
+  OBJECT_KIND_RANGE_TYPE = 15;
+  OBJECT_KIND_EXTENSION = 16;
+  OBJECT_KIND_POLICY = 17;
+}
+
+// ObjectRef is the identity of an object: what it is and how it is named.
+// References between objects are ObjectRefs, never nested copies.
+message ObjectRef {
+  ObjectKind kind = 1;
+  QualifiedName name = 2;
+}
+
+// SourceSpan records where an object came from in the SQL sources. Objects
+// built from source carry one; introspected objects carry none.
+message SourceSpan {
+  string file = 1;
+  uint32 start_line = 2;
+  uint32 start_column = 3;
+  uint32 end_line = 4;
+  uint32 end_column = 5;
+  uint64 start_offset = 6;
+  uint64 end_offset = 7;
+}
+
+enum DiagnosticSeverity {
+  DIAGNOSTIC_SEVERITY_UNSPECIFIED = 0;
+  DIAGNOSTIC_SEVERITY_INFO = 1;
+  DIAGNOSTIC_SEVERITY_WARNING = 2;
+  // A single ERROR diagnostic fails the run that produced it.
+  DIAGNOSTIC_SEVERITY_ERROR = 3;
+}
+
+// Diagnostic is a problem report: severity, a stable machine code to branch
+// on (never on message text), a human-readable message and, when known, the
+// position it originated from.
+message Diagnostic {
+  DiagnosticSeverity severity = 1;
+  string code = 2;       // e.g. "RTL-L02", a plugin code, a host inference code
+  string message = 3;
+  SourceSpan source = 4;
+}
+
+// AnnotationArg is one parsed argument of an annotation in the grammar of
+// docs/input.md: either a positional value (key empty) or a key=value pair.
+message AnnotationArg {
+  string key = 1;    // argument key; empty for positional arguments
+  string value = 2;  // value text with quotes stripped
+}
+
+// AnnotationValue is one annotation in the parsed form: "@" namespace "."
+// name followed by ordered arguments. The host parses the syntax and attaches
+// the value to its target; the owner of the namespace (the host for "ratel",
+// the plugin for its own namespace) validates the meaning.
+message AnnotationValue {
+  string namespace = 1;  // "ratel" for core annotations, the plugin name otherwise
+  string name = 2;       // annotation name without the namespace, e.g. "rel"
+  repeated AnnotationArg args = 3;  // in source order
+  oneof target {
+    ObjectRef object = 4;   // catalog object the annotation is attached to
+    string query_name = 5;  // name of the query the annotation is attached to
+  }
+  SourceSpan source = 6;  // position of the annotation comment
+}
+
+// Metadata is attached to every modeled object: its comment, provenance and
+// the annotations attached to it.
+message Metadata {
+  string comment = 1;  // from COMMENT ON and from the database
+  SourceSpan source = 2;
+  repeated AnnotationValue annotations = 3;  // in source order
+}
