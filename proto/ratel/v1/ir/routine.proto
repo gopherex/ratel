@@ -153,6 +153,16 @@ message Function {
   string body = 12;                  // routine body source (AS '...')
   repeated SelectStmt sql_body = 13; // standard SQL body (BEGIN ATOMIC ...)
   Metadata meta = 14;
+  string routine_kind = 15; // pg_proc.prokind: f (function), a (aggregate), w (window)
+  uint32 default_arguments = 16; // number of trailing input arguments with defaults
+  TypeRef variadic_element = 17; // pg_proc.provariadic; argument itself keeps its declared type
+  AggregateSignature aggregate = 18; // present only for aggregate functions
+}
+
+// AggregateSignature preserves the calling convention of pg_aggregate.
+message AggregateSignature {
+  string kind = 1; // n (normal), o (ordered-set), h (hypothetical-set)
+  uint32 direct_arguments = 2;
 }
 
 message Procedure {

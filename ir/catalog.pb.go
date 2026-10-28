@@ -110,6 +110,9 @@ type Schema struct {
 	Ranges            []*RangeType           `protobuf:"bytes,13,rep,name=ranges,proto3" json:"ranges,omitempty"`
 	Grants            []*Grant               `protobuf:"bytes,14,rep,name=grants,proto3" json:"grants,omitempty"` // grants on objects of this schema
 	Meta              *Metadata              `protobuf:"bytes,15,opt,name=meta,proto3" json:"meta,omitempty"`
+	BuiltinTypes      []*BuiltinType         `protobuf:"bytes,16,rep,name=builtin_types,json=builtinTypes,proto3" json:"builtin_types,omitempty"`
+	BuiltinOperators  []*BuiltinOperator     `protobuf:"bytes,17,rep,name=builtin_operators,json=builtinOperators,proto3" json:"builtin_operators,omitempty"`
+	BuiltinCasts      []*BuiltinCast         `protobuf:"bytes,18,rep,name=builtin_casts,json=builtinCasts,proto3" json:"builtin_casts,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -249,6 +252,258 @@ func (x *Schema) GetMeta() *Metadata {
 	return nil
 }
 
+func (x *Schema) GetBuiltinTypes() []*BuiltinType {
+	if x != nil {
+		return x.BuiltinTypes
+	}
+	return nil
+}
+
+func (x *Schema) GetBuiltinOperators() []*BuiltinOperator {
+	if x != nil {
+		return x.BuiltinOperators
+	}
+	return nil
+}
+
+func (x *Schema) GetBuiltinCasts() []*BuiltinCast {
+	if x != nil {
+		return x.BuiltinCasts
+	}
+	return nil
+}
+
+// BuiltinType preserves pg_type's overload-resolution metadata without OIDs.
+type BuiltinType struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          *TypeRef               `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Category      string                 `protobuf:"bytes,2,opt,name=category,proto3" json:"category,omitempty"` // pg_type.typcategory
+	Preferred     bool                   `protobuf:"varint,3,opt,name=preferred,proto3" json:"preferred,omitempty"`
+	Base          *TypeRef               `protobuf:"bytes,4,opt,name=base,proto3" json:"base,omitempty"`                                     // domain base, when present
+	RangeSubtype  *TypeRef               `protobuf:"bytes,5,opt,name=range_subtype,json=rangeSubtype,proto3" json:"range_subtype,omitempty"` // range or multirange subtype
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuiltinType) Reset() {
+	*x = BuiltinType{}
+	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuiltinType) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuiltinType) ProtoMessage() {}
+
+func (x *BuiltinType) ProtoReflect() protoreflect.Message {
+	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuiltinType.ProtoReflect.Descriptor instead.
+func (*BuiltinType) Descriptor() ([]byte, []int) {
+	return file_ratel_v1_ir_catalog_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *BuiltinType) GetType() *TypeRef {
+	if x != nil {
+		return x.Type
+	}
+	return nil
+}
+
+func (x *BuiltinType) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *BuiltinType) GetPreferred() bool {
+	if x != nil {
+		return x.Preferred
+	}
+	return false
+}
+
+func (x *BuiltinType) GetBase() *TypeRef {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *BuiltinType) GetRangeSubtype() *TypeRef {
+	if x != nil {
+		return x.RangeSubtype
+	}
+	return nil
+}
+
+// BuiltinOperator identifies unary/binary operators by their operand types.
+type BuiltinOperator struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Left          *TypeRef               `protobuf:"bytes,2,opt,name=left,proto3" json:"left,omitempty"` // absent for prefix operators
+	Right         *TypeRef               `protobuf:"bytes,3,opt,name=right,proto3" json:"right,omitempty"`
+	Result        *TypeRef               `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	Function      *QualifiedName         `protobuf:"bytes,5,opt,name=function,proto3" json:"function,omitempty"` // implementing function's input signature
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuiltinOperator) Reset() {
+	*x = BuiltinOperator{}
+	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuiltinOperator) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuiltinOperator) ProtoMessage() {}
+
+func (x *BuiltinOperator) ProtoReflect() protoreflect.Message {
+	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuiltinOperator.ProtoReflect.Descriptor instead.
+func (*BuiltinOperator) Descriptor() ([]byte, []int) {
+	return file_ratel_v1_ir_catalog_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *BuiltinOperator) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *BuiltinOperator) GetLeft() *TypeRef {
+	if x != nil {
+		return x.Left
+	}
+	return nil
+}
+
+func (x *BuiltinOperator) GetRight() *TypeRef {
+	if x != nil {
+		return x.Right
+	}
+	return nil
+}
+
+func (x *BuiltinOperator) GetResult() *TypeRef {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *BuiltinOperator) GetFunction() *QualifiedName {
+	if x != nil {
+		return x.Function
+	}
+	return nil
+}
+
+// BuiltinCast contains implicit and assignment casts, never explicit-only casts.
+type BuiltinCast struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Source        *TypeRef               `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
+	Target        *TypeRef               `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
+	Context       string                 `protobuf:"bytes,3,opt,name=context,proto3" json:"context,omitempty"`   // pg_cast.castcontext: i (implicit), a (assignment)
+	Method        string                 `protobuf:"bytes,4,opt,name=method,proto3" json:"method,omitempty"`     // pg_cast.castmethod: f (function), b (binary), i (I/O)
+	Function      *QualifiedName         `protobuf:"bytes,5,opt,name=function,proto3" json:"function,omitempty"` // absent for binary and I/O casts
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuiltinCast) Reset() {
+	*x = BuiltinCast{}
+	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuiltinCast) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuiltinCast) ProtoMessage() {}
+
+func (x *BuiltinCast) ProtoReflect() protoreflect.Message {
+	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuiltinCast.ProtoReflect.Descriptor instead.
+func (*BuiltinCast) Descriptor() ([]byte, []int) {
+	return file_ratel_v1_ir_catalog_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *BuiltinCast) GetSource() *TypeRef {
+	if x != nil {
+		return x.Source
+	}
+	return nil
+}
+
+func (x *BuiltinCast) GetTarget() *TypeRef {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+func (x *BuiltinCast) GetContext() string {
+	if x != nil {
+		return x.Context
+	}
+	return ""
+}
+
+func (x *BuiltinCast) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *BuiltinCast) GetFunction() *QualifiedName {
+	if x != nil {
+		return x.Function
+	}
+	return nil
+}
+
 // Catalog is the whole database snapshot: the single contract between the
 // host and output plugins. Two producers build it: the catalog builder from
 // schema files (desired state) and introspection from a live database
@@ -269,7 +524,7 @@ type Catalog struct {
 
 func (x *Catalog) Reset() {
 	*x = Catalog{}
-	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[2]
+	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -281,7 +536,7 @@ func (x *Catalog) String() string {
 func (*Catalog) ProtoMessage() {}
 
 func (x *Catalog) ProtoReflect() protoreflect.Message {
-	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[2]
+	mi := &file_ratel_v1_ir_catalog_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -294,7 +549,7 @@ func (x *Catalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Catalog.ProtoReflect.Descriptor instead.
 func (*Catalog) Descriptor() ([]byte, []int) {
-	return file_ratel_v1_ir_catalog_proto_rawDescGZIP(), []int{2}
+	return file_ratel_v1_ir_catalog_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Catalog) GetName() string {
@@ -357,12 +612,12 @@ var File_ratel_v1_ir_catalog_proto protoreflect.FileDescriptor
 
 const file_ratel_v1_ir_catalog_proto_rawDesc = "" +
 	"\n" +
-	"\x19ratel/v1/ir/catalog.proto\x12\vratel.v1.ir\x1a\x18ratel/v1/ir/common.proto\x1a\x1aratel/v1/ir/relation.proto\x1a\x19ratel/v1/ir/routine.proto\x1a\x18ratel/v1/ir/schema.proto\"|\n" +
+	"\x19ratel/v1/ir/catalog.proto\x12\vratel.v1.ir\x1a\x18ratel/v1/ir/common.proto\x1a\x1aratel/v1/ir/relation.proto\x1a\x19ratel/v1/ir/routine.proto\x1a\x18ratel/v1/ir/schema.proto\x1a\x16ratel/v1/ir/type.proto\"|\n" +
 	"\tExtension\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06schema\x18\x02 \x01(\tR\x06schema\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12)\n" +
-	"\x04meta\x18\x04 \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\xcc\x05\n" +
+	"\x04meta\x18\x04 \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\x95\a\n" +
 	"\x06Schema\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12*\n" +
@@ -383,7 +638,28 @@ const file_ratel_v1_ir_catalog_proto_rawDesc = "" +
 	"composites\x12.\n" +
 	"\x06ranges\x18\r \x03(\v2\x16.ratel.v1.ir.RangeTypeR\x06ranges\x12*\n" +
 	"\x06grants\x18\x0e \x03(\v2\x12.ratel.v1.ir.GrantR\x06grants\x12)\n" +
-	"\x04meta\x18\x0f \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\xd7\x02\n" +
+	"\x04meta\x18\x0f \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\x12=\n" +
+	"\rbuiltin_types\x18\x10 \x03(\v2\x18.ratel.v1.ir.BuiltinTypeR\fbuiltinTypes\x12I\n" +
+	"\x11builtin_operators\x18\x11 \x03(\v2\x1c.ratel.v1.ir.BuiltinOperatorR\x10builtinOperators\x12=\n" +
+	"\rbuiltin_casts\x18\x12 \x03(\v2\x18.ratel.v1.ir.BuiltinCastR\fbuiltinCasts\"\xd6\x01\n" +
+	"\vBuiltinType\x12(\n" +
+	"\x04type\x18\x01 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x04type\x12\x1a\n" +
+	"\bcategory\x18\x02 \x01(\tR\bcategory\x12\x1c\n" +
+	"\tpreferred\x18\x03 \x01(\bR\tpreferred\x12(\n" +
+	"\x04base\x18\x04 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x04base\x129\n" +
+	"\rrange_subtype\x18\x05 \x01(\v2\x14.ratel.v1.ir.TypeRefR\frangeSubtype\"\xe1\x01\n" +
+	"\x0fBuiltinOperator\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12(\n" +
+	"\x04left\x18\x02 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x04left\x12*\n" +
+	"\x05right\x18\x03 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x05right\x12,\n" +
+	"\x06result\x18\x04 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x06result\x126\n" +
+	"\bfunction\x18\x05 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\bfunction\"\xd3\x01\n" +
+	"\vBuiltinCast\x12,\n" +
+	"\x06source\x18\x01 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x06source\x12,\n" +
+	"\x06target\x18\x02 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x06target\x12\x18\n" +
+	"\acontext\x18\x03 \x01(\tR\acontext\x12\x16\n" +
+	"\x06method\x18\x04 \x01(\tR\x06method\x126\n" +
+	"\bfunction\x18\x05 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\bfunction\"\xd7\x02\n" +
 	"\aCatalog\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12)\n" +
 	"\x10database_version\x18\x02 \x01(\tR\x0fdatabaseVersion\x12%\n" +
@@ -409,50 +685,68 @@ func file_ratel_v1_ir_catalog_proto_rawDescGZIP() []byte {
 	return file_ratel_v1_ir_catalog_proto_rawDescData
 }
 
-var file_ratel_v1_ir_catalog_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_ratel_v1_ir_catalog_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_ratel_v1_ir_catalog_proto_goTypes = []any{
 	(*Extension)(nil),        // 0: ratel.v1.ir.Extension
 	(*Schema)(nil),           // 1: ratel.v1.ir.Schema
-	(*Catalog)(nil),          // 2: ratel.v1.ir.Catalog
-	(*Metadata)(nil),         // 3: ratel.v1.ir.Metadata
-	(*Table)(nil),            // 4: ratel.v1.ir.Table
-	(*View)(nil),             // 5: ratel.v1.ir.View
-	(*MaterializedView)(nil), // 6: ratel.v1.ir.MaterializedView
-	(*Sequence)(nil),         // 7: ratel.v1.ir.Sequence
-	(*Function)(nil),         // 8: ratel.v1.ir.Function
-	(*Procedure)(nil),        // 9: ratel.v1.ir.Procedure
-	(*Trigger)(nil),          // 10: ratel.v1.ir.Trigger
-	(*EnumType)(nil),         // 11: ratel.v1.ir.EnumType
-	(*DomainType)(nil),       // 12: ratel.v1.ir.DomainType
-	(*CompositeType)(nil),    // 13: ratel.v1.ir.CompositeType
-	(*RangeType)(nil),        // 14: ratel.v1.ir.RangeType
-	(*Grant)(nil),            // 15: ratel.v1.ir.Grant
-	(*Relation)(nil),         // 16: ratel.v1.ir.Relation
+	(*BuiltinType)(nil),      // 2: ratel.v1.ir.BuiltinType
+	(*BuiltinOperator)(nil),  // 3: ratel.v1.ir.BuiltinOperator
+	(*BuiltinCast)(nil),      // 4: ratel.v1.ir.BuiltinCast
+	(*Catalog)(nil),          // 5: ratel.v1.ir.Catalog
+	(*Metadata)(nil),         // 6: ratel.v1.ir.Metadata
+	(*Table)(nil),            // 7: ratel.v1.ir.Table
+	(*View)(nil),             // 8: ratel.v1.ir.View
+	(*MaterializedView)(nil), // 9: ratel.v1.ir.MaterializedView
+	(*Sequence)(nil),         // 10: ratel.v1.ir.Sequence
+	(*Function)(nil),         // 11: ratel.v1.ir.Function
+	(*Procedure)(nil),        // 12: ratel.v1.ir.Procedure
+	(*Trigger)(nil),          // 13: ratel.v1.ir.Trigger
+	(*EnumType)(nil),         // 14: ratel.v1.ir.EnumType
+	(*DomainType)(nil),       // 15: ratel.v1.ir.DomainType
+	(*CompositeType)(nil),    // 16: ratel.v1.ir.CompositeType
+	(*RangeType)(nil),        // 17: ratel.v1.ir.RangeType
+	(*Grant)(nil),            // 18: ratel.v1.ir.Grant
+	(*TypeRef)(nil),          // 19: ratel.v1.ir.TypeRef
+	(*QualifiedName)(nil),    // 20: ratel.v1.ir.QualifiedName
+	(*Relation)(nil),         // 21: ratel.v1.ir.Relation
 }
 var file_ratel_v1_ir_catalog_proto_depIdxs = []int32{
-	3,  // 0: ratel.v1.ir.Extension.meta:type_name -> ratel.v1.ir.Metadata
-	4,  // 1: ratel.v1.ir.Schema.tables:type_name -> ratel.v1.ir.Table
-	5,  // 2: ratel.v1.ir.Schema.views:type_name -> ratel.v1.ir.View
-	6,  // 3: ratel.v1.ir.Schema.materialized_views:type_name -> ratel.v1.ir.MaterializedView
-	7,  // 4: ratel.v1.ir.Schema.sequences:type_name -> ratel.v1.ir.Sequence
-	8,  // 5: ratel.v1.ir.Schema.functions:type_name -> ratel.v1.ir.Function
-	9,  // 6: ratel.v1.ir.Schema.procedures:type_name -> ratel.v1.ir.Procedure
-	10, // 7: ratel.v1.ir.Schema.triggers:type_name -> ratel.v1.ir.Trigger
-	11, // 8: ratel.v1.ir.Schema.enums:type_name -> ratel.v1.ir.EnumType
-	12, // 9: ratel.v1.ir.Schema.domains:type_name -> ratel.v1.ir.DomainType
-	13, // 10: ratel.v1.ir.Schema.composites:type_name -> ratel.v1.ir.CompositeType
-	14, // 11: ratel.v1.ir.Schema.ranges:type_name -> ratel.v1.ir.RangeType
-	15, // 12: ratel.v1.ir.Schema.grants:type_name -> ratel.v1.ir.Grant
-	3,  // 13: ratel.v1.ir.Schema.meta:type_name -> ratel.v1.ir.Metadata
-	0,  // 14: ratel.v1.ir.Catalog.extensions:type_name -> ratel.v1.ir.Extension
-	1,  // 15: ratel.v1.ir.Catalog.schemas:type_name -> ratel.v1.ir.Schema
-	16, // 16: ratel.v1.ir.Catalog.relations:type_name -> ratel.v1.ir.Relation
-	3,  // 17: ratel.v1.ir.Catalog.meta:type_name -> ratel.v1.ir.Metadata
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	6,  // 0: ratel.v1.ir.Extension.meta:type_name -> ratel.v1.ir.Metadata
+	7,  // 1: ratel.v1.ir.Schema.tables:type_name -> ratel.v1.ir.Table
+	8,  // 2: ratel.v1.ir.Schema.views:type_name -> ratel.v1.ir.View
+	9,  // 3: ratel.v1.ir.Schema.materialized_views:type_name -> ratel.v1.ir.MaterializedView
+	10, // 4: ratel.v1.ir.Schema.sequences:type_name -> ratel.v1.ir.Sequence
+	11, // 5: ratel.v1.ir.Schema.functions:type_name -> ratel.v1.ir.Function
+	12, // 6: ratel.v1.ir.Schema.procedures:type_name -> ratel.v1.ir.Procedure
+	13, // 7: ratel.v1.ir.Schema.triggers:type_name -> ratel.v1.ir.Trigger
+	14, // 8: ratel.v1.ir.Schema.enums:type_name -> ratel.v1.ir.EnumType
+	15, // 9: ratel.v1.ir.Schema.domains:type_name -> ratel.v1.ir.DomainType
+	16, // 10: ratel.v1.ir.Schema.composites:type_name -> ratel.v1.ir.CompositeType
+	17, // 11: ratel.v1.ir.Schema.ranges:type_name -> ratel.v1.ir.RangeType
+	18, // 12: ratel.v1.ir.Schema.grants:type_name -> ratel.v1.ir.Grant
+	6,  // 13: ratel.v1.ir.Schema.meta:type_name -> ratel.v1.ir.Metadata
+	2,  // 14: ratel.v1.ir.Schema.builtin_types:type_name -> ratel.v1.ir.BuiltinType
+	3,  // 15: ratel.v1.ir.Schema.builtin_operators:type_name -> ratel.v1.ir.BuiltinOperator
+	4,  // 16: ratel.v1.ir.Schema.builtin_casts:type_name -> ratel.v1.ir.BuiltinCast
+	19, // 17: ratel.v1.ir.BuiltinType.type:type_name -> ratel.v1.ir.TypeRef
+	19, // 18: ratel.v1.ir.BuiltinType.base:type_name -> ratel.v1.ir.TypeRef
+	19, // 19: ratel.v1.ir.BuiltinType.range_subtype:type_name -> ratel.v1.ir.TypeRef
+	19, // 20: ratel.v1.ir.BuiltinOperator.left:type_name -> ratel.v1.ir.TypeRef
+	19, // 21: ratel.v1.ir.BuiltinOperator.right:type_name -> ratel.v1.ir.TypeRef
+	19, // 22: ratel.v1.ir.BuiltinOperator.result:type_name -> ratel.v1.ir.TypeRef
+	20, // 23: ratel.v1.ir.BuiltinOperator.function:type_name -> ratel.v1.ir.QualifiedName
+	19, // 24: ratel.v1.ir.BuiltinCast.source:type_name -> ratel.v1.ir.TypeRef
+	19, // 25: ratel.v1.ir.BuiltinCast.target:type_name -> ratel.v1.ir.TypeRef
+	20, // 26: ratel.v1.ir.BuiltinCast.function:type_name -> ratel.v1.ir.QualifiedName
+	0,  // 27: ratel.v1.ir.Catalog.extensions:type_name -> ratel.v1.ir.Extension
+	1,  // 28: ratel.v1.ir.Catalog.schemas:type_name -> ratel.v1.ir.Schema
+	21, // 29: ratel.v1.ir.Catalog.relations:type_name -> ratel.v1.ir.Relation
+	6,  // 30: ratel.v1.ir.Catalog.meta:type_name -> ratel.v1.ir.Metadata
+	31, // [31:31] is the sub-list for method output_type
+	31, // [31:31] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_ratel_v1_ir_catalog_proto_init() }
@@ -464,13 +758,14 @@ func file_ratel_v1_ir_catalog_proto_init() {
 	file_ratel_v1_ir_relation_proto_init()
 	file_ratel_v1_ir_routine_proto_init()
 	file_ratel_v1_ir_schema_proto_init()
+	file_ratel_v1_ir_type_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ratel_v1_ir_catalog_proto_rawDesc), len(file_ratel_v1_ir_catalog_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

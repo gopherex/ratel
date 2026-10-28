@@ -18,7 +18,7 @@ MODULES := $(shell $(GO) work edit -json | sed -n 's/.*"DiskPath": "\([^"]*\)".*
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench proto check
+.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench proto builtins check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -72,5 +72,8 @@ proto: ## Generate Go from proto/ (needs protoc-gen-go on PATH; no-op until .pro
 	else
 		echo ">> proto: no .proto files yet, nothing to generate"
 	fi
+
+builtins: ## Generate builtin signatures from pinned PostgreSQL 16, 17 and 18 containers (needs Docker)
+	( cd cmd/ratel && $(GO) generate ./internal/builtins )
 
 check: fmt-check lint test ## Run the CI gates: format check, linter, unit tests

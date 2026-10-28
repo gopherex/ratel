@@ -157,6 +157,54 @@ registry. With an empty signature input, calls to ordinary built-in functions
 are unresolved; sequence calls (`nextval`, `currval`, `setval`) resolve their
 constant sequence names directly.
 
+### Generated builtins
+
+`cmd/ratel/internal/builtins.For(major)` returns caller-owned `[]*ir.Schema`
+for PostgreSQL 16, 17 or 18; unsupported versions return `*UnsupportedMajorError`.
+Pass this result to `catalog.Build`. The snapshots are committed protobuf
+`Schema` messages in `cmd/ratel/internal/builtins/data/{16,17,18}.binpb`, embedded
+in the host. Loading them requires neither Docker nor a database connection.
+
+Regenerate with `make builtins`, or
+`cd cmd/ratel && go generate ./internal/builtins`. The generator starts a pristine
+testcontainers PostgreSQL server for each major, reads its system catalogs,
+and removes its containers and connections. Image digests in
+`internal/builtins/gen/main.go` pin the extraction inputs. The generator's
+`-timeout` flag sets its total deadline and cleanup timeout (default 10 minutes).
+To intentionally update server images, update those digests and regenerate.
+
+Only `pg_catalog` objects are included; procedures and other namespaces are
+excluded. No extra extensions are installed beyond the image's default plpgsql. Database-local OIDs, owners and source metadata are
+not serialized. The extraction retains:
+
+- `Schema.builtin_types`: canonical `TypeRef` names and kinds, array elements,
+  `pg_type` category/preferred flags, domain bases and range/multirange subtypes.
+- `Schema.functions`: all function, aggregate and window signatures, ordered
+  arguments with names and IN/OUT/INOUT/VARIADIC modes, scalar or SETOF returns,
+  strictness and volatility. TABLE outputs use OUT mode; their column names and
+  types remain arguments. `routine_kind` retains `pg_proc.prokind`,
+  `default_arguments` retains `pronargdefaults`, and `variadic_element` retains
+  `provariadic`. `aggregate` retains `pg_aggregate.aggkind` and the direct
+  argument count. These are calling signatures, not function bodies or complete
+  migration definitions.
+- `Schema.builtin_operators`: operator name, left/right operand types, result
+  type and implementing function identity; a prefix operator has no left type.
+- `Schema.builtin_casts`: implicit and assignment casts, their source/target
+  types, PostgreSQL context/method codes and optional implementation identity.
+  Explicit-only casts are excluded. PostgreSQL's generic array/domain/I/O
+  coercion rules are not extra rows in `pg_cast` and are not synthesized here.
+
+Function identities use the existing three-part schema/name/input-signature
+convention. Sorting canonicalizes catalog sets without reordering argument
+positions. Deterministic protobuf serialization and pinned inputs make repeated
+extractions byte-identical. Unit tests exercise reversed input order and known
+PostgreSQL signatures, version-specific functions and independent loader state.
+Run `cd cmd/ratel && go test -race ./internal/builtins/...`; benchmarks use
+`go test -run '^$' -bench . -benchmem ./internal/builtins/...` in that module.
+The catalog resolver still requires explicit argument casts when its current
+literal matching cannot choose a unique overload; loading complete signatures
+does not itself implement PostgreSQL's overload selection algorithm.
+
 The builder uses `public` as the default schema and search path. It collects
 schema declarations, visits embedded `CREATE SCHEMA` elements with that schema
 as their namespace, collects objects, and canonicalizes routine signatures after

@@ -1373,23 +1373,27 @@ func (*ReturnType_VoidValue) isReturnType_Kind() {}
 func (*ReturnType_TriggerValue) isReturnType_Kind() {}
 
 type Function struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Name            *QualifiedName         `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // last part is the argument type list
-	Arguments       []*Argument            `protobuf:"bytes,2,rep,name=arguments,proto3" json:"arguments,omitempty"`
-	Returns         *ReturnType            `protobuf:"bytes,3,opt,name=returns,proto3" json:"returns,omitempty"`
-	Language        string                 `protobuf:"bytes,4,opt,name=language,proto3" json:"language,omitempty"` // sql, plpgsql, c...
-	Volatility      Volatility             `protobuf:"varint,5,opt,name=volatility,proto3,enum=ratel.v1.ir.Volatility" json:"volatility,omitempty"`
-	NullInput       NullInputBehavior      `protobuf:"varint,6,opt,name=null_input,json=nullInput,proto3,enum=ratel.v1.ir.NullInputBehavior" json:"null_input,omitempty"`
-	SecurityDefiner bool                   `protobuf:"varint,7,opt,name=security_definer,json=securityDefiner,proto3" json:"security_definer,omitempty"` // false = SECURITY INVOKER
-	Leakproof       bool                   `protobuf:"varint,8,opt,name=leakproof,proto3" json:"leakproof,omitempty"`
-	Parallel        ParallelSafety         `protobuf:"varint,9,opt,name=parallel,proto3,enum=ratel.v1.ir.ParallelSafety" json:"parallel,omitempty"`
-	EstimatedCost   int32                  `protobuf:"varint,10,opt,name=estimated_cost,json=estimatedCost,proto3" json:"estimated_cost,omitempty"`
-	EstimatedRows   int32                  `protobuf:"varint,11,opt,name=estimated_rows,json=estimatedRows,proto3" json:"estimated_rows,omitempty"`
-	Body            string                 `protobuf:"bytes,12,opt,name=body,proto3" json:"body,omitempty"`                      // routine body source (AS '...')
-	SqlBody         []*SelectStmt          `protobuf:"bytes,13,rep,name=sql_body,json=sqlBody,proto3" json:"sql_body,omitempty"` // standard SQL body (BEGIN ATOMIC ...)
-	Meta            *Metadata              `protobuf:"bytes,14,opt,name=meta,proto3" json:"meta,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Name             *QualifiedName         `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // last part is the argument type list
+	Arguments        []*Argument            `protobuf:"bytes,2,rep,name=arguments,proto3" json:"arguments,omitempty"`
+	Returns          *ReturnType            `protobuf:"bytes,3,opt,name=returns,proto3" json:"returns,omitempty"`
+	Language         string                 `protobuf:"bytes,4,opt,name=language,proto3" json:"language,omitempty"` // sql, plpgsql, c...
+	Volatility       Volatility             `protobuf:"varint,5,opt,name=volatility,proto3,enum=ratel.v1.ir.Volatility" json:"volatility,omitempty"`
+	NullInput        NullInputBehavior      `protobuf:"varint,6,opt,name=null_input,json=nullInput,proto3,enum=ratel.v1.ir.NullInputBehavior" json:"null_input,omitempty"`
+	SecurityDefiner  bool                   `protobuf:"varint,7,opt,name=security_definer,json=securityDefiner,proto3" json:"security_definer,omitempty"` // false = SECURITY INVOKER
+	Leakproof        bool                   `protobuf:"varint,8,opt,name=leakproof,proto3" json:"leakproof,omitempty"`
+	Parallel         ParallelSafety         `protobuf:"varint,9,opt,name=parallel,proto3,enum=ratel.v1.ir.ParallelSafety" json:"parallel,omitempty"`
+	EstimatedCost    int32                  `protobuf:"varint,10,opt,name=estimated_cost,json=estimatedCost,proto3" json:"estimated_cost,omitempty"`
+	EstimatedRows    int32                  `protobuf:"varint,11,opt,name=estimated_rows,json=estimatedRows,proto3" json:"estimated_rows,omitempty"`
+	Body             string                 `protobuf:"bytes,12,opt,name=body,proto3" json:"body,omitempty"`                      // routine body source (AS '...')
+	SqlBody          []*SelectStmt          `protobuf:"bytes,13,rep,name=sql_body,json=sqlBody,proto3" json:"sql_body,omitempty"` // standard SQL body (BEGIN ATOMIC ...)
+	Meta             *Metadata              `protobuf:"bytes,14,opt,name=meta,proto3" json:"meta,omitempty"`
+	RoutineKind      string                 `protobuf:"bytes,15,opt,name=routine_kind,json=routineKind,proto3" json:"routine_kind,omitempty"`                 // pg_proc.prokind: f (function), a (aggregate), w (window)
+	DefaultArguments uint32                 `protobuf:"varint,16,opt,name=default_arguments,json=defaultArguments,proto3" json:"default_arguments,omitempty"` // number of trailing input arguments with defaults
+	VariadicElement  *TypeRef               `protobuf:"bytes,17,opt,name=variadic_element,json=variadicElement,proto3" json:"variadic_element,omitempty"`     // pg_proc.provariadic; argument itself keeps its declared type
+	Aggregate        *AggregateSignature    `protobuf:"bytes,18,opt,name=aggregate,proto3" json:"aggregate,omitempty"`                                        // present only for aggregate functions
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Function) Reset() {
@@ -1520,6 +1524,87 @@ func (x *Function) GetMeta() *Metadata {
 	return nil
 }
 
+func (x *Function) GetRoutineKind() string {
+	if x != nil {
+		return x.RoutineKind
+	}
+	return ""
+}
+
+func (x *Function) GetDefaultArguments() uint32 {
+	if x != nil {
+		return x.DefaultArguments
+	}
+	return 0
+}
+
+func (x *Function) GetVariadicElement() *TypeRef {
+	if x != nil {
+		return x.VariadicElement
+	}
+	return nil
+}
+
+func (x *Function) GetAggregate() *AggregateSignature {
+	if x != nil {
+		return x.Aggregate
+	}
+	return nil
+}
+
+// AggregateSignature preserves the calling convention of pg_aggregate.
+type AggregateSignature struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Kind            string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"` // n (normal), o (ordered-set), h (hypothetical-set)
+	DirectArguments uint32                 `protobuf:"varint,2,opt,name=direct_arguments,json=directArguments,proto3" json:"direct_arguments,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AggregateSignature) Reset() {
+	*x = AggregateSignature{}
+	mi := &file_ratel_v1_ir_routine_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AggregateSignature) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AggregateSignature) ProtoMessage() {}
+
+func (x *AggregateSignature) ProtoReflect() protoreflect.Message {
+	mi := &file_ratel_v1_ir_routine_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AggregateSignature.ProtoReflect.Descriptor instead.
+func (*AggregateSignature) Descriptor() ([]byte, []int) {
+	return file_ratel_v1_ir_routine_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AggregateSignature) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *AggregateSignature) GetDirectArguments() uint32 {
+	if x != nil {
+		return x.DirectArguments
+	}
+	return 0
+}
+
 type Procedure struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Name            *QualifiedName         `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // last part is the argument type list
@@ -1535,7 +1620,7 @@ type Procedure struct {
 
 func (x *Procedure) Reset() {
 	*x = Procedure{}
-	mi := &file_ratel_v1_ir_routine_proto_msgTypes[14]
+	mi := &file_ratel_v1_ir_routine_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1547,7 +1632,7 @@ func (x *Procedure) String() string {
 func (*Procedure) ProtoMessage() {}
 
 func (x *Procedure) ProtoReflect() protoreflect.Message {
-	mi := &file_ratel_v1_ir_routine_proto_msgTypes[14]
+	mi := &file_ratel_v1_ir_routine_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1560,7 +1645,7 @@ func (x *Procedure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Procedure.ProtoReflect.Descriptor instead.
 func (*Procedure) Descriptor() ([]byte, []int) {
-	return file_ratel_v1_ir_routine_proto_rawDescGZIP(), []int{14}
+	return file_ratel_v1_ir_routine_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Procedure) GetName() *QualifiedName {
@@ -1631,7 +1716,7 @@ type Trigger struct {
 
 func (x *Trigger) Reset() {
 	*x = Trigger{}
-	mi := &file_ratel_v1_ir_routine_proto_msgTypes[15]
+	mi := &file_ratel_v1_ir_routine_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1643,7 +1728,7 @@ func (x *Trigger) String() string {
 func (*Trigger) ProtoMessage() {}
 
 func (x *Trigger) ProtoReflect() protoreflect.Message {
-	mi := &file_ratel_v1_ir_routine_proto_msgTypes[15]
+	mi := &file_ratel_v1_ir_routine_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1656,7 +1741,7 @@ func (x *Trigger) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Trigger.ProtoReflect.Descriptor instead.
 func (*Trigger) Descriptor() ([]byte, []int) {
-	return file_ratel_v1_ir_routine_proto_rawDescGZIP(), []int{15}
+	return file_ratel_v1_ir_routine_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Trigger) GetName() string {
@@ -1813,7 +1898,7 @@ const file_ratel_v1_ir_routine_proto_rawDesc = "" +
 	"\n" +
 	"void_value\x18\x04 \x01(\bH\x00R\tvoidValue\x12%\n" +
 	"\rtrigger_value\x18\x05 \x01(\bH\x00R\ftriggerValueB\x06\n" +
-	"\x04kind\"\xf9\x04\n" +
+	"\x04kind\"\xc9\x06\n" +
 	"\bFunction\x12.\n" +
 	"\x04name\x18\x01 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\x04name\x123\n" +
 	"\targuments\x18\x02 \x03(\v2\x15.ratel.v1.ir.ArgumentR\targuments\x121\n" +
@@ -1832,7 +1917,14 @@ const file_ratel_v1_ir_routine_proto_rawDesc = "" +
 	"\x0eestimated_rows\x18\v \x01(\x05R\restimatedRows\x12\x12\n" +
 	"\x04body\x18\f \x01(\tR\x04body\x122\n" +
 	"\bsql_body\x18\r \x03(\v2\x17.ratel.v1.ir.SelectStmtR\asqlBody\x12)\n" +
-	"\x04meta\x18\x0e \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\xaa\x02\n" +
+	"\x04meta\x18\x0e \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\x12!\n" +
+	"\froutine_kind\x18\x0f \x01(\tR\vroutineKind\x12+\n" +
+	"\x11default_arguments\x18\x10 \x01(\rR\x10defaultArguments\x12?\n" +
+	"\x10variadic_element\x18\x11 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x0fvariadicElement\x12=\n" +
+	"\taggregate\x18\x12 \x01(\v2\x1f.ratel.v1.ir.AggregateSignatureR\taggregate\"S\n" +
+	"\x12AggregateSignature\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12)\n" +
+	"\x10direct_arguments\x18\x02 \x01(\rR\x0fdirectArguments\"\xaa\x02\n" +
 	"\tProcedure\x12.\n" +
 	"\x04name\x18\x01 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\x04name\x123\n" +
 	"\targuments\x18\x02 \x03(\v2\x15.ratel.v1.ir.ArgumentR\targuments\x12\x1a\n" +
@@ -1910,97 +2002,100 @@ func file_ratel_v1_ir_routine_proto_rawDescGZIP() []byte {
 }
 
 var file_ratel_v1_ir_routine_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
-var file_ratel_v1_ir_routine_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_ratel_v1_ir_routine_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_ratel_v1_ir_routine_proto_goTypes = []any{
-	(CheckOption)(0),         // 0: ratel.v1.ir.CheckOption
-	(ArgMode)(0),             // 1: ratel.v1.ir.ArgMode
-	(Volatility)(0),          // 2: ratel.v1.ir.Volatility
-	(ParallelSafety)(0),      // 3: ratel.v1.ir.ParallelSafety
-	(NullInputBehavior)(0),   // 4: ratel.v1.ir.NullInputBehavior
-	(TriggerTiming)(0),       // 5: ratel.v1.ir.TriggerTiming
-	(TriggerEvent)(0),        // 6: ratel.v1.ir.TriggerEvent
-	(TriggerLevel)(0),        // 7: ratel.v1.ir.TriggerLevel
-	(*EnumType)(nil),         // 8: ratel.v1.ir.EnumType
-	(*DomainConstraint)(nil), // 9: ratel.v1.ir.DomainConstraint
-	(*DomainType)(nil),       // 10: ratel.v1.ir.DomainType
-	(*CompositeField)(nil),   // 11: ratel.v1.ir.CompositeField
-	(*CompositeType)(nil),    // 12: ratel.v1.ir.CompositeType
-	(*RangeType)(nil),        // 13: ratel.v1.ir.RangeType
-	(*View)(nil),             // 14: ratel.v1.ir.View
-	(*MaterializedView)(nil), // 15: ratel.v1.ir.MaterializedView
-	(*Argument)(nil),         // 16: ratel.v1.ir.Argument
-	(*SetofType)(nil),        // 17: ratel.v1.ir.SetofType
-	(*TableColumn)(nil),      // 18: ratel.v1.ir.TableColumn
-	(*TableReturn)(nil),      // 19: ratel.v1.ir.TableReturn
-	(*ReturnType)(nil),       // 20: ratel.v1.ir.ReturnType
-	(*Function)(nil),         // 21: ratel.v1.ir.Function
-	(*Procedure)(nil),        // 22: ratel.v1.ir.Procedure
-	(*Trigger)(nil),          // 23: ratel.v1.ir.Trigger
-	(*QualifiedName)(nil),    // 24: ratel.v1.ir.QualifiedName
-	(*Metadata)(nil),         // 25: ratel.v1.ir.Metadata
-	(*Expr)(nil),             // 26: ratel.v1.ir.Expr
-	(*TypeRef)(nil),          // 27: ratel.v1.ir.TypeRef
-	(*SelectStmt)(nil),       // 28: ratel.v1.ir.SelectStmt
-	(*Index)(nil),            // 29: ratel.v1.ir.Index
-	(*ObjectRef)(nil),        // 30: ratel.v1.ir.ObjectRef
+	(CheckOption)(0),           // 0: ratel.v1.ir.CheckOption
+	(ArgMode)(0),               // 1: ratel.v1.ir.ArgMode
+	(Volatility)(0),            // 2: ratel.v1.ir.Volatility
+	(ParallelSafety)(0),        // 3: ratel.v1.ir.ParallelSafety
+	(NullInputBehavior)(0),     // 4: ratel.v1.ir.NullInputBehavior
+	(TriggerTiming)(0),         // 5: ratel.v1.ir.TriggerTiming
+	(TriggerEvent)(0),          // 6: ratel.v1.ir.TriggerEvent
+	(TriggerLevel)(0),          // 7: ratel.v1.ir.TriggerLevel
+	(*EnumType)(nil),           // 8: ratel.v1.ir.EnumType
+	(*DomainConstraint)(nil),   // 9: ratel.v1.ir.DomainConstraint
+	(*DomainType)(nil),         // 10: ratel.v1.ir.DomainType
+	(*CompositeField)(nil),     // 11: ratel.v1.ir.CompositeField
+	(*CompositeType)(nil),      // 12: ratel.v1.ir.CompositeType
+	(*RangeType)(nil),          // 13: ratel.v1.ir.RangeType
+	(*View)(nil),               // 14: ratel.v1.ir.View
+	(*MaterializedView)(nil),   // 15: ratel.v1.ir.MaterializedView
+	(*Argument)(nil),           // 16: ratel.v1.ir.Argument
+	(*SetofType)(nil),          // 17: ratel.v1.ir.SetofType
+	(*TableColumn)(nil),        // 18: ratel.v1.ir.TableColumn
+	(*TableReturn)(nil),        // 19: ratel.v1.ir.TableReturn
+	(*ReturnType)(nil),         // 20: ratel.v1.ir.ReturnType
+	(*Function)(nil),           // 21: ratel.v1.ir.Function
+	(*AggregateSignature)(nil), // 22: ratel.v1.ir.AggregateSignature
+	(*Procedure)(nil),          // 23: ratel.v1.ir.Procedure
+	(*Trigger)(nil),            // 24: ratel.v1.ir.Trigger
+	(*QualifiedName)(nil),      // 25: ratel.v1.ir.QualifiedName
+	(*Metadata)(nil),           // 26: ratel.v1.ir.Metadata
+	(*Expr)(nil),               // 27: ratel.v1.ir.Expr
+	(*TypeRef)(nil),            // 28: ratel.v1.ir.TypeRef
+	(*SelectStmt)(nil),         // 29: ratel.v1.ir.SelectStmt
+	(*Index)(nil),              // 30: ratel.v1.ir.Index
+	(*ObjectRef)(nil),          // 31: ratel.v1.ir.ObjectRef
 }
 var file_ratel_v1_ir_routine_proto_depIdxs = []int32{
-	24, // 0: ratel.v1.ir.EnumType.name:type_name -> ratel.v1.ir.QualifiedName
-	25, // 1: ratel.v1.ir.EnumType.meta:type_name -> ratel.v1.ir.Metadata
-	26, // 2: ratel.v1.ir.DomainConstraint.check:type_name -> ratel.v1.ir.Expr
-	24, // 3: ratel.v1.ir.DomainType.name:type_name -> ratel.v1.ir.QualifiedName
-	27, // 4: ratel.v1.ir.DomainType.base_type:type_name -> ratel.v1.ir.TypeRef
-	26, // 5: ratel.v1.ir.DomainType.default_expr:type_name -> ratel.v1.ir.Expr
+	25, // 0: ratel.v1.ir.EnumType.name:type_name -> ratel.v1.ir.QualifiedName
+	26, // 1: ratel.v1.ir.EnumType.meta:type_name -> ratel.v1.ir.Metadata
+	27, // 2: ratel.v1.ir.DomainConstraint.check:type_name -> ratel.v1.ir.Expr
+	25, // 3: ratel.v1.ir.DomainType.name:type_name -> ratel.v1.ir.QualifiedName
+	28, // 4: ratel.v1.ir.DomainType.base_type:type_name -> ratel.v1.ir.TypeRef
+	27, // 5: ratel.v1.ir.DomainType.default_expr:type_name -> ratel.v1.ir.Expr
 	9,  // 6: ratel.v1.ir.DomainType.constraints:type_name -> ratel.v1.ir.DomainConstraint
-	25, // 7: ratel.v1.ir.DomainType.meta:type_name -> ratel.v1.ir.Metadata
-	27, // 8: ratel.v1.ir.CompositeField.type:type_name -> ratel.v1.ir.TypeRef
-	24, // 9: ratel.v1.ir.CompositeType.name:type_name -> ratel.v1.ir.QualifiedName
+	26, // 7: ratel.v1.ir.DomainType.meta:type_name -> ratel.v1.ir.Metadata
+	28, // 8: ratel.v1.ir.CompositeField.type:type_name -> ratel.v1.ir.TypeRef
+	25, // 9: ratel.v1.ir.CompositeType.name:type_name -> ratel.v1.ir.QualifiedName
 	11, // 10: ratel.v1.ir.CompositeType.fields:type_name -> ratel.v1.ir.CompositeField
-	25, // 11: ratel.v1.ir.CompositeType.meta:type_name -> ratel.v1.ir.Metadata
-	24, // 12: ratel.v1.ir.RangeType.name:type_name -> ratel.v1.ir.QualifiedName
-	27, // 13: ratel.v1.ir.RangeType.subtype:type_name -> ratel.v1.ir.TypeRef
-	25, // 14: ratel.v1.ir.RangeType.meta:type_name -> ratel.v1.ir.Metadata
-	24, // 15: ratel.v1.ir.View.name:type_name -> ratel.v1.ir.QualifiedName
-	28, // 16: ratel.v1.ir.View.query:type_name -> ratel.v1.ir.SelectStmt
+	26, // 11: ratel.v1.ir.CompositeType.meta:type_name -> ratel.v1.ir.Metadata
+	25, // 12: ratel.v1.ir.RangeType.name:type_name -> ratel.v1.ir.QualifiedName
+	28, // 13: ratel.v1.ir.RangeType.subtype:type_name -> ratel.v1.ir.TypeRef
+	26, // 14: ratel.v1.ir.RangeType.meta:type_name -> ratel.v1.ir.Metadata
+	25, // 15: ratel.v1.ir.View.name:type_name -> ratel.v1.ir.QualifiedName
+	29, // 16: ratel.v1.ir.View.query:type_name -> ratel.v1.ir.SelectStmt
 	0,  // 17: ratel.v1.ir.View.check_option:type_name -> ratel.v1.ir.CheckOption
-	25, // 18: ratel.v1.ir.View.meta:type_name -> ratel.v1.ir.Metadata
-	24, // 19: ratel.v1.ir.MaterializedView.name:type_name -> ratel.v1.ir.QualifiedName
-	28, // 20: ratel.v1.ir.MaterializedView.query:type_name -> ratel.v1.ir.SelectStmt
-	29, // 21: ratel.v1.ir.MaterializedView.indexes:type_name -> ratel.v1.ir.Index
-	25, // 22: ratel.v1.ir.MaterializedView.meta:type_name -> ratel.v1.ir.Metadata
-	27, // 23: ratel.v1.ir.Argument.type:type_name -> ratel.v1.ir.TypeRef
+	26, // 18: ratel.v1.ir.View.meta:type_name -> ratel.v1.ir.Metadata
+	25, // 19: ratel.v1.ir.MaterializedView.name:type_name -> ratel.v1.ir.QualifiedName
+	29, // 20: ratel.v1.ir.MaterializedView.query:type_name -> ratel.v1.ir.SelectStmt
+	30, // 21: ratel.v1.ir.MaterializedView.indexes:type_name -> ratel.v1.ir.Index
+	26, // 22: ratel.v1.ir.MaterializedView.meta:type_name -> ratel.v1.ir.Metadata
+	28, // 23: ratel.v1.ir.Argument.type:type_name -> ratel.v1.ir.TypeRef
 	1,  // 24: ratel.v1.ir.Argument.mode:type_name -> ratel.v1.ir.ArgMode
-	26, // 25: ratel.v1.ir.Argument.default_value:type_name -> ratel.v1.ir.Expr
-	27, // 26: ratel.v1.ir.SetofType.type:type_name -> ratel.v1.ir.TypeRef
-	27, // 27: ratel.v1.ir.TableColumn.type:type_name -> ratel.v1.ir.TypeRef
+	27, // 25: ratel.v1.ir.Argument.default_value:type_name -> ratel.v1.ir.Expr
+	28, // 26: ratel.v1.ir.SetofType.type:type_name -> ratel.v1.ir.TypeRef
+	28, // 27: ratel.v1.ir.TableColumn.type:type_name -> ratel.v1.ir.TypeRef
 	18, // 28: ratel.v1.ir.TableReturn.columns:type_name -> ratel.v1.ir.TableColumn
-	27, // 29: ratel.v1.ir.ReturnType.scalar:type_name -> ratel.v1.ir.TypeRef
+	28, // 29: ratel.v1.ir.ReturnType.scalar:type_name -> ratel.v1.ir.TypeRef
 	17, // 30: ratel.v1.ir.ReturnType.setof:type_name -> ratel.v1.ir.SetofType
 	19, // 31: ratel.v1.ir.ReturnType.table:type_name -> ratel.v1.ir.TableReturn
-	24, // 32: ratel.v1.ir.Function.name:type_name -> ratel.v1.ir.QualifiedName
+	25, // 32: ratel.v1.ir.Function.name:type_name -> ratel.v1.ir.QualifiedName
 	16, // 33: ratel.v1.ir.Function.arguments:type_name -> ratel.v1.ir.Argument
 	20, // 34: ratel.v1.ir.Function.returns:type_name -> ratel.v1.ir.ReturnType
 	2,  // 35: ratel.v1.ir.Function.volatility:type_name -> ratel.v1.ir.Volatility
 	4,  // 36: ratel.v1.ir.Function.null_input:type_name -> ratel.v1.ir.NullInputBehavior
 	3,  // 37: ratel.v1.ir.Function.parallel:type_name -> ratel.v1.ir.ParallelSafety
-	28, // 38: ratel.v1.ir.Function.sql_body:type_name -> ratel.v1.ir.SelectStmt
-	25, // 39: ratel.v1.ir.Function.meta:type_name -> ratel.v1.ir.Metadata
-	24, // 40: ratel.v1.ir.Procedure.name:type_name -> ratel.v1.ir.QualifiedName
-	16, // 41: ratel.v1.ir.Procedure.arguments:type_name -> ratel.v1.ir.Argument
-	28, // 42: ratel.v1.ir.Procedure.sql_body:type_name -> ratel.v1.ir.SelectStmt
-	25, // 43: ratel.v1.ir.Procedure.meta:type_name -> ratel.v1.ir.Metadata
-	30, // 44: ratel.v1.ir.Trigger.table:type_name -> ratel.v1.ir.ObjectRef
-	5,  // 45: ratel.v1.ir.Trigger.timing:type_name -> ratel.v1.ir.TriggerTiming
-	6,  // 46: ratel.v1.ir.Trigger.events:type_name -> ratel.v1.ir.TriggerEvent
-	7,  // 47: ratel.v1.ir.Trigger.level:type_name -> ratel.v1.ir.TriggerLevel
-	26, // 48: ratel.v1.ir.Trigger.when:type_name -> ratel.v1.ir.Expr
-	30, // 49: ratel.v1.ir.Trigger.function:type_name -> ratel.v1.ir.ObjectRef
-	25, // 50: ratel.v1.ir.Trigger.meta:type_name -> ratel.v1.ir.Metadata
-	51, // [51:51] is the sub-list for method output_type
-	51, // [51:51] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	29, // 38: ratel.v1.ir.Function.sql_body:type_name -> ratel.v1.ir.SelectStmt
+	26, // 39: ratel.v1.ir.Function.meta:type_name -> ratel.v1.ir.Metadata
+	28, // 40: ratel.v1.ir.Function.variadic_element:type_name -> ratel.v1.ir.TypeRef
+	22, // 41: ratel.v1.ir.Function.aggregate:type_name -> ratel.v1.ir.AggregateSignature
+	25, // 42: ratel.v1.ir.Procedure.name:type_name -> ratel.v1.ir.QualifiedName
+	16, // 43: ratel.v1.ir.Procedure.arguments:type_name -> ratel.v1.ir.Argument
+	29, // 44: ratel.v1.ir.Procedure.sql_body:type_name -> ratel.v1.ir.SelectStmt
+	26, // 45: ratel.v1.ir.Procedure.meta:type_name -> ratel.v1.ir.Metadata
+	31, // 46: ratel.v1.ir.Trigger.table:type_name -> ratel.v1.ir.ObjectRef
+	5,  // 47: ratel.v1.ir.Trigger.timing:type_name -> ratel.v1.ir.TriggerTiming
+	6,  // 48: ratel.v1.ir.Trigger.events:type_name -> ratel.v1.ir.TriggerEvent
+	7,  // 49: ratel.v1.ir.Trigger.level:type_name -> ratel.v1.ir.TriggerLevel
+	27, // 50: ratel.v1.ir.Trigger.when:type_name -> ratel.v1.ir.Expr
+	31, // 51: ratel.v1.ir.Trigger.function:type_name -> ratel.v1.ir.ObjectRef
+	26, // 52: ratel.v1.ir.Trigger.meta:type_name -> ratel.v1.ir.Metadata
+	53, // [53:53] is the sub-list for method output_type
+	53, // [53:53] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_ratel_v1_ir_routine_proto_init() }
@@ -2025,7 +2120,7 @@ func file_ratel_v1_ir_routine_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ratel_v1_ir_routine_proto_rawDesc), len(file_ratel_v1_ir_routine_proto_rawDesc)),
 			NumEnums:      8,
-			NumMessages:   16,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

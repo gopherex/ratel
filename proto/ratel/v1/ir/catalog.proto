@@ -6,6 +6,7 @@ import "ratel/v1/ir/common.proto";
 import "ratel/v1/ir/relation.proto";
 import "ratel/v1/ir/routine.proto";
 import "ratel/v1/ir/schema.proto";
+import "ratel/v1/ir/type.proto";
 
 option go_package = "github.com/gopherex/ratel/ir;ir";
 
@@ -39,6 +40,36 @@ message Schema {
   repeated RangeType ranges = 13;
   repeated Grant grants = 14;  // grants on objects of this schema
   Metadata meta = 15;
+  repeated BuiltinType builtin_types = 16;
+  repeated BuiltinOperator builtin_operators = 17;
+  repeated BuiltinCast builtin_casts = 18;
+}
+
+// BuiltinType preserves pg_type's overload-resolution metadata without OIDs.
+message BuiltinType {
+  TypeRef type = 1;
+  string category = 2; // pg_type.typcategory
+  bool preferred = 3;
+  TypeRef base = 4; // domain base, when present
+  TypeRef range_subtype = 5; // range or multirange subtype
+}
+
+// BuiltinOperator identifies unary/binary operators by their operand types.
+message BuiltinOperator {
+  string name = 1;
+  TypeRef left = 2; // absent for prefix operators
+  TypeRef right = 3;
+  TypeRef result = 4;
+  QualifiedName function = 5; // implementing function's input signature
+}
+
+// BuiltinCast contains implicit and assignment casts, never explicit-only casts.
+message BuiltinCast {
+  TypeRef source = 1;
+  TypeRef target = 2;
+  string context = 3; // pg_cast.castcontext: i (implicit), a (assignment)
+  string method = 4; // pg_cast.castmethod: f (function), b (binary), i (I/O)
+  QualifiedName function = 5; // absent for binary and I/O casts
 }
 
 // Catalog is the whole database snapshot: the single contract between the

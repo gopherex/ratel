@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gopherex/ratel/ir"
-
+	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
@@ -68,13 +67,14 @@ func TestBuiltinSnapshot(t *testing.T) {
 	parse.Warm()
 	t.Parallel()
 
-	builtin := &ir.Schema{Name: "pg_catalog", Functions: []*ir.Function{{
-		Name:      &ir.QualifiedName{Parts: []string{"pg_catalog", "abs", "int4"}},
-		Arguments: []*ir.Argument{{Type: &ir.TypeRef{PgName: "int4"}}},
-	}}}
-	files := []catalog.File{{Name: "builtin.sql", SQL: `CREATE TABLE a(id int DEFAULT abs(-1));`}}
+	signatures, err := builtins.For(17)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	result, err := catalog.Build(files, 17, []*ir.Schema{builtin})
+	files := []catalog.File{{Name: "builtin.sql", SQL: `CREATE TABLE a(id int DEFAULT abs((-1)::int4));`}}
+
+	result, err := catalog.Build(files, 17, signatures)
 	if err != nil {
 		t.Fatal(err)
 	}
