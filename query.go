@@ -86,6 +86,7 @@ type Select[M any] struct {
 	after    []any  // keyset values matching orders
 	lock     string // FOR UPDATE / FOR SHARE clause
 	wait     string // SKIP LOCKED / NOWAIT; requires a lock
+	joins    []func(writer *sqlWriter, alias string) error
 }
 
 // From starts a SELECT over a generated descriptor, static query, or another SELECT.
@@ -163,7 +164,7 @@ func (q Select[M]) SQL() (Statement, error) {
 // plain reports a SELECT without added clauses.
 func (q Select[M]) plain() bool {
 	return !q.hasWhere && len(q.orders) == 0 && !q.limit.Set && !q.offset.Set && q.after == nil &&
-		q.lock == "" && q.wait == ""
+		q.lock == "" && q.wait == "" && len(q.joins) == 0
 }
 
 // verbatim reports a plain SELECT over a static query, which runs the
@@ -171,10 +172,26 @@ func (q Select[M]) plain() bool {
 func (q Select[M]) verbatim() bool { return q.source.static != nil && q.plain() }
 
 func (q Select[M]) appendSQL(writer *sqlWriter) error {
-	if !q.source.table.valid() || q.limit.V < 0 || q.offset.V < 0 {
+	if !q.source.table.valid() || q.limit.V < 0 || q.offset.V < 0 ||
+		(q.after != nil && len(q.after) != len(q.orders)) || (q.wait != "" && q.lock == "") {
 		return ErrInvalidQuery
 	}
 
+	if err := q.appendFrom(writer); err != nil {
+		return err
+	}
+
+	q.appendWhere(writer)
+	q.appendOrder(writer)
+	q.appendPagination(writer)
+	writer.WriteString(q.lock)
+	writer.WriteString(q.wait)
+
+	return nil
+}
+
+// appendFrom renders the projection, the source as "q" and the joins.
+func (q Select[M]) appendFrom(writer *sqlWriter) error {
 	if q.source.render == nil {
 		if q.source.table.selectSQL == "" {
 			return ErrInvalidQuery
@@ -193,10 +210,17 @@ func (q Select[M]) appendSQL(writer *sqlWriter) error {
 		writer.WriteString(` AS "q"`)
 	}
 
-	if (q.after != nil && len(q.after) != len(q.orders)) || (q.wait != "" && q.lock == "") {
-		return ErrInvalidQuery
+	for index, join := range q.joins {
+		if err := join(writer, "j"+strconv.Itoa(index)); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+// appendWhere conjoins the predicates and the keyset condition.
+func (q Select[M]) appendWhere(writer *sqlWriter) {
 	switch {
 	case q.hasWhere && q.after != nil:
 		writer.WriteString(" WHERE ")
@@ -207,14 +231,8 @@ func (q Select[M]) appendSQL(writer *sqlWriter) error {
 	case q.after != nil:
 		writer.WriteString(" WHERE ")
 		q.keyset().appendSQL(writer)
+	default:
 	}
-
-	q.appendOrder(writer)
-	q.appendPagination(writer)
-	writer.WriteString(q.lock)
-	writer.WriteString(q.wait)
-
-	return nil
 }
 
 func (q Select[M]) appendOrder(writer *sqlWriter) {

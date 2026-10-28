@@ -389,8 +389,12 @@ n, err := db.From(app.Users).Where(...).Count(ctx)
 ```
 
 - `Where` takes `ratel.Cond[M]` for the query's model only; a condition on
-  another table does not compile. Joins take `ratel.Cond2[M, M2]`
-  (`app.Users.ManagerID.EqCol(app.Users.ID)` style column comparisons).
+  another table does not compile. `Join(source, on)` inner-joins another
+  descriptor, static query or SELECT on a `ratel.Cond2[M, M2]`
+  (`app.Users.ID.EqCol(app.Orders.UserID)` style column comparisons) as
+  `"j0"`, `"j1"`, ...; the result stays `M`, and a row repeats once per match,
+  so existence is `rel.Has`. A static query joins only while no earlier
+  argument is bound, since its own markers start at `$1`.
 - `Col[M, V]` has comparison, `In`, range and pattern operators typed by `V`;
   `NullCol[M, V]` adds `IsNull` and `IsNotNull`.
 - Terminals: `One` (exactly one row; `ErrNotFound` for zero,

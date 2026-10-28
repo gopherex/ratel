@@ -61,6 +61,27 @@ func TestSelectClauses(t *testing.T) {
 	}
 }
 
+func TestJoin(t *testing.T) {
+	t.Parallel()
+
+	users, orders := relationDescriptors()
+	userID := ratel.NewCol[relationOrder, int64]("user_id")
+	orderID := ratel.NewCol[relationOrder, int64]("id")
+	database := ratel.New(&pgx.Conn{})
+
+	query := database.From(users).Join(orders, users.ID.EqCol(userID)).Where(users.ID.Gt(1)).
+		Join(database.From(orders).Where(orderID.Gt(9)), users.ID.EqCol(userID))
+
+	statement, err := query.SQL()
+	want := `SELECT "q"."id" FROM "app"."users" AS "q" JOIN "app"."orders" AS "j0" ON "q"."id" = "j0"."user_id"` +
+		` JOIN (SELECT "q"."id", "q"."user_id" FROM "app"."orders" AS "q" WHERE "q"."id" > $1) AS "j1"` +
+		` ON "q"."id" = "j1"."user_id" WHERE "q"."id" > $2`
+
+	if err != nil || statement.SQL != want || !reflect.DeepEqual(statement.Args, []any{int64(9), int64(1)}) {
+		t.Fatalf("got %+v, %v; want %s", statement, err, want)
+	}
+}
+
 func TestSelectClausesInvalid(t *testing.T) {
 	t.Parallel()
 

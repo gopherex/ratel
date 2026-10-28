@@ -53,6 +53,32 @@ func (q Select[M]) keyset() Cond[M] {
 	}}
 }
 
+// Join inner-joins another source on a typed join predicate; the result stays
+// the query's model. A row repeats once per match: for existence, use a
+// relation's Has.
+func (q Select[M]) Join[N any](other Source[N], predicate Cond2[M, N]) Select[M] {
+	joined := other.ratelSource()
+
+	q.joins = append(append([]func(*sqlWriter, string) error{}, q.joins...), func(writer *sqlWriter, alias string) error {
+		writer.WriteString(" JOIN ")
+
+		if joined.render == nil {
+			writer.qualifiedColumn(joined.table.schema, joined.table.name)
+		} else if err := joined.render(writer); err != nil {
+			return err
+		}
+
+		writer.WriteString(" AS ")
+		writer.identifier(alias)
+		writer.WriteString(" ON ")
+		predicate.appendSQL(writer, "q", alias)
+
+		return nil
+	})
+
+	return q
+}
+
 // ForUpdate locks the selected rows against concurrent updates and deletes
 // until the transaction ends.
 func (q Select[M]) ForUpdate() Select[M] { return q.locked(" FOR UPDATE") }
