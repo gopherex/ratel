@@ -32,8 +32,10 @@ db := ratel.New(exec, ratel.WithTracerProvider(tp), ratel.WithExecMode(pgx.Query
   assertion test per type.
 - ratel creates no pools, opens no connections and has no transaction API.
   Transactions, isolation levels, savepoints for nested units and retry of
-  serialization failures come from the executor; with pgtx, every ratel call
-  inside `Do*` runs in the transaction carried by `ctx`.
+  serialization failures come from the executor; with pgtx (v1.1.4 or newer),
+  every ratel call inside `Do*` runs in the transaction carried by `ctx`, and
+  concurrent use of that transaction from several goroutines is refused with
+  pgtx's `tx.ErrTxInUse`, which ratel returns wrapped and unchanged.
 - `*ratel.DB` is a concrete type: generic methods cannot be declared on
   interfaces. It is safe for concurrent use when its executor is.
 - `WithExecMode` (and the per-call option `ratel.ExecMode(mode)`) passes a pgx
@@ -55,9 +57,9 @@ type User struct {
 	ID        int64
 	Email     string
 	Status    UserStatus      // enum type generated from the Catalog
-	ManagerID *int64          // nullable column: pointer
+	ManagerID ratel.Null[int64] // nullable column
 	CreatedAt time.Time
-	R         UserRelations   // loaded relations, tri-state
+	R         UserRelations     // loaded relations, tri-state
 }
 
 func (u *User) Orders() ([]Order, error) // ratel.ErrNotLoaded unless loaded
@@ -65,12 +67,13 @@ func (u *User) Orders() ([]Order, error) // ratel.ErrNotLoaded unless loaded
 type UserInsert struct {          // columns without a default are required
 	Email     string
 	Status    UserStatus
-	ManagerID *int64
+	ManagerID ratel.Null[int64]    // nullable, no default: zero value inserts NULL
 	ID        ratel.Opt[int64]     // identity: omitted unless set
 	CreatedAt ratel.Opt[time.Time] // DEFAULT now(): omitted unless set
+	// a nullable column with a default would be ratel.Opt[ratel.Null[T]]
 }
 
-var Users = usersTable{...}       // descriptor
+var Users = usersTable{...}       // descriptor: immutable, dependency-free, generated code only
 
 type usersTable struct {
 	ratel.Table[User]
@@ -89,9 +92,19 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error // for pgxpool Aft
 Rules:
 
 - The model is a plain struct; columns, scanner and relations live in the
-  descriptor. Nullable columns are pointer fields in the model and
+  descriptor. Nullable columns are `ratel.Null[V]` fields in the model and
   `NullCol[M, V]` in the descriptor, so operators take `V`
   (`ManagerID.Eq(int64)`, `IsNull()`).
+- Optional values are value types, never pointers:
+  - `ratel.Null[T]`: a value or SQL NULL; `ratel.NullFrom(v)`,
+    `ratel.NullFromPtr(p)`, `Get() (T, bool)`, `GetOr(fallback)`, `Ptr()`;
+  - `ratel.Opt[T]`: set or not set (not set = the column is omitted and its
+    default applies); `ratel.OptFrom(v)`, `Get() (T, bool)`;
+  - both implement `IsZero()` (NULL, respectively not set), so JSON's
+    `omitzero` skips them, and scan and encode through pgx codecs natively,
+    without `database/sql` interfaces.
+- Non-null columns are plain fields: a wrapper would add a state the column
+  cannot have.
 - One model type per table, shared by the builder and by static queries.
   There are no bridge conversions between model kinds.
 - Scanners and argument lists are generated code. *Check:* the linter forbids
