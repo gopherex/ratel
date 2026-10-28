@@ -16,6 +16,7 @@ const (
 	DropType        Kind = "drop-type"
 	AddEnumValue    Kind = "add-enum-value"
 	RenameEnumValue Kind = "rename-enum-value"
+	RenameType      Kind = "rename-type"
 	AlterDomain     Kind = "alter-domain" // default, DROP NOT NULL, drop constraint
 	DomainNotNull   Kind = "domain-set-not-null"
 	DomainCheck     Kind = "domain-add-check"

@@ -29,6 +29,11 @@ func (p *planner) object(change *diff.Change) bool {
 		// Renamed by intent, before the values added next to it.
 		p.add(change, Expand, Short, statement(change.SQL, safety.RenameEnumValue, "", ""))
 		p.steps[len(p.steps)-1].Allow = append(p.steps[len(p.steps)-1].Allow, "RTL-C01")
+	case change.Kind == diff.RenameType:
+		// Renamed by intent and first: later changes name the new type.
+		p.add(change, Expand, Short, statement(change.SQL, safety.RenameType, "", ""))
+		p.steps[len(p.steps)-1].Allow = append(p.steps[len(p.steps)-1].Allow, "RTL-C01")
+		p.env.Current = diff.Requalified(p.env.Current, nameOf(change.Before), nameOf(change.Key))
 	case change.Kind == diff.AddEnumValue:
 		// A value is usable only after its transaction commits: its own step.
 		p.add(change, Expand, Short, statement(change.SQL, safety.AddEnumValue, "", ""))

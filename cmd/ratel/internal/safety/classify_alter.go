@@ -162,6 +162,8 @@ func (c *Classifier) rename(statement *pg.RenameStmt) []Operation {
 		return []Operation{{Kind: RenameConstraint, Relation: relation}}
 	case pg.ObjectType_OBJECT_INDEX:
 		return []Operation{{Kind: RenameIndex, Relation: relation}}
+	case pg.ObjectType_OBJECT_TYPE, pg.ObjectType_OBJECT_DOMAIN:
+		return []Operation{{Kind: RenameType}}
 	default:
 		return []Operation{{Kind: Unknown}}
 	}

@@ -92,7 +92,7 @@ func objectRule(kind Kind) (rule, bool) {
 	case CreateSchema, CreateExtension, AlterExtension, CreateType, AlterDomain, CreateRoutine, ReplaceRoutine,
 		DomainCheckNotValid:
 		return metadata(NoLock), true
-	case RenameEnumValue:
+	case RenameEnumValue, RenameType:
 		return rule{compat: Breaking, codes: []string{codeRename}}, true
 	case DropSchema:
 		return dropping(NoLock, Data, codeDropData), true

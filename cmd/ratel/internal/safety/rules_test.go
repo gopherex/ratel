@@ -12,7 +12,8 @@ import (
 func kinds() []safety.Kind {
 	return []safety.Kind{
 		safety.CreateSchema, safety.DropSchema, safety.CreateExtension, safety.AlterExtension, safety.DropExtension,
-		safety.CreateType, safety.DropType, safety.AddEnumValue, safety.RenameEnumValue, safety.AlterDomain,
+		safety.CreateType, safety.DropType, safety.AddEnumValue, safety.RenameEnumValue, safety.RenameType,
+		safety.AlterDomain,
 		safety.DomainNotNull, safety.DomainCheck, safety.DomainCheckNotValid, safety.DomainValidate,
 		safety.CreateSequence, safety.AlterSequence, safety.DropSequence, safety.CreateRoutine, safety.ReplaceRoutine,
 		safety.DropRoutine, safety.CreateTable, safety.CreatePartition, safety.DropTable, safety.RenameTable,

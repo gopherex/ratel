@@ -1,25 +1,23 @@
 package safety
 
 import (
-	"strings"
-
 	pg "github.com/pganalyze/pg_query_go/v6"
 
+	"github.com/gopherex/ratel/cmd/ratel/internal/ident"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
 // Classifier turns hand-written statements into operations, naming
 // relations as introspection renders them so they match Env.
 type Classifier struct {
-	parser parse.Parser
 	env    Env
-	quoted map[string]string
+	quoter *ident.Quoter
 }
 
 // NewClassifier classifies statements against env; parser decides which
 // names are keywords that need quoting.
 func NewClassifier(parser parse.Parser, env Env) *Classifier {
-	return &Classifier{parser: parser, env: env, quoted: make(map[string]string)}
+	return &Classifier{env: env, quoter: ident.New(parser)}
 }
 
 // Operations is what one parsed statement does. Statements that change
@@ -257,7 +255,7 @@ func (c *Classifier) name(relation *pg.RangeVar) string {
 		schema = "public"
 	}
 
-	return c.quote(schema) + "." + c.quote(relation.GetRelname())
+	return c.quoter.Qualified(schema, relation.GetRelname())
 }
 
 // qualified is a "schema.name" from a list of name parts.
@@ -271,50 +269,5 @@ func (c *Classifier) qualified(items []*pg.Node) string {
 		parts = append([]string{"public"}, parts...)
 	}
 
-	for index, part := range parts {
-		parts[index] = c.quote(part)
-	}
-
-	return strings.Join(parts, ".")
-}
-
-// quote quotes an identifier unless it is lower case, simple and not a
-// keyword PostgreSQL reserves in any position.
-func (c *Classifier) quote(name string) string {
-	if quoted, ok := c.quoted[name]; ok {
-		return quoted
-	}
-
-	quoted := `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-	if simple(name) && !c.keyword(name) {
-		quoted = name
-	}
-
-	c.quoted[name] = quoted
-
-	return quoted
-}
-
-func (c *Classifier) keyword(name string) bool {
-	scan, err := c.parser.Scan(name)
-	if err != nil || len(scan.GetTokens()) != 1 {
-		return true
-	}
-
-	kind := scan.GetTokens()[0].GetKeywordKind()
-
-	return kind != pg.KeywordKind_NO_KEYWORD && kind != pg.KeywordKind_UNRESERVED_KEYWORD
-}
-
-func simple(name string) bool {
-	for index, char := range name {
-		letter := char >= 'a' && char <= 'z' || char == '_'
-		suffix := index > 0 && (char >= '0' && char <= '9' || char == '$')
-
-		if !letter && !suffix {
-			return false
-		}
-	}
-
-	return name != ""
+	return c.quoter.Qualified(parts...)
 }

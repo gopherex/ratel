@@ -9,6 +9,7 @@ package probe
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -59,13 +60,39 @@ func Env(
 		return plan.Env{}, err
 	}
 
+	renamed := env.Safety
+	renamed.Relations = maps.Clone(env.Safety.Relations)
+
 	for index := range changes {
-		if err := probe(ctx, transaction, &changes[index], &env); err != nil {
+		if err := rename(ctx, transaction, &changes[index], &renamed); err != nil {
+			return plan.Env{}, err
+		}
+
+		if err := probe(ctx, transaction, &changes[index], &env, &renamed); err != nil {
 			return plan.Env{}, err
 		}
 	}
 
 	return env, nil
+}
+
+// rename applies a table or type rename in the probe's transaction, so the
+// changes after it, which name the new table or type, probe as planned.
+func rename(ctx context.Context, transaction pgx.Tx, change *diff.Change, renamed *safety.Env) error {
+	if change.Kind != diff.RenameTable && change.Kind != diff.RenameType {
+		return nil
+	}
+
+	if _, err := transaction.Exec(ctx, change.SQL); err != nil {
+		return fmt.Errorf("probe: %s: %w", change.Key, err)
+	}
+
+	if change.Kind == diff.RenameTable {
+		_, target, _ := strings.Cut(change.Key, " ")
+		renamed.Relations[target] = renamed.Relations[change.Table]
+	}
+
+	return nil
 }
 
 // relations are the tables, views and sequences of the namespaces with
@@ -177,9 +204,9 @@ GROUP BY c.relfilenode`
 
 // probe runs a column change on an empty copy of its table under a
 // savepoint and records whether the table or its indexes got new files.
-func probe(ctx context.Context, transaction pgx.Tx, change *diff.Change, env *plan.Env) error {
+func probe(ctx context.Context, transaction pgx.Tx, change *diff.Change, env *plan.Env, renamed *safety.Env) error {
 	prefix := "ALTER TABLE " + change.Table + " "
-	if !probed(change.Kind) || !env.Safety.Exists(change.Table) || !strings.HasPrefix(change.SQL, prefix) {
+	if !probed(change.Kind) || !renamed.Exists(change.Table) || !strings.HasPrefix(change.SQL, prefix) {
 		return nil
 	}
 

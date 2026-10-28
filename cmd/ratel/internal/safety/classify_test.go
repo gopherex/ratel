@@ -44,6 +44,8 @@ func classifyCases() []struct {
 		{"CREATE TYPE app.r AS RANGE (subtype = int4)", []safety.Operation{op(safety.CreateType, "", "")}},
 		{"ALTER TYPE app.e ADD VALUE 'b'", []safety.Operation{op(safety.AddEnumValue, "", "")}},
 		{"ALTER TYPE app.e RENAME VALUE 'a' TO 'b'", []safety.Operation{op(safety.RenameEnumValue, "", "")}},
+		{"ALTER TYPE app.e RENAME TO f", []safety.Operation{op(safety.RenameType, "", "")}},
+		{"ALTER DOMAIN app.d RENAME TO f", []safety.Operation{op(safety.RenameType, "", "")}},
 		{"ALTER DOMAIN app.d SET NOT NULL", []safety.Operation{op(safety.DomainNotNull, "", "")}},
 		{"ALTER DOMAIN app.d ADD CONSTRAINT c CHECK (VALUE > 0)", []safety.Operation{op(safety.DomainCheck, "", "")}},
 		{

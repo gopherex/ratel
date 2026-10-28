@@ -14,6 +14,7 @@ const (
 
 	CreateType      Kind = "create type"
 	DropType        Kind = "drop type"
+	RenameType      Kind = "rename type"
 	AddEnumValue    Kind = "add enum value"
 	RenameEnumValue Kind = "rename enum value"
 	// RemoveEnumValue removes or reorders labels; no PostgreSQL statement

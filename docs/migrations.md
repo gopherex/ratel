@@ -76,7 +76,14 @@ type Safety struct {
   with `SET LOCAL TimeZone = 'UTC'`, so the probe and production see the same
   conversion.
 - The same probe reads, from `pg_depend`, the objects using each view,
-  routine and type, so a replacement knows what to recreate.
+  routine and type, so a replacement knows what to recreate. Table and type
+  renames run first in the probe's transaction, so the changes after them
+  probe under the new names.
+- Intents are read from the annotations of the desired catalog and keyed
+  like the rendering: `@ratel.renamed` on a table, type or column,
+  `@ratel.retype` and `@ratel.backfill` on a column, `@ratel.allow` on any
+  object. A constraint or index renamed with the same definition needs no
+  intent: the diff finds the rename.
 - Columns are compared by name. A column a migration adds comes last in its
   table whatever its place in the schema files; diff and drift ignore column
   order.
@@ -147,6 +154,7 @@ emitted as short DDL under the lock guards.
 | detach partition, no default partition | `DETACH PARTITION ... CONCURRENTLY` (long DDL), then the drop of the `CHECK` it leaves behind (short DDL); a partition moving to another bound or parent moves in expand, one becoming a plain table leaves in contract |
 | detach partition, default partition exists | concurrent detach is not supported: `DETACH PARTITION` as short DDL |
 | enum: add value | `ALTER TYPE ... ADD VALUE [BEFORE\|AFTER]` in its own step, committed before any step that uses the value (on 17+ not needed when the type is created in the same transaction) |
+| rename type or domain | `ALTER TYPE` or `ALTER DOMAIN ... RENAME TO` (short DDL), first in expand like a table rename (`@ratel.renamed` on the type) |
 | enum: rename value | `ALTER TYPE ... RENAME VALUE` (short DDL in expand, before the values added next to it; `@ratel.renamed` on the value is the consent to `RTL-C01`) |
 | enum: remove or reorder values | PostgreSQL has no way to drop or move a value: `RTL-D05`; written as a hand-written migration |
 | domain: set or drop default, drop not null, drop constraint | short DDL |

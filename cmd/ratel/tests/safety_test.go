@@ -121,6 +121,7 @@ func objectSamples() []lockSample {
 		sample(safety.DropType, "", "", `DROP TYPE app.e`),
 		sample(safety.AddEnumValue, "", "", `ALTER TYPE app.e ADD VALUE 'b'`),
 		sample(safety.RenameEnumValue, "", "", `ALTER TYPE app.e RENAME VALUE 'a' TO 'z'`),
+		sample(safety.RenameType, "", "", `ALTER TYPE app.e RENAME TO e3`),
 		sample(safety.AlterDomain, "", "", `ALTER DOMAIN app.d SET DEFAULT 1`),
 		sample(safety.DomainNotNull, "", "", `ALTER DOMAIN app.d SET NOT NULL`),
 		sample(safety.DomainCheck, "", "", `ALTER DOMAIN app.d ADD CONSTRAINT d2 CHECK (VALUE > -5)`),
