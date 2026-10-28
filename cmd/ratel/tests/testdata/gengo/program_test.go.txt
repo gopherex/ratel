@@ -113,8 +113,15 @@ func TestGenerated(t *testing.T) {
 	}
 
 	tag, err := queries.CreateTag(ctx, db, 1, "go")
-	if err != nil || tag.Label != "go" {
+	if err != nil || tag.Label != "go" || tag.Kind != app.TagKindTopic {
 		t.Fatalf("CreateTag = %+v, %v", tag, err)
+	}
+
+	brand := app.NewTagInsert(9, "acme")
+	brand.Kind = ratel.OptFrom(app.TagKindBrand)
+
+	if _, err := db.Insert(app.Tags, brand).Exec(ctx, ratel.ExecMode(pgx.QueryExecModeSimpleProtocol)); err != nil {
+		t.Fatalf("insert checked enum in simple protocol = %v", err)
 	}
 
 	copied, err := queries.CopyTags(ctx, db, slices.Values([]queries.CopyTagsParams{{ID: 2, Label: "sql"}, {ID: 3, Label: "pg"}}))
@@ -164,7 +171,7 @@ func TestGenerated(t *testing.T) {
 		db.From(app.Users).Where(app.Users.ID.Eq(bob.ID)).BatchOne(&single),
 		db.Update(app.Tags).Set(app.Tags.Label.To("relabeled")).All().Batch(&retagged),
 	)
-	if err != nil || len(everyone) != 2 || single.ID != bob.ID || retagged != 2 {
+	if err != nil || len(everyone) != 2 || single.ID != bob.ID || retagged != 3 {
 		t.Fatalf("Batch = %v, %d users, %+v, %d tags", err, len(everyone), single, retagged)
 	}
 

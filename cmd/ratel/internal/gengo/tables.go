@@ -108,6 +108,10 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 
 		file.imports = append(file.imports, ratelImport, "github.com/jackc/pgx/v5")
 
+		if err := s.checkEnums(file, names, table, columns); err != nil {
+			return err
+		}
+
 		for _, value := range columns {
 			s.use(file, value.typ, value.goType, value.nullable || value.insert == insertOptional)
 		}

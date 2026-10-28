@@ -141,8 +141,12 @@ Rules:
   `ratel.ErrInvalidInsert` before any SQL is sent. Nullable columns without a
   default are exported `ratel.Null` fields; `ratel.Opt` marks columns with a
   default, identity or generated value.
-- Enums come from the Catalog: a PostgreSQL enum type, or a `text` column with
-  an `IN (...)` check, becomes a Go string type with one constant per value.
+- Enums come from the Catalog: a PostgreSQL enum type, or a `text`, `varchar`
+  or `char` column with a `CHECK (column IN ('a', ...))` of string literals,
+  becomes a Go string type with one constant per value; the column's type is
+  `<Model><Column>` (`TagKind`, constants `TagKindTopic`, ...) unless
+  `@go.type` overrides it. `RegisterTypes` maps it to the column's text type
+  for pgx's parameter inference.
 - Views and materialized views get a model and a read-only descriptor (no
   write methods).
 - Composite primary and foreign keys are supported everywhere; batched loading

@@ -376,10 +376,19 @@ var ErrOrdersUserIDFkey = &ratel.ConstraintError{Kind: ratel.ConstraintForeignKe
 // ErrOrdersUserIDNotNull matches a violation of orders_user_id_not_null on app.orders.
 var ErrOrdersUserIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_user_id_not_null", Columns: []string{"user_id"}}
 
+// TagKind is the CHECK (kind IN (...)) of tags.
+type TagKind string
+
+const (
+	TagKindTopic    TagKind = "topic"
+	TagKindBrandNew TagKind = "brand-new"
+)
+
 // Tag is a row of tags.
 type Tag struct {
 	ID    int32
 	Label string
+	Kind  TagKind
 	R     TagRelations
 }
 
@@ -400,7 +409,7 @@ func (m *Tag) OrderTags() ([]OrderTag, error) { return m.R.OrderTags.Get() }
 func scanTag(row pgx.Row) (Tag, error) {
 	var model Tag
 
-	err := row.Scan(&model.ID, &model.Label)
+	err := row.Scan(&model.ID, &model.Label, &model.Kind)
 
 	return model, err
 }
@@ -409,6 +418,7 @@ func scanTag(row pgx.Row) (Tag, error) {
 type TagInsert struct {
 	id    int32
 	label string
+	Kind  ratel.Opt[TagKind]
 	valid bool
 }
 
@@ -418,14 +428,16 @@ func NewTagInsert(id int32, label string) TagInsert {
 }
 
 var tagsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
-	ratel.NewTable("app", "tags", []string{"id", "label"}, scanTag,
+	ratel.NewTable("app", "tags", []string{"id", "label", "kind"}, scanTag,
 		ratel.PrimaryKey([]string{"id"}, func(model Tag) []any { return []any{model.ID} }),
 		ratel.Constraints[Tag](
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_id_not_null", Columns: []string{"id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintCheck, Schema: "app", Table: "tags", Constraint: "tags_kind_check", Columns: []string{}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_kind_not_null", Columns: []string{"kind"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_label_not_null", Columns: []string{"label"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "tags", Constraint: "tags_pkey", Columns: []string{"id"}},
 		),
-		ratel.ModelValues(func(model Tag) []any { return []any{model.ID, model.Label} })),
+		ratel.ModelValues(func(model Tag) []any { return []any{model.ID, model.Label, model.Kind} })),
 	func(insert TagInsert) bool { return insert.valid },
 	ratel.InsertField[TagInsert]{
 		Name: "id", Type: pgx.Identifier{"pg_catalog", "int4"},
@@ -451,6 +463,18 @@ var tagsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 			return out
 		},
 	},
+	ratel.InsertField[TagInsert]{
+		Name: "kind", Type: pgx.Identifier{"pg_catalog", "text"},
+		Value: func(insert TagInsert) (any, bool) { return insert.Kind.V, insert.Kind.Set },
+		Values: func(rows []TagInsert) any {
+			out := make([]TagKind, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.Kind.V
+			}
+
+			return out
+		},
+	},
 ))
 
 // Tags describes app.tags.
@@ -458,6 +482,7 @@ var Tags = tagsTable{
 	KeyedTable: tagsBase,
 	ID:         ratel.NewCol[Tag, int32]("id"),
 	Label:      ratel.NewCol[Tag, string]("label"),
+	Kind:       ratel.NewCol[Tag, TagKind]("kind"),
 	Orders: ratel.NewRel[Tag, Order](ordersBase, ratel.RelMany,
 		[]ratel.RelKey[Tag]{{
 			Column: "tag_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int4"},
@@ -497,6 +522,7 @@ type tagsTable struct {
 	ratel.KeyedTable[Tag, TagInsert]
 	ID        ratel.Col[Tag, int32]
 	Label     ratel.Col[Tag, string]
+	Kind      ratel.Col[Tag, TagKind]
 	Orders    ratel.Rel[Tag, Order]
 	OrderTags ratel.Rel[Tag, OrderTag]
 }
@@ -510,6 +536,12 @@ func (t tagsTable) InSchema(schema string) tagsTable {
 
 // ErrTagsIDNotNull matches a violation of tags_id_not_null on app.tags.
 var ErrTagsIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_id_not_null", Columns: []string{"id"}}
+
+// ErrTagsKindCheck matches a violation of tags_kind_check on app.tags.
+var ErrTagsKindCheck = &ratel.ConstraintError{Kind: ratel.ConstraintCheck, Schema: "app", Table: "tags", Constraint: "tags_kind_check", Columns: []string{}}
+
+// ErrTagsKindNotNull matches a violation of tags_kind_not_null on app.tags.
+var ErrTagsKindNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_kind_not_null", Columns: []string{"kind"}}
 
 // ErrTagsLabelNotNull matches a violation of tags_label_not_null on app.tags.
 var ErrTagsLabelNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_label_not_null", Columns: []string{"label"}}
@@ -887,13 +919,20 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	}
 
 	types.RegisterDefaultPgType(Address{}, "app.address")
+	types.RegisterDefaultPgType(TagKind(""), "text")
 	types.RegisterDefaultPgType(UserStatus(""), "app.user_status")
 	types.RegisterDefaultPgType([]*Address(nil), "app._address")
+	types.RegisterDefaultPgType([]*TagKind(nil), "_text")
 	types.RegisterDefaultPgType([]*UserStatus(nil), "app._user_status")
 	types.RegisterDefaultPgType([]Address(nil), "app._address")
+	types.RegisterDefaultPgType([]TagKind(nil), "_text")
 	types.RegisterDefaultPgType([]UserStatus(nil), "app._user_status")
 
 	if err := ratel.RegisterValue[Address](types, "app.address"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[TagKind](types, "text"); err != nil {
 		return err
 	}
 

@@ -18,4 +18,8 @@ CREATE TABLE app.orders (
   user_id bigint NOT NULL REFERENCES app.users (id),
   total numeric(12, 2) NOT NULL
 );
-CREATE TABLE app.tags (id int PRIMARY KEY, label text NOT NULL);
+CREATE TABLE app.tags (
+  id int PRIMARY KEY,
+  label text NOT NULL,
+  kind text NOT NULL DEFAULT 'topic' CHECK (kind IN ('topic', 'brand'))
+);

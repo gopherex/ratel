@@ -348,7 +348,7 @@ func EmailsOfManagersAll(ctx context.Context, db *ratel.DB) iter.Seq2[EmailsOfMa
 func scanCreateTag(row pgx.Row) (app.Tag, error) {
 	var model app.Tag
 
-	if err := row.Scan(&model.ID, &model.Label); err != nil {
+	if err := row.Scan(&model.ID, &model.Label, &model.Kind); err != nil {
 		return model, err
 	}
 
@@ -357,7 +357,7 @@ func scanCreateTag(row pgx.Row) (app.Tag, error) {
 
 // CreateTag returns the query's row; ratel.ErrNotFound when there is none.
 func CreateTag(ctx context.Context, db *ratel.DB, id int32, label string) (app.Tag, error) {
-	return db.From(ratel.NewQuery([]string{"id", "label"}, scanCreateTag, "INSERT INTO app.tags (id, label) VALUES ($1, $2) RETURNING *", id, label)).One(ctx)
+	return db.From(ratel.NewQuery([]string{"id", "label", "kind"}, scanCreateTag, "INSERT INTO app.tags (id, label) VALUES ($1, $2) RETURNING *", id, label)).One(ctx)
 }
 
 // DeleteTag runs the query.
