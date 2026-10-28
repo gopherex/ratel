@@ -45,6 +45,10 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[1] {
+	case "check":
+		return check(args[2:], stderr)
+	case "generate":
+		return generate(args[2:], stderr)
 	case "dump":
 		return dump(args[2:], stdout, stderr)
 	case "version":
@@ -61,5 +65,5 @@ func Main(args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: ratel <command> [flags]")
-	fmt.Fprintln(w, "commands: version, dump")
+	fmt.Fprintln(w, "commands: version, check, generate, dump")
 }

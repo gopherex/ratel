@@ -19,9 +19,23 @@ One binary, `ratel`, installed with
 | `ratel migrate contract --url <dsn>` | runs pending steps of the `contract` phase | target |
 | `ratel migrate drift --url <dsn>` | introspects the target and diffs it against the state the applied migrations should have produced | target and dev database |
 
+### Check and generate
+
+`ratel check [--config <path>]` builds the catalog, infers views and queries,
+and prints warnings; a failure prints the error and exits `1`.
+`ratel generate [--config <path>]` does the same, then runs every configured
+plugin in order and writes its files under its `out`, relative to the
+configuration file; the request's `out_dir` is that absolute directory. Files
+are replaced atomically (a temporary file renamed over the target).
+`out/.ratel-manifest` lists the files the plugin wrote, one slash-separated
+path per line; the next run deletes listed files that are absent now, and
+directories they leave empty, and never touches files the manifest does not
+list. A path through a symbolic link, inside the output directory or as the
+directory itself, is refused before anything is written.
+
 ### Dump
 
-`version` and `dump` are implemented commands. `dump` reads `ratel.yaml` from the
+`version`, `check`, `generate` and `dump` are implemented commands. `dump` reads `ratel.yaml` from the
 working directory, or the file selected by `--config <path>`. Source patterns
 and plugin paths are relative to that configuration file, not the working
 directory. Schema patterns support `**`, expand in sorted order and deduplicate
