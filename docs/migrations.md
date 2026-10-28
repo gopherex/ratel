@@ -201,6 +201,22 @@ CREATE INDEX CONCURRENTLY orders_user_id_idx ON app.orders (user_id);
 - `ratel.sum` holds a hash per file and a hash of the whole directory;
   `ratel migrate verify` fails on any edit, reorder or missing file.
 - A step id is the hash of the file name and the step's normalized SQL.
+- Header fields: `id`; `phase` (`expand`, `backfill`, `contract`); `tx`
+  (`in`, or `own` for a statement that cannot run in a transaction);
+  `class` (`short`, `long`, `backfill`); `locks` (relation and mode, as
+  `Safety` gives them); `pg` (the `postgres.version` planned for); `allow`
+  (copied lint codes); `ops` (each operation as
+  `kind:relation:other:rewrite`, so a step is assessed again without parsing
+  its SQL, which may use syntax newer than the parser's grammar); `key` (the
+  batching key of a backfill). Names in `locks`, `ops` and `key` are
+  URL-query escaped.
+- Statements are separated by `;` outside quotes, quoted identifiers,
+  dollar quotes and comments; splitting needs no parser.
+- A hand-written file may use headers without an `id`: a header starts a
+  step holding the statements up to the next one, with the given fields. A
+  statement outside any header is a step of its own in expand. Hand-written
+  steps are classified from their parse tree; a statement the parser cannot
+  read is assessed as the worst case.
 - A step header carries every `@ratel.allow` that the planner copied from the
   schema object that caused the step. In hand-written files, `@ratel.allow`
   is written in the comment directly before the statement.
@@ -273,7 +289,13 @@ destruction, `C` compatibility, `T` transaction structure, `P` practice.
   `@ratel.allow <code> reason=<text>`.
 - Breaking changes in the expand phase fail lint the same way.
 - Hand-written migration files are analysed with the same rules through the
-  same `Safety` records.
+  same `Safety` records; a planned step is checked for its transaction
+  structure and for breaking changes in expand, its recipe being the
+  planner's. `RTL-L01` is a step declared `class=long` (run without
+  `lock_timeout`) that takes a blocking lock. `RTL-D03` is reported for
+  planned type changes, whose old and new types the diff knows.
+- `RTL-P01` and `RTL-P02` check the desired schema; `@ratel.allow` on the
+  table or column allows them.
 
 | Code | Finding |
 |---|---|
@@ -307,7 +329,7 @@ destruction, `C` compatibility, `T` transaction structure, `P` practice.
 | RTL-T01 | statement that cannot run in a transaction inside one |
 | RTL-T02 | new enum value used in the same transaction (not reported on 17+ when the type is created in that transaction) |
 | RTL-T03 | slow work after an exclusive lock in the same transaction |
-| RTL-T04 | hand-written step without `lock_timeout` |
+| RTL-T04 | hand-written step overriding the runner's `lock_timeout` or `statement_timeout` |
 | RTL-T05 | exclusive locks on several tables in one transaction |
 | RTL-T06 | data change outside a backfill step |
 | RTL-P01 | FK columns without a supporting index (also reported for ORM relations) |
