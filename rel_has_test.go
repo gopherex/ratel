@@ -20,9 +20,10 @@ func TestHas(t *testing.T) {
 	join := ratel.NewRel(orders, ratel.RelMany, []ratel.RelKey[relationUser]{{
 		Column: "user_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
 		Values: func([]relationUser) any { return []int64{} },
-	}}, func(*relationUser, []relationOrder) {}, ratel.Through[relationUser, relationOrder]("app", "user_orders", "order_id"))
+	}}, func(*relationUser, []relationOrder) {},
+		ratel.Through[relationUser, relationOrder]("app", "user_orders", "order_id"))
 
-	const users_ = `SELECT "q"."id" FROM "app"."users" AS "q" WHERE `
+	const where = `SELECT "q"."id" FROM "app"."users" AS "q" WHERE `
 
 	for _, tc := range []struct {
 		name  string
@@ -32,18 +33,18 @@ func TestHas(t *testing.T) {
 	}{
 		{
 			"exists", database.From(users).Where(users.Orders.Has(orderID.Gt(5))),
-			users_ + `EXISTS (SELECT 1 FROM "app"."orders" AS "h0" WHERE "h0"."user_id" = "q"."id" AND "h0"."id" > $1)`,
+			where + `EXISTS (SELECT 1 FROM "app"."orders" AS "h0" WHERE "h0"."user_id" = "q"."id" AND "h0"."id" > $1)`,
 			[]any{int64(5)},
 		},
 		{
 			"relation where", database.From(users).Where(users.Orders.Where(orderID.Lt(9)).Has(orderID.Gt(5))),
-			users_ + `EXISTS (SELECT 1 FROM "app"."orders" AS "h0" WHERE "h0"."user_id" = "q"."id" AND ` +
+			where + `EXISTS (SELECT 1 FROM "app"."orders" AS "h0" WHERE "h0"."user_id" = "q"."id" AND ` +
 				`("h0"."id" < $1 AND "h0"."id" > $2))`,
 			[]any{int64(9), int64(5)},
 		},
 		{
 			"through", database.From(users).Where(join.Has(ratel.Cond[relationOrder]{})),
-			users_ + `EXISTS (SELECT 1 FROM "app"."orders" AS "h0" JOIN "app"."user_orders" AS "h0l" ON ` +
+			where + `EXISTS (SELECT 1 FROM "app"."orders" AS "h0" JOIN "app"."user_orders" AS "h0l" ON ` +
 				`"h0l"."order_id" = "h0"."id" WHERE "h0l"."user_id" = "q"."id" AND TRUE)`,
 			nil,
 		},
