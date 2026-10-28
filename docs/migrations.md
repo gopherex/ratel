@@ -80,7 +80,8 @@ type Safety struct {
   renames run first in the probe's transaction, so the changes after them
   probe under the new names.
 - Intents are read from the annotations of the desired catalog and keyed
-  like the rendering: `@ratel.renamed` on a table, type or column,
+  like the rendering: `@ratel.renamed` on a table, type or column (with
+  `value=` on an enum type, a label, keyed by its `quote_literal` form),
   `@ratel.retype` and `@ratel.backfill` on a column, `@ratel.allow` on any
   object. A constraint or index renamed with the same definition needs no
   intent: the diff finds the rename.
@@ -155,7 +156,7 @@ emitted as short DDL under the lock guards.
 | detach partition, default partition exists | concurrent detach is not supported: `DETACH PARTITION` as short DDL |
 | enum: add value | `ALTER TYPE ... ADD VALUE [BEFORE\|AFTER]` in its own step, committed before any step that uses the value (on 17+ not needed when the type is created in the same transaction) |
 | rename type or domain | `ALTER TYPE` or `ALTER DOMAIN ... RENAME TO` (short DDL), first in expand like a table rename (`@ratel.renamed` on the type) |
-| enum: rename value | `ALTER TYPE ... RENAME VALUE` (short DDL in expand, before the values added next to it; `@ratel.renamed` on the value is the consent to `RTL-C01`) |
+| enum: rename value | `ALTER TYPE ... RENAME VALUE` (short DDL in expand, before the values added next to it; `@ratel.renamed from=<old> value=<new>` on the type is the consent to `RTL-C01`) |
 | enum: remove or reorder values | PostgreSQL has no way to drop or move a value: `RTL-D05`; written as a hand-written migration |
 | domain: set or drop default, drop not null, drop constraint | short DDL |
 | domain: add check | `ALTER DOMAIN ... ADD CONSTRAINT ... NOT VALID` (short DDL), then `VALIDATE CONSTRAINT` (long DDL) |

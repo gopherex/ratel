@@ -203,6 +203,7 @@ namespace.
 | `@ratel.rel name=<Name> [inverse=<Name>]` | FK constraint or FK column | names the relation and its inverse; required when two FKs connect the same pair of tables |
 | `@ratel.norel` | FK constraint or FK column | the FK produces no relation |
 | `@ratel.renamed from=<old>` | table, column, constraint, index, type | rename intent for the migration engine |
+| `@ratel.renamed from=<old> value=<new>` | enum type, once per label | the label `<new>` is the label `<old>` renamed; may sit beside a rename of the type itself |
 | `@ratel.retype using=<sql expr>` | column | type change intent with the conversion expression |
 | `@ratel.backfill expr=<sql expr> [batch=<n>]` | column | how existing rows get a value when the column is added or becomes `NOT NULL` |
 | `@ratel.allow <RTL-code> reason=<text>` | schema object; statement in a hand-written migration | explicit permission for a change the planner cannot make safe, or a breaking change in expand; the planner copies it into the step header |

@@ -16,6 +16,7 @@ import (
 )
 
 const schemaV1 = `CREATE SCHEMA app;
+CREATE TYPE app.state AS ENUM ('new', 'done', E'it''s \\ odd');
 CREATE TABLE app.users (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, email text NOT NULL);
 CREATE TABLE app.orders (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -25,6 +26,9 @@ CREATE TABLE app.orders (
 CREATE INDEX orders_user_id ON app.orders (user_id);`
 
 const schemaV2 = `CREATE SCHEMA app;
+-- @ratel.renamed from=done value=finished
+-- @ratel.renamed from="it's \ odd" value="it's \ fine"
+CREATE TYPE app.state AS ENUM ('new', 'finished', E'it''s \\ fine');
 CREATE TABLE app.users (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   email text NOT NULL,
@@ -142,6 +146,12 @@ func TestMigrateCommands(t *testing.T) {
 	p.must("apply", "--url", url)
 	p.must("contract", "--url", url)
 	p.must("drift", "--url", url)
+
+	var labels string
+	if err := target.QueryRow(ctx, `SELECT string_agg(enumlabel, '|' ORDER BY enumsortorder) FROM pg_enum
+		WHERE enumtypid = 'app.state'::regtype`).Scan(&labels); err != nil || labels != `new|finished|it's \ fine` {
+		t.Fatalf("renamed labels = %q, %v", labels, err)
+	}
 
 	var filled bool
 	if err := target.QueryRow(ctx, `SELECT bool_and(status = 'active') FROM app.users`).Scan(&filled); err != nil ||

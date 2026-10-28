@@ -15,6 +15,7 @@ func testValidate(t *testing.T, parser parse.Parser) {
 
 	for _, tc := range []struct{ name, annotation, failure string }{
 		{"rename", "@ratel.renamed from=old", ""},
+		{"label rename off an enum", "@ratel.renamed from=old value=new", "label of an enum"},
 		{"missing key", "@ratel.renamed", "missing"},
 		{"extra value", "@ratel.renamed from=old extra", "positional"},
 		{"empty value", "@ratel.renamed from=\"\"", "empty"},
@@ -49,6 +50,43 @@ func testValidate(t *testing.T, parser parse.Parser) {
 			}
 
 			if len(meta.GetAnnotations()) != 1 {
+				t.Fatalf("annotations = %v", meta.GetAnnotations())
+			}
+		})
+	}
+}
+
+// testValidateLabels checks label renames on an enum: one per label, beside
+// a rename of the type itself.
+func testValidateLabels(t *testing.T, parser parse.Parser) {
+	t.Helper()
+
+	for _, tc := range []struct {
+		name     string
+		comments []string
+		failure  string
+	}{
+		{"labels and type", []string{
+			"@ratel.renamed from=mood", "@ratel.renamed from=a value=b", "@ratel.renamed from=c value=d",
+		}, ""},
+		{"same label twice", []string{"@ratel.renamed from=a value=b", "@ratel.renamed from=c value=b"}, "duplicate"},
+		{"type twice", []string{"@ratel.renamed from=a", "@ratel.renamed from=c"}, "duplicate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sql := "-- " + strings.Join(tc.comments, "\n-- ") + "\nCREATE TYPE e AS ENUM ('b', 'd');"
+			meta := &ir.Metadata{Source: &ir.SourceSpan{File: "schema.sql", EndOffset: uint64(len(sql))}}
+			target := annotate.Target{Object: &ir.ObjectRef{Kind: ir.ObjectKind_OBJECT_KIND_ENUM_TYPE}, Meta: meta}
+
+			_, err := annotate.Attach(parser, annotate.File{Name: "schema.sql", SQL: sql}, []annotate.Target{target}, nil)
+
+			switch {
+			case tc.failure == "" && err != nil:
+				t.Fatal(err)
+			case tc.failure != "" && (err == nil || !strings.Contains(err.Error(), tc.failure)):
+				t.Fatalf("error = %v, want %q", err, tc.failure)
+			case tc.failure == "" && len(meta.GetAnnotations()) != len(tc.comments):
 				t.Fatalf("annotations = %v", meta.GetAnnotations())
 			}
 		})

@@ -23,6 +23,7 @@ func TestAnnotate(t *testing.T) {
 		{"QueryFiles", testQueryFiles},
 		{"Scan", testScan},
 		{"Validate", testValidate},
+		{"ValidateLabels", testValidateLabels},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

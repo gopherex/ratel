@@ -5,6 +5,7 @@ package intent
 
 import (
 	"slices"
+	"strings"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -39,14 +40,18 @@ func From(catalog *ir.Catalog, quoter *ident.Quoter) Intents {
 			arguments[argument.GetKey()] = argument.GetValue()
 		}
 
-		switch annotation.GetName() {
-		case "renamed":
+		switch name := annotation.GetName(); {
+		case name == "renamed" && arguments["value"] != "":
+			// A label rename is keyed by the label, as the diff keys it.
+			_, typeName, _ := strings.Cut(key, " ")
+			result.Diff.Renamed["value "+typeName+" "+literal(arguments["value"])] = literal(arguments["from"])
+		case name == "renamed":
 			result.Diff.Renamed[key] = quoter.Quote(arguments["from"])
-		case "retype":
+		case name == "retype":
 			result.Diff.Retype[key] = arguments["using"]
-		case "backfill":
+		case name == "backfill":
 			result.Plan.Backfill[key] = arguments["expr"]
-		case "allow":
+		case name == "allow":
 			result.Plan.Allow[key] = append(result.Plan.Allow[key], arguments[""])
 		default:
 		}
@@ -60,6 +65,18 @@ func From(catalog *ir.Catalog, quoter *ident.Quoter) Intents {
 	}
 
 	return result
+}
+
+// literal renders a label as quote_literal does, which is how introspection
+// renders enum labels: quotes doubled, and an E string when it has a
+// backslash.
+func literal(label string) string {
+	quoted := "'" + strings.ReplaceAll(label, "'", "''") + "'"
+	if strings.Contains(label, `\`) {
+		return "E" + strings.ReplaceAll(quoted, `\`, `\\`)
+	}
+
+	return quoted
 }
 
 // walk calls visit for every annotation in a message tree.

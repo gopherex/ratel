@@ -26,7 +26,9 @@ CREATE TABLE app."Order" (
   note text NOT NULL
 );
 -- @ratel.renamed from=mood
-CREATE TYPE app.feeling AS ENUM ('ok');`
+-- @ratel.renamed from=fine value=ok
+-- @ratel.renamed from=sad value="it's \ bad"
+CREATE TYPE app.feeling AS ENUM ('ok', E'it''s \\ bad');`
 
 func TestFrom(t *testing.T) {
 	parser, err := parse.New(parse.Config{})
@@ -51,6 +53,7 @@ func TestFrom(t *testing.T) {
 	want := map[string]any{
 		"renamed": map[string]string{
 			`table app."Order"`: `"Old"`, `column app."Order".after`: "before", "type app.feeling": "mood",
+			"value app.feeling 'ok'": "'fine'", `value app.feeling E'it''s \\ bad'`: "'sad'",
 		},
 		"retype":   map[string]string{`column app."Order".amount`: "amount::numeric"},
 		"backfill": map[string]string{`column app."Order".note`: "'x'"},

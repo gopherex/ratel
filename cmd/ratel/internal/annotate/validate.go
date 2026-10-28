@@ -18,6 +18,8 @@ const (
 	relationAnnotation   = "rel"
 	noRelationAnnotation = "norel"
 	allowAnnotation      = "allow"
+	renamedAnnotation    = "renamed"
+	renamedValue         = "value"
 	notNullAnnotation    = "notnull"
 	nullableAnnotation   = "nullable"
 )
@@ -49,12 +51,13 @@ func coreRule(name string) (rule, bool) {
 		}, true
 	case noRelationAnnotation:
 		return rule{kinds: []ir.ObjectKind{column, ir.ObjectKind_OBJECT_KIND_CONSTRAINT}}, true
-	case "renamed":
+	case renamedAnnotation:
+		// With value= it renames one label of an enum, once per label.
 		return rule{kinds: []ir.ObjectKind{
 			ir.ObjectKind_OBJECT_KIND_TABLE, column, ir.ObjectKind_OBJECT_KIND_CONSTRAINT,
 			ir.ObjectKind_OBJECT_KIND_INDEX, ir.ObjectKind_OBJECT_KIND_ENUM_TYPE, ir.ObjectKind_OBJECT_KIND_DOMAIN_TYPE,
 			ir.ObjectKind_OBJECT_KIND_COMPOSITE_TYPE, ir.ObjectKind_OBJECT_KIND_RANGE_TYPE,
-		}, required: []string{"from"}}, true
+		}, required: []string{"from"}, optional: []string{renamedValue}, repeat: true}, true
 	case "retype":
 		return rule{kinds: []ir.ObjectKind{column}, required: []string{"using"}}, true
 	case "backfill":
@@ -89,6 +92,11 @@ func validate(parser parse.Parser, value *ir.AnnotationValue, target Target, que
 
 	if (value.GetName() == relationAnnotation || value.GetName() == noRelationAnnotation) && !target.ForeignKey {
 		return invalid(value.GetSource(), "annotation target is not a foreign key")
+	}
+
+	if value.GetName() == renamedAnnotation && argument(value, renamedValue) != "" &&
+		kind != ir.ObjectKind_OBJECT_KIND_ENUM_TYPE {
+		return invalid(value.GetSource(), "value= renames a label of an enum type")
 	}
 
 	if err := validateArgs(parser, value, contract); err != nil {
@@ -268,10 +276,21 @@ func contains(values []string, value string) bool {
 	return false
 }
 
+// argumentIdentity tells repeatable annotations apart: by their positional
+// value, a label rename by the label it names.
 func argumentIdentity(value *ir.AnnotationValue) string {
-	for _, argument := range value.GetArgs() {
-		if argument.GetKey() == "" {
-			return argument.GetValue()
+	if value.GetName() == renamedAnnotation {
+		return argument(value, renamedValue)
+	}
+
+	return argument(value, "")
+}
+
+// argument is the value of an annotation argument by key, empty when absent.
+func argument(value *ir.AnnotationValue, key string) string {
+	for _, current := range value.GetArgs() {
+		if current.GetKey() == key {
+			return current.GetValue()
 		}
 	}
 
