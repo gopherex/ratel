@@ -370,6 +370,45 @@ func TestBwBatchOutcomes(t *testing.T) {
 	}
 }
 
+// TestBatchRowWrites checks that a row write in a batch refuses when it
+// matches no row, as it does outside one.
+func TestBatchRowWrites(t *testing.T) {
+	t.Parallel()
+
+	users := keyedDescriptor(true)
+	user := readUser{ID: 7, Email: "a@x"}
+
+	for _, tc := range []struct {
+		name  string
+		write func(*ratel.DB) ratel.Write[readUser]
+		tag   string
+		want  error
+		count int64
+	}{
+		{
+			"delete missing", func(db *ratel.DB) ratel.Write[readUser] { return db.DeleteRow(users, user) }, "DELETE 0",
+			ratel.ErrNotFound, 0,
+		},
+		{"stale version", func(db *ratel.DB) ratel.Write[readUser] {
+			return db.Save(users, user).ExpectVersion(users.Email, "old")
+		}, "UPDATE 0", ratel.ErrStaleVersion, 0},
+		{"saved", func(db *ratel.DB) ratel.Write[readUser] { return db.Save(users, user) }, "UPDATE 1", nil, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			queued := 0
+			db := ratel.New(bwBatchExecutor{results: &bwResults{tags: []string{tc.tag}}, queued: &queued})
+
+			var count int64
+
+			if err := db.Batch(t.Context(), tc.write(db).Batch(&count)); !errors.Is(err, tc.want) || count != tc.count {
+				t.Fatalf("Batch() = %v, count %d; want %v, %d", err, count, tc.want, tc.count)
+			}
+		})
+	}
+}
+
 func TestBwBatchNilDB(t *testing.T) {
 	t.Parallel()
 

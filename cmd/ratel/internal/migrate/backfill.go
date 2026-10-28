@@ -82,16 +82,24 @@ func splitUpdate(statement string) (update, error) {
 		return update{table: table, head: statement, condition: "true"}, nil
 	}
 
-	return update{table: table, head: statement[:where], condition: statement[where+len(" WHERE "):]}, nil
+	return update{
+		table:     table,
+		head:      strings.TrimSpace(statement[:where]),
+		condition: strings.TrimSpace(statement[where+len("WHERE"):]),
+	}, nil
 }
 
-// topLevelWhere is the index of the last " WHERE " outside parentheses,
+// topLevelWhere is the index of the last WHERE keyword outside parentheses,
 // quotes and comments, or -1.
 func topLevelWhere(statement string) int {
 	found, depth := -1, 0
 
 	for index := 0; index < len(statement); {
 		if next := skip(statement, index); next > index {
+			if depth == 0 && strings.EqualFold(statement[index:next], "WHERE") {
+				found = index
+			}
+
 			index = next
 
 			continue
@@ -103,10 +111,6 @@ func topLevelWhere(statement string) int {
 		case ')':
 			depth--
 		default:
-			if depth == 0 && len(statement)-index >= len(" WHERE ") &&
-				strings.EqualFold(statement[index:index+len(" WHERE ")], " WHERE ") {
-				found = index
-			}
 		}
 
 		index++

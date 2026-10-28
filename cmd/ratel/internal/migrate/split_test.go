@@ -35,6 +35,26 @@ func TestSplit(t *testing.T) {
 			name: "comments inside", sql: "SELECT 1 -- ;\n, /* ; */ 2;",
 			want: []migrate.Piece{{Text: "SELECT 1 -- ;\n, /* ; */ 2"}},
 		},
+		{
+			name: "escape string", sql: `SELECT E'\';', e'\\';SELECT 'a\';`,
+			want: []migrate.Piece{{Text: `SELECT E'\';', e'\\'`}, {Text: `SELECT 'a\'`}},
+		},
+		{
+			name: "no escape string after a word", sql: `SELECT date'\';SELECT E"\";SELECT 2`,
+			want: []migrate.Piece{{Text: `SELECT date'\'`}, {Text: `SELECT E"\"`}, {Text: "SELECT 2"}},
+		},
+		{
+			name: "nested comment", sql: "SELECT /* /* */ ; */ 1;SELECT 2",
+			want: []migrate.Piece{{Text: "SELECT /* /* */ ; */ 1"}, {Text: "SELECT 2"}},
+		},
+		{
+			name: "dollar inside identifier", sql: "SELECT a$$b;SELECT $$;$$",
+			want: []migrate.Piece{{Text: "SELECT a$$b"}, {Text: "SELECT $$;$$"}},
+		},
+		{
+			name: "dollar quoted non-ASCII tag", sql: "SELECT $ü$;$ü$;SELECT 2",
+			want: []migrate.Piece{{Text: "SELECT $ü$;$ü$"}, {Text: "SELECT 2"}},
+		},
 		{name: "unterminated", sql: "SELECT 'x", want: []migrate.Piece{{Text: "SELECT 'x"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

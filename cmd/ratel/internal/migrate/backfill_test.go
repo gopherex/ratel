@@ -20,6 +20,17 @@ func TestSplitUpdate(t *testing.T) {
 			[3]string{"app.t", "UPDATE ONLY app.t SET a = (SELECT 1 WHERE true)", "b IS NULL"},
 		},
 		{"UPDATE app.t SET a = ' WHERE ' WHERE b", [3]string{"app.t", "UPDATE app.t SET a = ' WHERE '", "b"}},
+		{"UPDATE app.t SET a = 1\nWHERE\tb", [3]string{"app.t", "UPDATE app.t SET a = 1", "b"}},
+		{"UPDATE app.t SET a = 1 where b", [3]string{"app.t", "UPDATE app.t SET a = 1", "b"}},
+		{
+			`UPDATE app.t SET "WHERE" = 1, nowhere = 2`,
+			[3]string{"app.t", `UPDATE app.t SET "WHERE" = 1, nowhere = 2`, "true"},
+		},
+		{"UPDATE app.t SET a = E'\\' WHERE ' WHERE b", [3]string{"app.t", "UPDATE app.t SET a = E'\\' WHERE '", "b"}},
+		{
+			"UPDATE app.t SET a = 1 /* /* */ WHERE */ WHERE b",
+			[3]string{"app.t", "UPDATE app.t SET a = 1 /* /* */ WHERE */", "b"},
+		},
 	} {
 		t.Run(tc.statement, func(t *testing.T) {
 			t.Parallel()
