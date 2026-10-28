@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package shop.v1;
+
+option go_package = "example.com/shop/v1;shopv1";
+
+import "ratel/v1/options/ratel.proto";
+
+option (ratel.v1.options.file) = { schema: "shop" };
+
+message Customer {
+  option (ratel.v1.options.table) = { primary_key: "id" };
+
+  int64 id = 1;
+  string email = 2;
+}

@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package shop.v1;
+
+option go_package = "example.com/shop/v1;shopv1";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "ratel/v1/options/ratel.proto";
+
+option (ratel.v1.options.file) = { schema: "shop" };
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACTIVE = 1;
+  STATUS_CLOSED = 2;
+}
+
+message Address {
+  string street = 1;
+  string city = 2;
+}
+
+message Customer {
+  option (ratel.v1.options.table) = {
+    name: "customers"
+    primary_key: "id"
+    indexes: [{ fields: "email" unique: true }]
+    uniques: [{ fields: ["tenant_no", "email"] }]
+    checks: [{ name: "customers_tenant_positive" expr: "tenant_no > 0" }]
+  };
+
+  int64 id = 1;
+  uint32 tenant_no = 2;
+  string email = 3;
+  optional string nickname = 4;
+  Status status = 5 [(ratel.v1.options.column) = { default: "'STATUS_ACTIVE'" }];
+  google.protobuf.Timestamp created_at = 6 [(ratel.v1.options.column) = { default: "now()" }];
+  google.protobuf.Duration ttl = 7;
+  google.protobuf.Int32Value score = 8;
+  repeated string tags = 9;
+  map<string, int32> counters = 10;
+  Address address = 11 [(ratel.v1.options.column) = { embed: { prefix: "home_" } }];
+  bytes avatar = 12 [(ratel.v1.options.column) = { name: "avatar_blob" }];
+  uint64 big = 13 [(ratel.v1.options.column) = { type: "numeric(20)" }];
+  string secret = 14 [(ratel.v1.options.column) = { skip: true }];
+  google.protobuf.Struct meta = 15 [(ratel.v1.options.column) = { serialize: true }];
+  repeated Address previous = 16;
+  int64 subtotal = 17;
+  int64 total = 18 [(ratel.v1.options.column) = { generated: "subtotal + subtotal / 5" }];
+
+  oneof contact {
+    option (ratel.v1.options.oneof) = { embed: true };
+    string phone = 19;
+    string fax = 20;
+  }
+}

@@ -17,7 +17,7 @@ state; code follows it and the first components are still landing.
 doc.go                  runtime package ratel (module github.com/gopherex/ratel)
 rateltest/              user test helpers (own module)
 cmd/ratel/              host CLI (own module; only `version` exists today)
-cmd/protoc-gen-ratel/   proto frontend plugin (own module; only --version today)
+cmd/protoc-gen-ratel/   proto frontend plugin: .proto options to schema DDL (own module)
 proto/                  contract sources: ratel/v1/{ir,plugin,options}/*.proto
                         plus the easyp v1 config (protobuf.mod, easyp.yaml, ...)
 tests/                  integration suite (own module, build tag `integration`)

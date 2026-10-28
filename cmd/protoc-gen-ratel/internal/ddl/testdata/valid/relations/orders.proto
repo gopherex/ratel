@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package shop.v1;
+
+option go_package = "example.com/shop/v1;shopv1";
+
+import "ratel/v1/options/ratel.proto";
+
+option (ratel.v1.options.file) = { schema: "shop" };
+
+enum OrderKind {
+  option (ratel.v1.options.enum) = { pg_enum: true };
+
+  ORDER_KIND_UNSPECIFIED = 0;
+  ORDER_KIND_WEB = 1;
+  ORDER_KIND_PHONE = 2;
+}
+
+message Order {
+  option (ratel.v1.options.table) = {
+    primary_key: "id"
+    indexes: [{ fields: "customer_id" where: "kind = 'ORDER_KIND_WEB'" }]
+  };
+
+  int64 id = 1;
+  int64 customer_id = 2 [(ratel.v1.options.column) = {
+    references: { table: "shop.v1.Customer" columns: "id" rel: "Customer" inverse: "Orders" }
+  }];
+  OrderKind kind = 3;
+  repeated OrderKind history = 4;
+}

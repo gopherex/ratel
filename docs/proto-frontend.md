@@ -86,5 +86,71 @@ proto messages and models.
 - A flattened column name that collides with another is a generation error
   naming both proto paths.
 - Output is deterministic and depends only on the input descriptors.
-- Negative cases (`testdata/invalid`) and a conformance harness in the style of
-  plainjson's `spectest` cover every option and every mapping row.
+- Every option and mapping row is covered by a golden fixture
+  (`cmd/protoc-gen-ratel/internal/ddl/testdata/valid`) or by a negative case in
+  `ddl_test.go`. Every golden output must parse as PostgreSQL (go-pgquery).
+
+## Decisions
+
+- **No `CREATE SCHEMA`.** Each file emits only the objects it declares. A
+  schema is declared once by a hand-written file, because two generated files
+  declaring it would be a duplicate object ([input.md](input.md)).
+- **Identifiers are always quoted** (`"shop"."customers"`). A lower-case simple
+  identifier has the same catalog identity quoted or bare, so no keyword list is
+  needed.
+- **Origin paths.** A table carries its full message name. A column carries the
+  table name plus the field path through embeds, for example
+  `shop.v1.Customer.address.street`. A case column carries the oneof name.
+- **Nullability.** A field is nullable when it has proto presence (`optional`,
+  message-typed, oneof member). Everything inside an embedded message is nullable,
+  because the embedding message may be absent. Repeated and map fields are
+  `NOT NULL`.
+- **Oneof.** `Oneof.embed` adds the `<oneof>_case` column; members map as
+  ordinary nullable columns with or without it.
+- **Repeated messages and well-known repeated types** (`Timestamp`, wrappers)
+  are `jsonb`, as repeated messages are.
+- **A message field needs an explicit mapping.** A message that is neither a
+  well-known type nor a wrapper needs `embed` or `serialize`; otherwise it is an
+  error.
+- **Enum text values.** A text enum has `CHECK (col IN (...))`; a repeated text
+  enum has `CHECK (col <@ ARRAY[...])`. A PostgreSQL enum (`pg_enum`) is declared
+  in the file of the enum.
+- **Reference targets.** `Ref.table` is the full proto name of a table message
+  in the request. `Ref.columns` names exactly one direct field of that table.
+  `rel` and `inverse` must be exported identifiers; `inverse` needs `rel`.
+- **Raw SQL fragments** (`type`, `default`, `generated`, `where`, check
+  expressions) are inserted verbatim. Each must be one line without `;`, `--` or
+  `/*`; anything else is an error, because a fragment cannot be escaped.
+- **Parameters.** The plugin takes none; a non-empty parameter is an error.
+
+## Usage
+
+Build the plugin from the repository root and put it on `PATH`:
+
+```sh
+go build -o bin/protoc-gen-ratel ./cmd/protoc-gen-ratel
+bin/protoc-gen-ratel --version
+```
+
+Add it to the proto module's `easyp.gen.yaml`, next to the Go plugins:
+
+```yaml
+generate:
+  paths:
+    - shop
+plugins:
+  - name: ratel
+    out: gen/schema
+```
+
+Then generate from the proto module (easyp resolves `protoc-gen-ratel` from
+`PATH`):
+
+```sh
+PATH="$PWD/bin:$PATH" bin/easyp generate
+```
+
+The output is `gen/schema/shop/v1/<file>.sql`, one file per `.proto` with
+`generate` paths. Point the schema sources of `ratel.yaml` at that directory.
+Protoc drives the same binary without arguments: it reads a
+`CodeGeneratorRequest` on stdin and writes a `CodeGeneratorResponse` to stdout.

@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"runtime/debug"
+	"strings"
 	"testing"
 
 	"github.com/gopherex/ratel/cmd/protoc-gen-ratel/internal/cli"
@@ -10,8 +11,9 @@ import (
 
 // Exit codes mirrored from the cli package.
 const (
-	codeOK    = 0
-	codeUsage = 2
+	codeOK      = 0
+	codeFailure = 1
+	codeUsage   = 2
 )
 
 func TestMain(t *testing.T) {
@@ -20,6 +22,7 @@ func TestMain(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
+		stdin   string
 		code    int
 		wantOut string
 		wantErr string
@@ -37,10 +40,22 @@ func TestMain(t *testing.T) {
 			wantOut: "(devel)",
 		},
 		{
-			name:    "no flags is a usage error",
-			args:    []string{"protoc-gen-ratel"},
+			name: "no arguments runs the plugin on an empty request",
+			args: []string{"protoc-gen-ratel"},
+			code: codeOK,
+		},
+		{
+			name:    "positional argument is a usage error",
+			args:    []string{"protoc-gen-ratel", "extra"},
 			code:    codeUsage,
 			wantErr: "usage: protoc-gen-ratel",
+		},
+		{
+			name:    "malformed request is a failure",
+			args:    []string{"protoc-gen-ratel"},
+			stdin:   "\xff\xff\xff",
+			code:    codeFailure,
+			wantErr: "malformed CodeGeneratorRequest",
 		},
 		{
 			name:    "unknown flag is a usage error",
@@ -56,7 +71,7 @@ func TestMain(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 
-			code := cli.Main(tc.args, &stdout, &stderr)
+			code := cli.Main(tc.args, strings.NewReader(tc.stdin), &stdout, &stderr)
 
 			if code != tc.code {
 				t.Errorf("Main(%q) code = %d, want %d", tc.args, code, tc.code)
@@ -110,6 +125,6 @@ func BenchmarkMain(b *testing.B) {
 	for b.Loop() {
 		var stdout bytes.Buffer
 
-		_ = cli.Main([]string{"protoc-gen-ratel", "--version"}, &stdout, &bytes.Buffer{})
+		_ = cli.Main([]string{"protoc-gen-ratel", "--version"}, strings.NewReader(""), &stdout, &bytes.Buffer{})
 	}
 }
