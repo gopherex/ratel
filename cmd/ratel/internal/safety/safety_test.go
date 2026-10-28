@@ -156,6 +156,36 @@ func TestLockMode(t *testing.T) {
 	}
 }
 
+// TestConflicts checks the table against PostgreSQL's documented matrix.
+func TestConflicts(t *testing.T) {
+	t.Parallel()
+
+	// Each mode's row: the modes it conflicts with, weakest first.
+	matrix := map[safety.LockMode]string{
+		safety.NoLock:               "--------",
+		safety.AccessShare:          "-------X",
+		safety.RowShare:             "------XX",
+		safety.RowExclusive:         "----XXXX",
+		safety.ShareUpdateExclusive: "---XXXXX",
+		safety.Share:                "--XX-XXX",
+		safety.ShareRowExclusive:    "--XXXXXX",
+		safety.Exclusive:            "-XXXXXXX",
+		safety.AccessExclusive:      "XXXXXXXX",
+	}
+
+	for mode, row := range matrix {
+		for other := safety.AccessShare; other <= safety.AccessExclusive; other++ {
+			if want := row[other-1] == 'X'; mode.Conflicts(other) != want {
+				t.Errorf("%s vs %s = %v", mode, other, !want)
+			}
+		}
+
+		if mode.Conflicts(safety.NoLock) {
+			t.Errorf("%s conflicts with no lock", mode)
+		}
+	}
+}
+
 func TestEffectString(t *testing.T) {
 	t.Parallel()
 

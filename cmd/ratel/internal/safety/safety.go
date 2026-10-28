@@ -59,6 +59,32 @@ func (m LockMode) String() string {
 // stronger than ShareUpdateExclusive conflicts with RowExclusive.
 func (m LockMode) Blocks() bool { return m > ShareUpdateExclusive }
 
+// Conflicts reports whether two modes cannot be held on one relation by two
+// transactions, by PostgreSQL's table-level lock conflict table.
+func (m LockMode) Conflicts(other LockMode) bool {
+	if m == NoLock || other == NoLock {
+		return false
+	}
+
+	low, high := min(m, other), max(m, other)
+
+	switch low {
+	case AccessShare:
+		return high == AccessExclusive
+	case RowShare:
+		return high >= Exclusive
+	case RowExclusive:
+		return high >= Share
+	case ShareUpdateExclusive:
+		return high >= ShareUpdateExclusive
+	case Share:
+		return high != Share
+	default:
+		// ShareRowExclusive and stronger conflict with themselves and above.
+		return true
+	}
+}
+
 // RelLock is a lock on one relation.
 type RelLock struct {
 	Relation string // "schema.name"

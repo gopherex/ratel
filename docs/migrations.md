@@ -170,9 +170,14 @@ A plan has up to three phases, recorded per step:
 
 - **expand** adds: new tables, columns, indexes, constraints not yet
   validated, sync triggers. Old and new application versions both work.
-- **backfill** fills data in batches (`@ratel.backfill`): `UPDATE ... WHERE pk
-  BETWEEN` in batches of `migrate.backfill.batch`, one transaction per batch,
-  pausing while replica lag exceeds `max_replica_lag`.
+- **backfill** fills data in batches (`@ratel.backfill`): each `UPDATE` of
+  the step runs over consecutive ranges of the batching key (the header's
+  `key`, else the table's primary key, composite keys compared as rows), each
+  range ending at the `migrate.backfill.batch`-th key after the last one, one
+  transaction per batch under the short step timeouts, pausing
+  `migrate.backfill.pause` between batches and while replica lag exceeds
+  `max_replica_lag`. The `UPDATE` keeps its own `WHERE`; the range is added
+  to it.
 - **contract** removes and tightens: drops of old columns, tables, triggers,
   `SET NOT NULL`, validations that old code could violate.
 
@@ -227,21 +232,29 @@ CREATE INDEX CONCURRENTLY orders_user_id_idx ON app.orders (user_id);
 
 Every step runs on a connection with `application_name = 'ratel-migrate'`. The
 run holds a session advisory lock on a dedicated connection, so two runs never
-overlap; the key is the 64-bit FNV-1a hash of the string `ratel.migrate` and
-the target database name. Each SQL statement is sent as its own protocol
+overlap: a second run fails at once instead of waiting. The key is the 64-bit
+FNV-1a hash of the string `ratel.migrate` and the target database name.
+Sessions named `ratel-migrate` are not counted by the pre-flight. A step
+planned for a major version newer than the server's, or a server newer than
+the latest ratel supports, is refused. Each SQL statement is sent as its own protocol
 message; the runner itself issues `BEGIN`, `SET LOCAL` and `COMMIT`, so no
 statement ever runs inside an implicit multi-statement transaction.
 
 | Step class | Guards |
 |---|---|
 | short DDL (takes a blocking lock briefly) | pre-flight: no session holds a conflicting lock on the relation and no transaction is older than `long_tx_threshold`; otherwise wait without requesting the lock, polling on the retry schedule, bounded by `max_total_wait`; then `BEGIN; SET LOCAL lock_timeout; SET LOCAL statement_timeout; SET LOCAL TimeZone = 'UTC'; <ddl>; COMMIT`; on SQLSTATE `55P03` retry with the schedule and jitter, also bounded by `max_total_wait` |
-| long DDL (`CONCURRENTLY`, `VALIDATE`, `DETACH CONCURRENTLY`) | takes at most `ShareUpdateExclusive`; same pre-flight on old transactions; `lock_timeout = 0` with the run's deadline; on cancel the invalid leftover is dropped concurrently |
+| long DDL (`CONCURRENTLY`, `VALIDATE`, `DETACH CONCURRENTLY`) | takes at most `ShareUpdateExclusive`; same pre-flight on old transactions; `lock_timeout = 0` and `statement_timeout = 0` with the run's deadline; when a concurrent index build fails or is canceled, the invalid index it leaves is dropped concurrently |
 | backfill | no DDL lock; batches as above |
 
 - When retries are exhausted the step **fails** and prints the blocking
   sessions (pid, application, state, transaction age, query). There is no
   final attempt without a timeout.
-- `transaction_timeout` (PostgreSQL 17+) bounds in-transaction steps.
+- `transaction_timeout` (PostgreSQL 17+) bounds in-transaction steps: the
+  attempt's `lock_timeout` plus `statement_timeout` per statement.
+- The retry schedule `gitlab` is GitLab's `with_lock_retries` timing table
+  (41 pairs of lock timeout and pause, repeated 15 times) without its final
+  attempt without a timeout; every lock timeout is scaled by
+  `lock_timeout / 100ms`, and pauses get ±25% jitter.
 - Statements that cannot run in a transaction always run as their own step.
 
 ## Journal and resume
@@ -269,8 +282,11 @@ interrupted one:
 | concurrent index build | `pg_index.indisvalid = false`: drop the leftover concurrently, rebuild |
 | validation | `pg_constraint.convalidated`: skip when already validated |
 | concurrent detach | `pg_inherits.inhdetachpending = true`: `ALTER TABLE ... DETACH PARTITION ... FINALIZE` |
-| create | object exists with the planned definition: skip; with another definition: fail |
-| backfill | resumes after `resume_key`, which every committed batch updates in the same transaction |
+| short step | never half done: its journal row is marked done in the step's own transaction |
+| backfill | resumes after `resume_key` (the statement and the last key of the last committed batch), which every committed batch updates in the same transaction |
+
+A step recorded done whose statements changed since fails the run: an
+applied migration file is never edited.
 
 ## Data changes
 

@@ -57,10 +57,12 @@ CREATE SCHEMA cyc;`
 		namespace          string
 	}{
 		{name: "shop reversed", ddl: string(shop), ordered: string(shop), namespace: "shop"},
-		{name: "foreign key cycle", ddl: cycle, namespace: "cyc",
+		{
+			name: "foreign key cycle", ddl: cycle, namespace: "cyc",
 			ordered: `CREATE SCHEMA cyc; CREATE TABLE cyc.a (id int PRIMARY KEY, b int);
 CREATE TABLE cyc.b (id int PRIMARY KEY, a int, CONSTRAINT b_a FOREIGN KEY (a) REFERENCES cyc.a);
-ALTER TABLE cyc.a ADD FOREIGN KEY (b) REFERENCES cyc.b;`},
+ALTER TABLE cyc.a ADD FOREIGN KEY (b) REFERENCES cyc.b;`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			files := reversed(t, parser, tc.ddl)
