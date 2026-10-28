@@ -152,6 +152,22 @@ func TestGenerated(t *testing.T) {
 		t.Fatalf("keyset Pluck = %v, %v", ids, err)
 	}
 
+	var (
+		everyone []app.User
+		single   app.User
+		retagged int64
+	)
+
+	err = db.Batch(ctx,
+		db.From(app.Users).OrderBy(app.Users.ID.Asc()).Batch(&everyone),
+		db.From(queries.EmailsQ.Args()).Where(queries.EmailsQ.ID.Eq(ann.ID)).Batch(new([]queries.EmailsRow)),
+		db.From(app.Users).Where(app.Users.ID.Eq(bob.ID)).BatchOne(&single),
+		db.Update(app.Tags).Set(app.Tags.Label.To("relabeled")).All().Batch(&retagged),
+	)
+	if err != nil || len(everyone) != 2 || single.ID != bob.ID || retagged != 2 {
+		t.Fatalf("Batch = %v, %d users, %+v, %d tags", err, len(everyone), single, retagged)
+	}
+
 	if _, err := db.DeleteRow(app.Orders, app.Order{ID: 3}).Exec(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -498,9 +498,15 @@ n, err = db.Delete(app.Users).Where(app.Users.Email.Eq(email)).Exec(ctx)
 - `db.Exec(ctx, statement, options...)` runs a static `Statement`, as generated
   `:exec` and `:execrows` queries do, and returns the affected row count;
   integrity violations are `*ConstraintError` like any write.
-- `db.Batch(ctx, items...)` sends several prepared operations (static queries
-  and builder statements, each producing a `ratel.BatchItem`) in one round
-  trip and scans each result into its own destination.
+- `db.Batch(ctx, items...)` sends several prepared operations in one round
+  trip and fills each one's destination in order. Items come from
+  `select.Batch(&models)`, `select.BatchOne(&model)` (`ErrNotFound`,
+  `ErrMultipleRows`), `write.Batch(&count)` (including `Save` and `DeleteRow`,
+  with their missed-row refusals), `insert.Batch(&count)` (every chunk) and
+  `ratel.ExecItem(statement, &count)` for static statements; a static query is
+  a select through `db.From(query)`. An item that cannot render returns its
+  error before anything is sent. pgx batches use the connection's exec mode,
+  so per-call `ExecMode` does not apply.
 
 ## Relations
 
