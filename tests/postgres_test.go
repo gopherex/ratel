@@ -48,10 +48,10 @@ func TestPostgresImageVersion(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), containerWait)
-		defer cancel()
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), containerWait)
+		defer cleanupCancel()
 
-		if err := ctr.Terminate(ctx); err != nil {
+		if err := ctr.Terminate(cleanupCtx); err != nil {
 			t.Logf("terminate container from %q: %v", image, err)
 		}
 	})
