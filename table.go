@@ -23,12 +23,13 @@ type source[M any] struct {
 
 // Table describes an immutable, schema-qualified result and its generated scanner.
 type Table[M any] struct {
-	schema    string
-	name      string
-	columns   []string
-	scan      Scanner[M]
-	keys      []string
-	keyValues func(M) []any
+	schema      string
+	name        string
+	columns     []string
+	scan        Scanner[M]
+	keys        []string
+	keyValues   func(M) []any
+	constraints []ConstraintError
 }
 
 // TableOption supplies generated table metadata.

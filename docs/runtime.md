@@ -79,7 +79,7 @@ func NewUserInsert(email string, status UserStatus) UserInsert
 var Users = usersTable{...}       // descriptor: immutable, dependency-free, generated code only
 
 type usersTable struct {
-	ratel.Table[User]
+	ratel.WriteTable[User, UserInsert]
 	ID        ratel.Col[User, int64]
 	Email     ratel.Col[User, string]
 	Status    ratel.Col[User, UserStatus]
@@ -141,8 +141,28 @@ Rules:
 
 ### Descriptor construction
 
-Generated descriptors embed `ratel.Table[M]`, initialized with
-`ratel.NewTable(schema, table, columns, scan, options...)`. `columns` lists the
+Generated read-only descriptors embed `ratel.Table[M]`, initialized with
+`ratel.NewTable(schema, table, columns, scan, options...)`. Physical-table
+descriptors embed `ratel.WriteTable[M, I]`, constructed with
+`ratel.NewWriteTable(table, validInsert, fields...)`. `validInsert` reads the
+insert type's private constructor flag. Each generated `ratel.InsertField[I]`
+supplies `Name`, a schema-qualified PostgreSQL `Type` (`pgx.Identifier`), and
+`Value func(I) (any, bool)`: the boolean says whether to include the column.
+Required and nullable-without-default columns always return true; defaulted
+columns return their `Opt.Set` and unwrap `Opt.V`, including `Opt[Null[T]]`.
+Scalar fields also provide `Values func([]I) any`, projecting rows into a native
+typed slice for pgx (for example `[]string`, `[]int64`, or `[]pgtype.Text` for
+nullable text). Its length must equal the input length and preserve row order.
+Native typed arrays are required: `FlatArray[any]` has no default PostgreSQL
+type in exec/simple-protocol mode. Generated registration supplies default pgx
+array mappings for custom Go types used by these projections, as well as their
+scalar codecs. Array-valued columns set `Array: true`; their `Type` names the
+PostgreSQL array type and `Values` is unused. Metadata and field projections
+are generated, never reflected.
+Only `WriteTable` implements `ratel.Writable[M, I]`; passing a view, materialized
+view, static query or SELECT to a DB write method fails to compile.
+
+`columns` lists the
 PostgreSQL output names in scanner order. The generated
 `ratel.Scanner[M]` has signature `func(pgx.Row) (M, error)` and calls `Scan`
 with explicit model-field addresses. `ratel.NewCol[M, V](name)` and
@@ -161,8 +181,9 @@ The caller must not mutate argument values (for example, bound slices) while
 an operation uses them, following pgx's argument ownership rules.
 
 A generated descriptor provides its own `InSchema(schema)` method: copy the
-whole descriptor, replace its embedded `Table` with `Table.InSchema(schema)`,
-and return that copy. This preserves the typed columns and relation fields.
+whole descriptor, replace its embedded `Table` with `Table.InSchema(schema)`
+(or `WriteTable` with `WriteTable.InSchema(schema)`), and return that copy.
+This preserves typed columns, insert metadata and relation fields.
 
 Generated static query `.Args(...)` methods return
 `ratel.NewQuery(columns, scan, sql, args...)`. SQL is trusted generated SQL
@@ -352,13 +373,51 @@ n, err := db.From(app.Users).Where(...).Count(ctx)
 
 ## Writes
 
-- `Insert(UserInsert...)` with `Returning` scanning into the model.
-- `Upsert(UserInsert...).OnConflict(cols...).Update(cols...)`; many rows are
-  sent as one statement over `unnest` of parallel arrays, chunked by
-  `ratel.WithBatchRows(n)`, on any executor.
-- `Update().Set(col.To(v)...).Where(...)` and `Delete().Where(...)` on any
-  table, with `Returning`. Without `Where` they need an explicit `.All()`
-  marker, or they do not compile into SQL.
+```go
+rows, err := db.Insert(app.Users, app.NewUserInsert(email, status)).Returning(ctx)
+n, err := db.Upsert(app.Users, inserts...).OnConflict(app.Users.Email).
+    Update(app.Users.Status).Exec(ctx, ratel.ExecMode(pgx.QueryExecModeExec))
+rows, err = db.Update(app.Users).Set(app.Users.Status.To(status)).
+    Where(app.Users.Email.Eq(email)).Returning(ctx)
+n, err = db.Delete(app.Users).Where(app.Users.Email.Eq(email)).Exec(ctx)
+```
+
+- `db.Insert(table, inserts...)` and `db.Upsert(table, inserts...)` accept only
+  the table's generated insert type. Every constructor flag is checked before
+  any SQL is sent, including rows in later chunks; an empty input also returns
+  `ErrInvalidInsert`. Unset optional columns are omitted, never bound as NULL.
+- `OnConflict(cols...).Update(cols...)` assigns `EXCLUDED` values;
+  `OnConflict(cols...).DoNothing()` skips conflicts. Target and action are
+  mandatory for upsert; duplicate or unknown columns return `ErrInvalidQuery`.
+  Calling a conflict method on `Insert` also enables upsert; partial conflict
+  configuration is rejected, never silently ignored.
+- Consecutive rows with identical included columns share a statement. Many
+  scalar-valued rows use parallel typed arrays and `unnest` in one statement,
+  for inserts and upserts, on every executor. PostgreSQL `unnest` flattens
+  multidimensional arrays: rows containing array-valued columns instead use
+  one multi-row `VALUES` statement, preserving NULL and array boundaries.
+  Rows with no included columns each use `DEFAULT VALUES`. Heterogeneous
+  optional-column masks require separate statements so defaults apply per row.
+- `WithBatchRows(n)` caps rows per statement (default 1000); nonpositive values
+  return `ErrInvalidQuery`. `VALUES` chunks also respect PostgreSQL's 65535
+  parameter limit. Chunked operations are not implicitly transactional: use a
+  caller-owned transaction for atomicity. Earlier chunks can commit before a
+  later failure. A single homogeneous chunk is one atomic statement.
+- `db.Update(table).Set(col.To(v)...).Where(...)` and
+  `db.Delete(table).Where(...)` work without a primary key. Repeated `Where`
+  predicates are conjoined. Without `Where`, `.All()` is mandatory or SQL
+  rendering returns `ErrInvalidQuery`; no SQL is sent. Empty updates and
+  duplicate or unknown assignments are rejected. Nullable `.To` takes `Null[V]`.
+- `Exec(ctx, options...)` returns affected rows (`int64`);
+  `Returning(ctx, options...)` returns `[]M` scanned by the descriptor, including
+  defaults and `BEFORE` trigger values. Empty results are non-nil slices.
+  Conflicts skipped by `DO NOTHING` return no row. PostgreSQL defines row
+  order; there is no positional correspondence guarantee. An error returns
+  zero count or nil slice, never partial results. Per-call `ExecMode` overrides
+  `WithExecMode` and is passed as the first pgx argument on both execution paths.
+- `SQL()` renders one statement as `Statement`; insert `Statements()` renders
+  all chunks. `SQL()` rejects an operation requiring multiple statements.
+  Descriptors and builders copy metadata/input slices and are immutable.
 - `Save(model)` and `Delete(model)` address the row by primary key.
 - Optimistic locking: `.ExpectVersion(col, v)` on `Update` and `Save` adds the
   version predicate and returns `ratel.ErrStaleVersion` when no row matched.
@@ -428,13 +487,25 @@ active, err := db.From(app.Users).Where(app.Users.Orders.Has(app.Orders.Status.E
 | `ratel.ErrNotFound` | expected refusal | `One` or `First` found no row |
 | `ratel.ErrMultipleRows` | expected refusal | `One` found more than one row |
 | `ratel.ErrInvalidQuery` | programming error | invalid descriptor, pagination or chunk ordering |
+| `ratel.ErrInvalidInsert` | programming error | empty insert input or missing generated constructor flag; no SQL sent |
 | `ratel.ErrStaleVersion` | expected refusal | optimistic-locking predicate matched no row |
 | generated `Err<Constraint>` values, `*ratel.ConstraintError` | expected refusal | unique, FK, check, not-null or exclusion violation; carries kind, constraint, table, columns; matched with `errors.Is` and `errors.As` |
 | `ratel.ErrNotLoaded` | programming error | accessor of a relation that was not loaded |
 | wrapped executor errors | technical failure | driver, network, timeout; the cause stays reachable through `errors.As` |
 
+Write errors map SQLSTATE `23505`, `23503`, `23514`, `23502` and `23P01` to
+`ConstraintUnique`, `ConstraintForeignKey`, `ConstraintCheck`, `ConstraintNotNull`
+and `ConstraintExclusion`. `ConstraintError` carries `Kind`, `Schema`, `Table`,
+`Constraint`, `Columns` and `Cause`; `Unwrap` preserves the original executor
+error and `pgconn.PgError`. Generated sentinels are `*ConstraintError` values;
+`errors.Is` matches kind and each nonempty schema/table/constraint field.
+Generated `ratel.Constraints[M](values...)` table metadata supplies column lists
+for named constraints. Without it, only the driver's `ColumnName` is known;
+ratel never parses error details for columns or bound values. Constraint errors
+are refusals and do not mark operation spans as technical failures.
+
 ratel does not capture stacks; it never turns an unrecognized failure into a
-refusal.
+refusal, including serialization failures, cancellation and connection loss.
 
 ## Schemas and tenants
 
