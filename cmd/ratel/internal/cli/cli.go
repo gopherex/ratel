@@ -45,6 +45,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[1] {
+	case "dump":
+		return dump(args[2:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, Version())
 
@@ -59,5 +61,5 @@ func Main(args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: ratel <command> [flags]")
-	fmt.Fprintln(w, "commands: version")
+	fmt.Fprintln(w, "commands: version, dump")
 }

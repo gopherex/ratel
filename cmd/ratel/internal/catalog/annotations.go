@@ -9,7 +9,7 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/annotate"
 )
 
-func (b *builder) annotate(files []File) error {
+func (b *builder) annotate(files []File, owned []string) error {
 	targets := make([]annotate.Target, 0, len(b.objects))
 	for _, entry := range b.objects {
 		targets = append(targets, annotate.Target{Object: entry.reference, Meta: entry.meta, ForeignKey: b.foreignKey(entry)})
@@ -23,7 +23,7 @@ func (b *builder) annotate(files []File) error {
 	})
 
 	for _, file := range files {
-		diagnostics, err := annotate.Attach(b.parser, annotate.File{Name: file.Name, SQL: file.SQL}, targets, nil)
+		diagnostics, err := annotate.Attach(b.parser, annotate.File{Name: file.Name, SQL: file.SQL}, targets, owned)
 		if err != nil {
 			return err
 		}

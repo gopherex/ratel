@@ -78,7 +78,10 @@ type (
 // Build collects declarations before resolving any references. Builtins are a
 // pg_catalog snapshot for the target major, not part of the desired catalog.
 // Parser is shared with every mapper and annotation operation in this build.
-func Build(parser parse.Parser, files []File, major int, builtins []*ir.Schema) (*ir.Catalog, error) {
+// Owned namespaces identify configured output plugins for annotation diagnostics.
+func Build(
+	parser parse.Parser, files []File, major int, builtins []*ir.Schema, owned ...string,
+) (*ir.Catalog, error) {
 	const minMajor, maxMajor = 16, 18
 	if major < minMajor || major > maxMajor {
 		return nil, &Error{Code: "RTL-C01", Message: "unsupported PostgreSQL major " + strconv.Itoa(major)}
@@ -124,7 +127,7 @@ func Build(parser parse.Parser, files []File, major int, builtins []*ir.Schema) 
 		return nil, err
 	}
 
-	if err := state.annotate(ordered); err != nil {
+	if err := state.annotate(ordered, owned); err != nil {
 		return nil, err
 	}
 

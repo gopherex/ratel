@@ -13,8 +13,11 @@ same protocol. Messages are defined in `proto/ratel/v1/plugin` (package
   exits non-zero or writes an invalid response.
 - `--format=json` (protojson with proto field names) is accepted by every
   plugin instead of binary, for debugging and for languages without protobuf.
-- The host starts each configured plugin **once per run**: one `Info` exchange
-  is cached by plugin digest, and one `Generate` exchange produces the output.
+- Each exchange uses a fresh process or WASI instance, because stdin and stdout
+  end at EOF. A host run caches `Info` by plugin identity and SHA-256 digest;
+  it performs one `Generate` exchange per configured plugin. A cold run therefore
+  starts an external plugin twice, not once. Built-ins use the same envelopes
+  through `plugin.Generator` without a process.
 
 | Kind | Configured as | Executed by |
 |---|---|---|
@@ -79,12 +82,48 @@ message PluginResponse {
 
 ## Go SDK
 
-Package `github.com/gopherex/ratel/plugin` gives Go plugin authors the read,
-negotiate, dispatch and write loop, so a plugin implements two functions
-(`Info` and `Generate`). `ratel-gen-go` uses it.
+Package `github.com/gopherex/ratel/plugin` supplies `Read`, `Write`, `Negotiate`,
+`Dispatch` and `Serve`. Implement `plugin.Generator` (`Info` and `Generate`),
+parse `--format` with a default of `binpb`, then call
+`plugin.Serve(ctx, os.Stdin, os.Stdout, format, generator)`. `Serve` handles one
+exchange and returns only transport errors. Generator errors become `ERROR`
+diagnostics. Return `*plugin.Error` to preserve a stable code and source span;
+other errors use `RTL-P03`. Plugins must honor the passed context. `Info` must
+be side-effect-free: the SDK also calls it locally to validate Generate's version.
+
+The host package `cmd/ratel/internal/plugin` exposes `Prepare` (negotiate and
+construct a replay request) and `Run` (negotiate, generate, validate). It returns
+files without persisting them. Call `Host.Close(ctx)` after all operations to
+release its run-local compilation cache. WASI instances are fresh per exchange;
+compiled code is shared until the host closes. The `generate` command's output
+writer owns the manifest and filesystem safety checks, including symlink handling. `Run` rejects
+unsafe paths, duplicate files and file/directory collisions before returning.
+No built-in generator is registered until `ratel-gen-go` implements the interface.
+
+Exec plugins inherit the host environment and filesystem permissions: they are
+trusted executables, not a sandbox. WASI plugins receive no filesystem mounts,
+network access or inherited environment. Each plugin has a configured deadline,
+including verification, negotiation and generation; WASI execution is interrupted
+when the context expires. stderr is retained for failed or malformed exchanges.
 
 ## Conformance suite
 
-`tests/plugin` runs any plugin binary against a fixed corpus of requests and
-checks rules 2, 4 and 5, protocol negotiation and the JSON format. Third-party
-plugin authors run it in their own CI.
+Package `github.com/gopherex/ratel/plugin/plugintest` runs any plugin against
+fixed empty-catalog and schema requests, malformed requests and invalid protocol
+ranges. It checks rules 2, 4 and 5, negotiation, repeated-response determinism
+and binary/JSON equivalence. Authors add `plugintest.Case` values with their own
+requests and golden responses, including expected error diagnostics.
+
+```go
+func TestPlugin(t *testing.T) {
+    t.Parallel()
+    plugintest.Run(t, plugintest.Command("./ratel-gen-x", time.Minute))
+}
+```
+
+For non-exec transports supply a `plugintest.Exchange` function instead of
+`Command`. Exchanges must support concurrent calls and honor cancellation.
+`cmd/ratel/tests/plugin` builds a real exec fixture and the same fixture with
+`GOOS=wasip1 GOARCH=wasm`, checks host execution, checksums, deadlines and recovery,
+and runs the conformance suite against the executable. The future Go generator
+uses the same suite.

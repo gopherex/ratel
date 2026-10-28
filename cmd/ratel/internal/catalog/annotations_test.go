@@ -10,6 +10,34 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
+func TestOwnedNamespaces(t *testing.T) {
+	parser := newParser(t)
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		owned    []string
+		warnings int
+	}{
+		{"unowned", nil, 1}, {"owned", []string{"fixture"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			files := []catalog.File{{Name: "schema.sql", SQL: "-- @fixture.model User\nCREATE TABLE users(id int);"}}
+
+			result, err := catalog.Build(parser, files, 18, nil, tc.owned...)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(result.GetDiagnostics()) != tc.warnings {
+				t.Fatal(result.GetDiagnostics())
+			}
+		})
+	}
+}
+
 func testAnnotations(t *testing.T, parser parse.Parser) {
 	t.Helper()
 

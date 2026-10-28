@@ -163,5 +163,29 @@ Gates, in order; a gate starts only after the previous one passes:
    exercised through its public API on testcontainers; extended as each module
    lands.
 
+### Output-plugin SDK and host
+
+The public conformance helpers live in `plugin/plugintest`. Authors run
+`plugintest.Run(t, plugintest.Command(binary, timeout), cases...)` from their own
+tests. Optional cases pair Generate requests with golden PluginResponses;
+expected error diagnostics are checked like successful output. A custom
+`plugintest.Exchange` adapts another transport.
+
+SDK, configuration, catalog ownership and CLI unit tests have no external
+infrastructure. `cmd/ratel/tests/plugin` builds a real native plugin and a real
+WASI preview-1 plugin from `testdata/generator`. These integration tests need the
+Go toolchain, not Docker, and run without a build tag. They verify checksum
+rejection even with cached Info, execution deadlines, failure recovery, safe
+output paths, executable conformance and dump-request replay.
+
+```sh
+go test -race ./plugin/...
+go -C cmd/ratel test -race ./internal/plugin/... ./internal/config/... ./internal/cli/...
+go -C cmd/ratel test -race ./tests/plugin/...
+go test -run '^$' -bench . -benchmem ./plugin/...
+go -C cmd/ratel test -run '^$' -bench . -benchmem ./internal/plugin/... ./internal/config/... ./internal/cli/...
+go -C cmd/ratel test -run '^$' -bench BenchmarkTransports -benchtime=1x -benchmem ./tests/plugin/...
+```
+
 Property tests cover order independence of the catalog build and determinism
 of the IR and of plugin output.

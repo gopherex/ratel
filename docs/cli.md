@@ -19,6 +19,34 @@ One binary, `ratel`, installed with
 | `ratel migrate contract --url <dsn>` | runs pending steps of the `contract` phase | target |
 | `ratel migrate drift --url <dsn>` | introspects the target and diffs it against the state the applied migrations should have produced | target and dev database |
 
+### Dump
+
+`version` and `dump` are implemented commands. `dump` reads `ratel.yaml` from the
+working directory, or the file selected by `--config <path>`. Source patterns
+and plugin paths are relative to that configuration file, not the working
+directory. Schema patterns support `**`, expand in sorted order and deduplicate
+files; a pattern matching no files is an error. An explicit `schema: []` builds
+an empty catalog.
+
+`dump` currently builds the schema Catalog, including validated core annotations
+and parsed plugin annotations, using the configured PostgreSQL built-in snapshot.
+It does not infer configured queries; when query groups exist it prints a
+schema-only warning to stderr. The query-inference integration point is immediately
+after `catalog.Build` in `internal/cli/dump.go`, using the same parser and catalog.
+Plain dump serializes `Catalog`; `--plugin <name>` negotiates Info and serializes
+a `PluginRequest` with its Generate payload, filtered namespace annotations,
+JSON options, host version and configured output directory. It does not invoke
+Generate. Built-in replay requires a registered generator; none is registered
+before `ratel-gen-go` is available. Output goes to stdout, so shell redirection
+creates the replay file:
+
+```sh
+ratel dump --format json > catalog.json
+ratel dump --plugin go-external > request.binpb
+```
+
+The second command requires a plugin named `go-external` in `ratel.yaml`.
+
 Exit codes: `0` success; `1` diagnostics with severity `ERROR`, a failed
 migration step, a checksum mismatch or detected drift; `2` usage error.
 Diagnostics print as `file:line:column: severity CODE: message`; `--format=json`
@@ -81,8 +109,25 @@ Rules:
   catalog, mapper and annotation operation. All three WASM operations (parse,
   scan and deparse) share its semaphore. Do not construct a parser per request:
   the upstream pool retains every instance and its grown linear memory.
-- Plugin `options` is passed to the plugin as bytes of its own options
-  message; the plugin validates it in `Info` and `Generate`.
+- `version: 1` is required. Omitted `postgres.version` defaults to `18`,
+  `schema` to `[schema/**/*.sql]`, `migrations` to `migrations`, and `dev.image`
+  to `postgres:18-alpine` when neither dev setting is supplied. Explicit
+  `dev.image` and `dev.url` are mutually exclusive. Query groups and plugins
+  default to empty lists.
+  Migration defaults are exactly the values in the example above. Explicit
+  nonpositive migration deadlines, batch size or replica-lag bounds are errors;
+  backfill pause may be zero. Only `gitlab` is accepted as a retry schedule.
+- Each plugin selects exactly one of `builtin: true`, `exec: <path-or-name>` or
+  `wasm: <path-or-http(s)-URL>`, and requires a unique `name` and nonempty `out`.
+  `sha256` is required for WASM and exec paths, optional for PATH lookups.
+  When present it is always checked, including after a cached Info exchange.
+  `timeout` defaults to `1m`; zero selects that default and negatives are errors.
+  It bounds one host operation, not individual SQL parser calls.
+- Plugin `options` is a mapping encoded as UTF-8 JSON bytes (absent options
+  encode as `null`). Keys inside it belong to the plugin and are not rejected
+  by the host. `Info` describes options; `Generate` validates them. No options
+  exist in the Info request. Unknown host keys and multiple YAML documents
+  are errors; duplicate keys are errors as well.
 - `postgres.version` must be between 16 and the latest major this ratel
   version supports. A planned step records it; `migrate apply` refuses a
   server whose major is lower than the step's or higher than the latest

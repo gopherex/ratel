@@ -3,12 +3,15 @@ module github.com/gopherex/ratel/cmd/ratel
 go 1.27.3
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.4
+	github.com/goccy/go-yaml v1.19.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
-	google.golang.org/protobuf v1.36.11
+	github.com/tetratelabs/wazero v1.12.0
 	github.com/wasilibs/go-pgquery v0.0.0-20260519030130-725a785941e3
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -51,7 +54,6 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb // indirect

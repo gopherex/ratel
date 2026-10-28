@@ -56,6 +56,7 @@ test: ## Run unit tests (-race) in every module
 	done
 
 test-integration: ## Run integration suites (needs Docker; RATEL_PG_IMAGE overrides postgres:18-alpine)
+	( cd cmd/ratel && $(GO) test -tags integration ./tests/... )
 	( cd rateltest && $(GO) test -tags integration ./... )
 	( cd tests && $(GO) test -tags integration ./... )
 
