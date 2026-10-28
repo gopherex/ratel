@@ -28,7 +28,8 @@ migrations dir ─► apply to dev DB ─► render ─► current rendering ┘
    the same definition under a new name is a rename. *Check:* an integration
    test applies the changes of each case to the current database on
    PostgreSQL 16, 17 and 18 and compares its rendering with the desired one.
-2. **Assess** is a pure function `Assess(change, env) Safety`.
+2. **Assess** is a pure function `Assess(operations, env) Safety` over the
+   operations of one statement.
 3. **Planner** rewrites each change into safe steps and assigns phases.
 4. **Lint** checks the steps and hand-written migration files.
 5. **Apply** runs steps with guards and records each in the journal.
@@ -38,21 +39,33 @@ migrations dir ─► apply to dev DB ─► render ─► current rendering ┘
 ```go
 type Safety struct {
 	Locks    []RelLock // relation and lock mode, strictest first
-	Effect   Effect    // Metadata | Scan | Rewrite | IndexBuild
+	Effect   Effect    // Metadata | Scan | IndexBuild | Rewrite
 	Tx       TxMode    // InTx | OwnStatement (cannot run in a transaction)
 	Destroys Destroys  // None | Objects | Data
-	Compat   Compat    // Safe | Conditional | Breaking, with a reason code
+	Compat   Compat    // Safe | Conditional | Breaking
+	Reasons  []string  // lint codes behind Effect, Destroys and Compat
 	Waits    bool      // waits for older transactions (CONCURRENTLY builds, DETACH CONCURRENTLY)
 }
 ```
 
-- The lock and effect table is data keyed by change kind. *Check:* an
+- A statement is a list of operations (`create-index-concurrently` on
+  `app.orders`, `add-foreign-key-not-valid` on `app.orders` referencing
+  `app.users`, ...). The planner states the operations of every step it
+  writes, so statements the parser's PostgreSQL 17 grammar cannot read
+  (`NOT NULL ... NOT VALID` on 18) are still assessed; hand-written
+  statements are classified from their parse tree, and an unknown statement
+  is assessed as the worst case.
+- The lock and effect table is data keyed by operation kind. *Check:* an
   integration test replays every entry against PostgreSQL 16, 17 and 18 and
-  compares the observed `pg_locks` modes and `relfilenode` changes with the
-  table.
-- `Env` carries the target major version (`postgres.version`) and, per
-  existing relation, whether it is partitioned, has a default partition, and
-  its partition key columns. Recipes are chosen by these facts.
+  compares the observed `pg_locks` modes, `relfilenode` changes and waiting
+  with the table. Statements that commit a first phase before waiting
+  (`DETACH CONCURRENTLY`, `FINALIZE`) are checked against the locks they
+  hold while waiting.
+- `Env` carries the target major version (`postgres.version`), the existing
+  relations and, per relation, whether it is partitioned, has a default
+  partition, and its partition key columns; the relations created earlier in
+  the plan; and the table of each existing index. Recipes are chosen by these
+  facts.
 - Rewrite detection for type changes: a probe on the dev server (running the
   `postgres.version` image) creates an empty temporary table with the old
   column type, runs the same `ALTER COLUMN ... TYPE ... USING ...` with
