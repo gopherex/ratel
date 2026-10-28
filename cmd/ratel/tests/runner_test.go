@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func target(ctx context.Context, t *testing.T, server *devdb.Server) (*pgxpool.P
 
 	_, err = database.Pool.Exec(ctx, `CREATE SCHEMA app;
 		CREATE TABLE app.t (id int PRIMARY KEY, v int, w int);
-		INSERT INTO app.t SELECT g, g, NULL FROM generate_series(1, 25) g;`)
+		INSERT INTO app.t (id, v) SELECT g AS id, g AS v FROM generate_series(1, 25) g;`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,20 +75,24 @@ func TestRunner(t *testing.T) {
 	pool := postgresPool(t, 18)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*startupTimeout)
-	defer cancel()
+	t.Cleanup(cancel)
 
 	server, err := devdb.Start(ctx, config.Dev{URL: pool.Config().ConnString()})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	defer func() { _ = server.Close(context.WithoutCancel(ctx)) }()
+	t.Cleanup(func() { _ = server.Close(context.WithoutCancel(ctx)) })
 
 	for name, check := range map[string]func(context.Context, *testing.T, *devdb.Server){
 		"phases and journal": checkPhases, "blocked then free": checkBlocked, "resume": checkResume,
 		"busy": checkBusy, "server version": checkServerVersion,
 	} {
-		t.Run(name, func(t *testing.T) { check(ctx, t, server) })
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			check(ctx, t, server)
+		})
 	}
 }
 
@@ -102,6 +107,8 @@ ALTER TABLE app.t DROP COLUMN x;
 `
 
 func checkPhases(ctx context.Context, t *testing.T, server *devdb.Server) {
+	t.Helper()
+
 	pool, runner := target(ctx, t, server)
 	files := []migrate.File{parsed(t, "1_phased.sql", phased)}
 
@@ -115,7 +122,7 @@ func checkPhases(ctx context.Context, t *testing.T, server *devdb.Server) {
 			t.Fatal(err)
 		}
 
-		var result []migrate.State
+		result := make([]migrate.State, 0, len(status))
 		for _, step := range status {
 			result = append(result, step.State)
 		}
@@ -156,6 +163,8 @@ func checkPhases(ctx context.Context, t *testing.T, server *devdb.Server) {
 }
 
 func checkBlocked(ctx context.Context, t *testing.T, server *devdb.Server) {
+	t.Helper()
+
 	pool, runner := target(ctx, t, server)
 	files := []migrate.File{parsed(t, "1_add.sql", "ALTER TABLE app.t ADD COLUMN x int;")}
 
@@ -167,17 +176,19 @@ func checkBlocked(ctx context.Context, t *testing.T, server *devdb.Server) {
 	defer func() { _ = blocker.Rollback(context.WithoutCancel(ctx)) }()
 
 	// The blocker is not a ratel session.
-	if _, err := blocker.Exec(ctx, `SET application_name = 'blocker'; LOCK TABLE app.t IN ROW EXCLUSIVE MODE`); err != nil {
+	_, err = blocker.Exec(ctx, `SET application_name = 'blocker'; LOCK TABLE app.t IN ROW EXCLUSIVE MODE`)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	err = runner.Apply(ctx, files, plan.Expand)
-	if !errors.Is(err, migrate.ErrBlocked) || !bytes.Contains([]byte(err.Error()), []byte("blocker")) {
+	if !errors.Is(err, migrate.ErrBlocked) || !strings.Contains(err.Error(), "blocker") {
 		t.Fatalf("blocked step = %v", err)
 	}
 
 	go func() {
 		time.Sleep(200 * time.Millisecond)
+
 		_ = blocker.Rollback(context.WithoutCancel(ctx))
 	}()
 
@@ -187,6 +198,8 @@ func checkBlocked(ctx context.Context, t *testing.T, server *devdb.Server) {
 }
 
 func checkResume(ctx context.Context, t *testing.T, server *devdb.Server) {
+	t.Helper()
+
 	pool, runner := target(ctx, t, server)
 
 	// A unique build over duplicates fails and leaves an invalid index; the
@@ -237,6 +250,8 @@ UPDATE app.t SET w = 1;`)}
 }
 
 func checkBusy(ctx context.Context, t *testing.T, server *devdb.Server) {
+	t.Helper()
+
 	pool, runner := target(ctx, t, server)
 
 	holder, err := pool.Acquire(ctx)
@@ -266,6 +281,8 @@ SELECT pg_sleep(1);`)}
 }
 
 func checkServerVersion(ctx context.Context, t *testing.T, server *devdb.Server) {
+	t.Helper()
+
 	_, runner := target(ctx, t, server)
 	files := []migrate.File{parsed(t, "1_new.sql", `-- ratel:step id=n1 phase=expand tx=in class=short pg=19
 SELECT 1;`)}

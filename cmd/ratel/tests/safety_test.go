@@ -58,9 +58,17 @@ type lockSample struct {
 	pending bool
 }
 
-func (s lockSample) phases() lockSample { s.phased = true; return s }
+func (s lockSample) phases() lockSample {
+	s.phased = true
 
-func (s lockSample) interrupted() lockSample { s.pending = true; return s }
+	return s
+}
+
+func (s lockSample) interrupted() lockSample {
+	s.pending = true
+
+	return s
+}
 
 // interruptDetach leaves the detach of app.p1 pending: the concurrent detach
 // times out while a transaction still uses the partition.
@@ -100,11 +108,23 @@ func sample(kind safety.Kind, relation, other, sql string) lockSample {
 	return lockSample{operation: safety.Operation{Kind: kind, Relation: relation, Other: other}, sql: sql}
 }
 
-func (s lockSample) after(setup string) lockSample { s.setup = setup; return s }
+func (s lockSample) after(setup string) lockSample {
+	s.setup = setup
 
-func (s lockSample) rewrites() lockSample { s.operation.Rewrite = true; return s }
+	return s
+}
 
-func (s lockSample) since(major int) lockSample { s.minMajor = major; return s }
+func (s lockSample) rewrites() lockSample {
+	s.operation.Rewrite = true
+
+	return s
+}
+
+func (s lockSample) since(major int) lockSample {
+	s.minMajor = major
+
+	return s
+}
 
 func lockSamples() []lockSample {
 	return append(append(objectSamples(), columnSamples()...), relationSamples()...)
@@ -131,7 +151,8 @@ func objectSamples() []lockSample {
 		sample(safety.AlterSequence, "app.s", "", `ALTER SEQUENCE app.s INCREMENT BY 2`),
 		sample(safety.DropSequence, "app.s", "", `DROP SEQUENCE app.s`),
 		sample(safety.CreateRoutine, "", "", `CREATE FUNCTION app.g() RETURNS integer LANGUAGE sql AS 'SELECT 1'`),
-		sample(safety.ReplaceRoutine, "", "", `CREATE OR REPLACE FUNCTION app.h() RETURNS integer LANGUAGE sql AS 'SELECT 2'`),
+		sample(safety.ReplaceRoutine, "", "",
+			`CREATE OR REPLACE FUNCTION app.h() RETURNS integer LANGUAGE sql AS 'SELECT 2'`),
 		sample(safety.DropRoutine, "", "", `DROP FUNCTION app.h()`),
 		sample(safety.Comment, "app.t", "", `COMMENT ON TABLE app.t IS 'x'`),
 		sample(safety.Grant, "app.t", "", `GRANT SELECT ON app.t TO PUBLIC`),
@@ -298,16 +319,7 @@ func checkLocks(ctx context.Context, t *testing.T, server *devdb.Server, major i
 		got = observeInTx(ctx, t, database.Pool, item, names)
 	}
 
-	for _, relation := range []string{item.operation.Relation, item.operation.Other} {
-		if relation == "" || !env.Exists(relation) {
-			continue
-		}
-
-		expected := modeOf(want.Locks, relation)
-		if got.locks[relation] != expected && !(item.phased && got.locks[relation] < expected) {
-			t.Errorf("lock on %s: PostgreSQL %s, table %s", relation, got.locks[relation], expected)
-		}
-	}
+	compareLocks(t, item, env, want, got)
 
 	if got.rewritten != (want.Effect == safety.Rewrite) && env.Exists(item.operation.Relation) {
 		t.Errorf("rewrite: PostgreSQL %v, table effect %s", got.rewritten, want.Effect)
@@ -359,12 +371,29 @@ func relations(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[uint32
 	return result
 }
 
+// compareLocks checks the locks PostgreSQL took on the operation's relations
+// against the table; a phased operation may take weaker ones.
+func compareLocks(t *testing.T, item lockSample, env safety.Env, want safety.Safety, got observation) {
+	t.Helper()
+
+	for _, relation := range []string{item.operation.Relation, item.operation.Other} {
+		if relation == "" || !env.Exists(relation) {
+			continue
+		}
+
+		expected := modeOf(want.Locks, relation)
+		if got.locks[relation] != expected && (!item.phased || got.locks[relation] >= expected) {
+			t.Errorf("lock on %s: PostgreSQL %s, table %s", relation, got.locks[relation], expected)
+		}
+	}
+}
+
 // heldLocks is every granted relation lock of a backend.
 const heldLocks = `SELECT l.relation, l.mode FROM pg_locks l
 	WHERE l.pid = $1 AND l.locktype = 'relation' AND l.granted`
 
 func collectLocks(ctx context.Context, t *testing.T, query interface {
-	Query(context.Context, string, ...any) (pgx.Rows, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }, pid uint32, names map[uint32]string,
 ) map[string]safety.LockMode {
 	t.Helper()
@@ -407,15 +436,16 @@ func lockMode(name string) safety.LockMode {
 }
 
 func relfilenode(ctx context.Context, t *testing.T, query interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }, relation string,
 ) uint32 {
 	t.Helper()
 
-	var node uint32
 	if relation == "" {
 		return 0
 	}
+
+	var node uint32
 
 	// Sequences get a new file on every ALTER; only table data is rewritten.
 	err := query.QueryRow(ctx, `SELECT COALESCE((SELECT relfilenode FROM pg_class

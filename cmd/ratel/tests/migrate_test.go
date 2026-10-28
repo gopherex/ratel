@@ -23,8 +23,6 @@ import (
 // TestApplySchema applies schema statements in reverse order, with a
 // foreign key cycle, and checks the result renders as the ordered DDL does.
 func TestApplySchema(t *testing.T) {
-	parser := newParser(t)
-
 	t.Parallel()
 
 	shop, err := os.ReadFile("testdata/introspect/schema.sql")
@@ -35,7 +33,7 @@ func TestApplySchema(t *testing.T) {
 	pool := postgresPool(t, 18)
 
 	ctx, cancel := context.WithTimeout(t.Context(), startupTimeout)
-	defer cancel()
+	t.Cleanup(cancel)
 
 	if _, err := pool.Exec(ctx, `CREATE ROLE ratel_reader`); err != nil {
 		t.Fatal(err)
@@ -46,7 +44,7 @@ func TestApplySchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defer func() { _ = server.Close(context.WithoutCancel(ctx)) }()
+	t.Cleanup(func() { _ = server.Close(context.WithoutCancel(ctx)) })
 
 	cycle := `CREATE TABLE cyc.a (id int PRIMARY KEY, b int REFERENCES cyc.b);
 CREATE TABLE cyc.b (id int PRIMARY KEY, a int, CONSTRAINT b_a FOREIGN KEY (a) REFERENCES cyc.a);
@@ -65,6 +63,10 @@ ALTER TABLE cyc.a ADD FOREIGN KEY (b) REFERENCES cyc.b;`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			parser := newParser(t)
+
+			t.Parallel()
+
 			files := reversed(t, parser, tc.ddl)
 
 			got := database(ctx, t, server, func(connection *pgx.Conn) error {
@@ -103,7 +105,7 @@ func reversed(t *testing.T, parser parse.Parser, ddl string) []catalog.File {
 		t.Fatal(err)
 	}
 
-	var files []catalog.File
+	files := make([]catalog.File, 0, len(result.GetStmts()))
 
 	for _, raw := range result.GetStmts() {
 		start := int(raw.GetStmtLocation())

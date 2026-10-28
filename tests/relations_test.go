@@ -604,6 +604,7 @@ func handwrittenRelationLoad(ctx context.Context, executor ratel.Executor, model
  ORDER BY p.ordinal,q.id ASC`, tenants, ids)
 
 	results := executor.SendBatch(ctx, batch)
+
 	rows, err := results.Query()
 	if err != nil {
 		return errors.Join(err, results.Close())

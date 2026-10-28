@@ -65,8 +65,14 @@ func newProject(t *testing.T, devURL string) project {
 
 func (p project) schema(sql string) { write(p.t, filepath.Join(p.root, "schema", "app.sql"), sql) }
 
-// ratel runs a migrate subcommand and returns its exit code and output.
-func (p project) ratel(args ...string) (int, string) {
+// run is the exit code and the output of a migrate subcommand.
+type run struct {
+	code   int
+	output string
+}
+
+// ratel runs a migrate subcommand.
+func (p project) ratel(args ...string) run {
 	p.t.Helper()
 
 	var stdout, stderr bytes.Buffer
@@ -74,18 +80,18 @@ func (p project) ratel(args ...string) (int, string) {
 	code := cli.Main(append([]string{"ratel", "migrate", args[0], "--config", filepath.Join(p.root, "ratel.yaml")},
 		args[1:]...), &stdout, &stderr)
 
-	return code, stdout.String() + stderr.String()
+	return run{code: code, output: stdout.String() + stderr.String()}
 }
 
 func (p project) must(args ...string) string {
 	p.t.Helper()
 
-	code, output := p.ratel(args...)
-	if code != 0 {
-		p.t.Fatalf("ratel migrate %s = %d:\n%s", strings.Join(args, " "), code, output)
+	result := p.ratel(args...)
+	if result.code != 0 {
+		p.t.Fatalf("ratel migrate %s = %d:\n%s", strings.Join(args, " "), result.code, result.output)
 	}
 
-	return output
+	return result.output
 }
 
 func TestMigrateCommands(t *testing.T) {
@@ -111,20 +117,20 @@ func TestMigrateCommands(t *testing.T) {
 
 	defer target.Close()
 
-	p := newProject(t, server.Config().ConnString())
+	proj := newProject(t, server.Config().ConnString())
 
-	p.schema(schemaV1)
-	p.must("plan", "init")
-	p.must("verify")
-	p.must("lint")
-	p.must("apply", "--url", url)
-	p.must("contract", "--url", url)
+	proj.schema(schemaV1)
+	proj.must("plan", "init")
+	proj.must("verify")
+	proj.must("lint")
+	proj.must("apply", "--url", url)
+	proj.must("contract", "--url", url)
 
-	if output := p.must("status", "--url", url); strings.Contains(output, "pending") {
+	if output := proj.must("status", "--url", url); strings.Contains(output, "pending") {
 		t.Fatalf("status after apply:\n%s", output)
 	}
 
-	if output := p.must("plan", "again"); !strings.Contains(output, "no changes") {
+	if output := proj.must("plan", "again"); !strings.Contains(output, "no changes") {
 		t.Fatalf("second plan:\n%s", output)
 	}
 
@@ -134,18 +140,18 @@ func TestMigrateCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p.schema(schemaV2)
+	proj.schema(schemaV2)
 
-	output := p.must("plan", "status")
+	output := proj.must("plan", "status")
 	for _, want := range []string{"fixed RTL-L02", "fixed RTL-L04", "fixed RTL-C03"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("plan output lacks %q:\n%s", want, output)
 		}
 	}
 
-	p.must("apply", "--url", url)
-	p.must("contract", "--url", url)
-	p.must("drift", "--url", url)
+	proj.must("apply", "--url", url)
+	proj.must("contract", "--url", url)
+	proj.must("drift", "--url", url)
 
 	var labels string
 	if err := target.QueryRow(ctx, `SELECT string_agg(enumlabel, '|' ORDER BY enumsortorder) FROM pg_enum
@@ -163,26 +169,27 @@ func TestMigrateCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code, output := p.ratel("drift", "--url", url); code != 1 || !strings.Contains(output, "column app.users.extra") {
-		t.Fatalf("drift = %d:\n%s", code, output)
+	drift := proj.ratel("drift", "--url", url)
+	if drift.code != 1 || !strings.Contains(drift.output, "column app.users.extra") {
+		t.Fatalf("drift = %+v", drift)
 	}
 
-	checkTamper(t, p)
+	checkTamper(t, proj)
 }
 
 // checkTamper edits a planned file and adds a hand-written one breaking a
 // rule: verify fails on the first, lint on the second.
-func checkTamper(t *testing.T, p project) {
+func checkTamper(t *testing.T, proj project) {
 	t.Helper()
 
-	hand := filepath.Join(p.root, "migrations", "99999999999999_hand.sql")
+	hand := filepath.Join(proj.root, "migrations", "99999999999999_hand.sql")
 	write(t, hand, "CREATE INDEX orders_total ON app.orders (total);\n")
 
-	if code, output := p.ratel("lint"); code != 1 || !strings.Contains(output, "error RTL-L02") {
-		t.Fatalf("lint of a blocking index = %d:\n%s", code, output)
+	if lint := proj.ratel("lint"); lint.code != 1 || !strings.Contains(lint.output, "error RTL-L02") {
+		t.Fatalf("lint of a blocking index = %+v", lint)
 	}
 
-	if code, _ := p.ratel("verify"); code != 1 {
+	if proj.ratel("verify").code != 1 {
 		t.Fatal("verify accepted a file missing from ratel.sum")
 	}
 }

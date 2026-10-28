@@ -89,16 +89,18 @@ func objectCases() []diffCase {
 			},
 		},
 		{
-			name:    "renamed type",
-			current: `CREATE TYPE app.mood AS ENUM ('a'); CREATE DOMAIN app.cost AS int; CREATE TABLE app.t (m app.mood, c app.cost);`,
+			name: "renamed type",
+			current: `CREATE TYPE app.mood AS ENUM ('a'); CREATE DOMAIN app.cost AS int;
+				CREATE TABLE app.t (m app.mood, c app.cost);`,
 			desired: `CREATE TYPE app.feeling AS ENUM ('a'); CREATE DOMAIN app.price AS int;
 				CREATE TABLE app.t (m app.feeling, c app.price);`,
 			intents: diff.Intents{Renamed: map[string]string{"type app.feeling": "mood", "type app.price": "cost"}},
 			kinds:   []diff.Kind{diff.RenameType, diff.RenameType},
 		},
 		{
-			name:    "persistence and partitions",
-			current: partitions + `CREATE TABLE app.p2 PARTITION OF app.p FOR VALUES FROM (10) TO (20); CREATE TABLE app.loose (k int NOT NULL);`,
+			name: "persistence and partitions",
+			current: partitions + `CREATE TABLE app.p2 PARTITION OF app.p FOR VALUES FROM (10) TO (20);
+				CREATE TABLE app.loose (k int NOT NULL);`,
 			desired: `CREATE UNLOGGED TABLE app.solo (id int);` + `CREATE TABLE app.p (k int NOT NULL) PARTITION BY RANGE (k);
 				CREATE TABLE app.p1 PARTITION OF app.p FOR VALUES FROM (0) TO (5);
 				CREATE TABLE app.p2 (k int NOT NULL);
@@ -229,7 +231,7 @@ func checkDiff(ctx context.Context, t *testing.T, server *devdb.Server, item dif
 
 	changes := diff.Diff(render(ctx, t, current, namespaces), want, item.intents)
 
-	var kinds []diff.Kind
+	kinds := make([]diff.Kind, 0, len(changes))
 
 	for _, change := range changes {
 		kinds = append(kinds, change.Kind)

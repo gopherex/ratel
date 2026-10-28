@@ -31,22 +31,28 @@ tools: ## Install the pinned golangci-lint into ./bin
 easyp-bin: ## Build easyp from the local clone into ./bin (local dev only)
 	@[ -x $(BIN)/easyp ] || { mkdir -p $(BIN) && cd $(EASYP_DIR) && $(GO) build -o $(CURDIR)/$(BIN)/easyp ./cmd/easyp; }
 
+# The Go files of module $$m, without those of the modules nested in it:
+# golangci-lint fmt walks directories, and a nested module's files need that
+# module's import sections. testdata is skipped, as golangci-lint skips it.
+MODULE_FILES = nested=$$(for o in $(MODULES); do case $$o in $$m/*) printf '%s|' "$${o\#$$m/}";; esac; done); \
+	git ls-files --cached --others --exclude-standard -- '*.go' | grep -vE "^($${nested%|})/|(^|/)testdata/"
+
 fmt: ## Format every module (gofumpt + gci from .golangci.yaml)
 	for m in $(MODULES); do
 		echo ">> fmt $$m"
-		( cd $$m && $(CURDIR)/$(BIN)/golangci-lint fmt )
+		( cd $$m && $(CURDIR)/$(BIN)/golangci-lint fmt $$($(MODULE_FILES)) )
 	done
 
 fmt-check: ## Fail if any module is not formatted
 	for m in $(MODULES); do
 		echo ">> fmt-check $$m"
-		( cd $$m && $(CURDIR)/$(BIN)/golangci-lint fmt --diff )
+		( cd $$m && $(CURDIR)/$(BIN)/golangci-lint fmt --diff $$($(MODULE_FILES)) )
 	done
 
-lint: ## Lint every module of go.work
+lint: ## Lint every module of go.work, integration suites included
 	for m in $(MODULES); do
 		echo ">> lint $$m"
-		( cd $$m && $(CURDIR)/$(BIN)/golangci-lint run )
+		( cd $$m && $(CURDIR)/$(BIN)/golangci-lint run --build-tags integration )
 	done
 
 test: ## Run unit tests (-race) in every module

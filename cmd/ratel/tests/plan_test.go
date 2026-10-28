@@ -32,10 +32,12 @@ type planCase struct {
 func planCases(t *testing.T) []planCase {
 	t.Helper()
 
-	cases := make([]planCase, 0, len(diffCases(t)))
+	items := diffCases(t)
+	cases := make([]planCase, 0, len(items))
 
-	for _, item := range diffCases(t) {
-		cases = append(cases, planCase{diffCase: item, intents: plan.Intents{
+	for index := range items {
+		item := &items[index]
+		cases = append(cases, planCase{diffCase: *item, intents: plan.Intents{
 			Allow: map[string][]string{
 				"column app.t.a": {"RTL-R02"}, "column app.t.g": {"RTL-R01"}, "table app.solo": {"RTL-R03"},
 				"table app.loose": {"RTL-L07"}, "type app.d": {"RTL-L06"}, "column app.t.n": {"RTL-R02"},
@@ -50,7 +52,7 @@ func planCases(t *testing.T) []planCase {
 // recipeCases exercise the safe recipes on tables holding rows.
 func recipeCases() []planCase {
 	table := `CREATE TABLE app.t (id integer PRIMARY KEY, v integer, s text);`
-	rows := `INSERT INTO app.t SELECT g, g, 'r' || g FROM generate_series(1, 25) g;`
+	rows := `INSERT INTO app.t SELECT g AS id, g AS v, 'r' || g FROM generate_series(1, 25) g;`
 
 	return []planCase{
 		{
@@ -333,7 +335,8 @@ func splitTopLevel(text string) []string {
 func describe(planned plan.Plan) string {
 	var out strings.Builder
 
-	for _, step := range planned.Steps {
+	for index := range planned.Steps {
+		step := &planned.Steps[index]
 		out.WriteString("-- " + string(step.Phase) + " " + string(step.Class) + " " + step.Change + "\n")
 
 		for _, statement := range step.Statements {

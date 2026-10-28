@@ -112,8 +112,9 @@ make check             # format check + linter + unit tests (what CI runs)
 make test-integration  # integration suites on Docker (postgres:18-alpine)
 ```
 
-Useful extras: `make lint`, `make fmt` (never `golangci-lint fmt` at the
-root: it rewrites the nested modules), `make test`, `make bench`,
+Useful extras: `make lint` (integration suites included), `make fmt` (it
+hands each module only its own files; a bare `golangci-lint fmt` at the root
+rewrites the nested modules), `make test`, `make bench`,
 `make proto`. `RATEL_PG_IMAGE` overrides the integration image, e.g.
 `RATEL_PG_IMAGE=postgres:17-alpine make test-integration`.
 
