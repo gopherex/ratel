@@ -157,12 +157,16 @@ func (q Select[M]) single(ctx context.Context, operation string, limit int, opti
 }
 
 func (q Select[M]) spanOptions() []trace.SpanStartOption {
+	return readSpanOptions(q.source.table.schema, q.source.table.name)
+}
+
+func readSpanOptions(schema, table string) []trace.SpanStartOption {
 	attributes := []attribute.KeyValue{
 		attribute.String("db.system.name", "postgresql"),
 		attribute.String("db.operation.name", "SELECT"),
-		attribute.String("db.collection.name", q.source.table.schema+"."+q.source.table.name),
+		attribute.String("db.collection.name", schema+"."+table),
 	}
-	if q.source.table.name == "" {
+	if table == "" {
 		attributes = attributes[:len(attributes)-1]
 	}
 
@@ -172,8 +176,25 @@ func (q Select[M]) spanOptions() []trace.SpanStartOption {
 	}
 }
 
+func readRefusal(err error) bool {
+	// A refusal must not hide technical failures from later batch results.
+	var joined interface{ Unwrap() []error }
+	if errors.As(err, &joined) {
+		causes := joined.Unwrap()
+		for _, child := range causes {
+			if !readRefusal(child) {
+				return false
+			}
+		}
+
+		return len(causes) > 0
+	}
+
+	return errors.Is(err, ErrInvalidQuery) || errors.Is(err, ErrMultipleRows) || errors.Is(err, ErrNotFound)
+}
+
 func recordFailure(span trace.Span, err error) {
-	if errors.Is(err, ErrInvalidQuery) {
+	if readRefusal(err) {
 		return
 	}
 

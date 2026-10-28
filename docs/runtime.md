@@ -40,7 +40,9 @@ db := ratel.New(exec, ratel.WithTracerProvider(tp), ratel.WithExecMode(pgx.Query
   interfaces. It is safe for concurrent use when its executor is.
 - `WithExecMode` (and the per-call option `ratel.ExecMode(mode)`) passes a pgx
   query exec mode as the first query argument; it is needed behind PgBouncer
-  in transaction mode. Default: pgx's default.
+  in transaction mode. Default: pgx's default. Eager relation loading uses
+  `SendBatch`, whose mode can only be configured on the executor's connections;
+  see the explicit-mode restriction under Relations.
 - `WithTracerProvider` defaults to the global OpenTelemetry provider. ratel
   never logs and records no metrics; pool metrics belong to the pool owner.
 - There are no hooks or interceptors. Data invariants such as `updated_at`
@@ -442,19 +444,96 @@ err = db.Load(ctx, users, app.Users.Manager)          // any []User, e.g. from a
 active, err := db.From(app.Users).Where(app.Users.Orders.Has(app.Orders.Status.Eq(app.OrderPaid))).List(ctx)
 ```
 
+### Generated relation contract
+
+A generated relations struct stores independent loaded values and counts:
+
+```go
+type UserRelations struct {
+    Orders     ratel.Loaded[[]Order]
+    Manager    ratel.Loaded[*User]
+    OrderCount ratel.Loaded[int64]
+}
+
+func (u *User) Orders() ([]Order, error) { return u.R.Orders.Get() }
+func (u *User) Manager() (*User, error) { return u.R.Manager.Get() }
+```
+
+`Loaded[T]` has private state. Its zero value returns `ErrNotLoaded` from
+`Get()` and true from `IsZero()`. `LoadedFrom(value)` marks a successful load.
+A loaded to-many value is a non-nil slice, including when empty. A loaded
+missing to-one value is nil without an error. A loaded count can be zero;
+requesting a count does not mark the corresponding models as loaded.
+
+Generated descriptors construct each edge with
+`NewRel(target, cardinality, keys, attach, options...)`:
+
+- `target` implements `RelationTarget[R]` by embedding `Table[R]` or
+  `WriteTable[R, I]`. It is a physical, schema-qualified table with primary-key
+  metadata, not a SELECT or static query. `RelOne` allows at most one result
+  per parent; multiple matches return `ErrMultipleRows`. `RelMany` allows any
+  number of results.
+- Each `RelKey[M]` supplies `Column`, the target foreign-key column, `Type`,
+  its schema-qualified scalar PostgreSQL type, and `Values func([]M) any`.
+  The projection returns a native typed array in input order, with exactly
+  one element per input model, just like insert-field array projections.
+  Nullable keys use pgx-native nullable array elements. Composite keys are
+  parallel arrays in declared component order. No runtime reflection or
+  string encoding of keys is used.
+- `attach func(*M, []R)` assigns `LoadedFrom(children)` to the generated
+  model's `R` field. For to-one edges it maps an empty slice to nil and a
+  singleton to `&children[0]`.
+- `RelCount[M, R](func(*M, int64))` supplies the independent generated count
+  assignment. `WithCount(rel...)` requests it; `rel.Count()` is the equivalent
+  projection for `db.Load(ctx, models, rel.Count())`.
+- `Through[M, R](schema, table, targetColumns...)` supplies a join table.
+  `RelKey.Column` then addresses that table's parent-side FK. The ordered
+  `targetColumns` match the target's primary-key columns, including composite
+  target keys. All tables and PostgreSQL types remain schema-qualified.
+- Constructor metadata, modifiers and requested-relation slices are copied.
+  Descriptors are immutable. Projection and assignment callbacks are generated
+  code and must preserve the declared array lengths and field assignments.
+
+### Loading behavior
+
 - Loading is eager and explicit. Models hold no database handle; there is no
   lazy loading.
 - `db.Load` loads relations onto any slice of models, so results of static
   queries get relations the same way builder results do.
-- Default strategy: one query per relation per depth, `WHERE fk = ANY($1)`;
-  relations of the same depth go in one `pgx.Batch`. Nested relations load
-  before results are attached to parents.
+- Default strategy: one query per requested relation or count per depth,
+  `WHERE fk = ANY($1)` for single-column keys; composite keys join parallel
+  arrays through `unnest`. Relations of the same depth go in one `pgx.Batch`.
+  The parent-key input uses `WITH ORDINALITY`; its ordinal identifies the
+  destination model, preserving duplicate parent keys and NULL FK semantics
+  without reflection or Go-key comparability requirements.
+- Each batch and every result cursor closes before the next depth starts.
+  Nested relations load before results are attached to parents. Attachments
+  happen deepest first, only after the entire graph succeeds. A failed
+  `db.Load` leaves existing loaded fields unchanged; builder terminals return
+  no partial result. Empty parent slices send no batch, and absent children
+  trigger no deeper batch. Each page of `Chunks` is a separate graph load.
 - `Limit` and `Offset` inside a relation are per parent, through
   `unnest($1) CROSS JOIN LATERAL (... LIMIT n)`.
-- Counts per parent through one batched `GROUP BY fk` query.
-- The strategy is selectable per relation for data-specific cases:
-  `ratel.Window()` for per-parent limits with `row_number()`,
-  `ratel.Correlated()` for counts, `ratel.Joined()` for to-one relations.
+- Counts per parent use one batched `GROUP BY` query over the foreign key and
+  parent ordinal. Missing groups attach zero. Counts respect child `Where`
+  predicates, but ignore child ordering, pagination and nested loads.
+- `rel.Strategy(strategy)` selects a SQL strategy for data-specific cases:
+  `ratel.Window()` uses `row_number()` partitioned by parent ordinal;
+  `ratel.Correlated()` uses a correlated count subquery over the same parent-key
+  input; `ratel.Joined()` joins that input to an unpaginated to-one target in
+  the depth batch. Joined does not fold child columns into the parent SELECT:
+  a descriptor can also be loaded onto an arbitrary slice through `db.Load`.
+  The zero strategy uses LATERAL for pagination and a key-input join otherwise.
+  Incompatible strategies (`Joined` on to-many or paginated edges, `Correlated`
+  on row loads, `Window` on counts) return `ErrInvalidQuery` before their batch
+  is sent. Every strategy uses native pgx scanning, never `json_agg`.
+- pgx v5.11 `Batch.Queue` accepts `QueryRewriter` but not `QueryExecMode`;
+  `SendBatch` always uses `ConnConfig.DefaultQueryExecMode`. Configure that
+  setting on executor connections, including pool connections, for eager loads.
+  `With`, `WithCount` and `db.Load` reject explicit `WithExecMode` or per-call
+  `ExecMode` with `ErrInvalidQuery` before any SQL is sent. Silently ignoring a
+  requested protocol mode would be unsafe behind PgBouncer. Plain SELECT and
+  write operations retain their per-call exec-mode support.
 - Parent filters: `Has`, `HasNone`, `HasCount(op, n)` and `Every`. `Every` is
   true for a parent with no children, as documented on the method.
 - A query with `With` returns a type that has no `All` iterator: relations need
@@ -545,3 +624,9 @@ exhaustion, failure or early break.
   complete five-row slice reads, including SQL rendering and tracing on the
   builder path. Both compare generated field-address scanning with direct
   handwritten `Scan` calls and report allocations.
+- `go -C tests test -tags integration -run '^$' -bench '^BenchmarkRelationLoad$' -benchmem`
+  compares complete batched relation loads on the real driver: four parent
+  models and five child rows, including empty and composite-key parents.
+  The generated path builds SQL, traces, scans through generated field
+  addresses and attaches loaded values; the handwritten baseline uses the
+  same ordinal-key join in one `pgx.Batch` and scans and attaches directly.
