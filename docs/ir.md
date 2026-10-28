@@ -157,9 +157,11 @@ shared parser, complete `File{Name, SQL}` sources, a PostgreSQL major from 16
 through 18, and schemas
 containing the target server's built-in function signatures. Built-in signatures
 are an explicit input, not a hand-maintained function whitelist. They are not
-copied into the desired catalog. Scalar built-in type names use pgx's type
-registry. With an empty signature input, calls to ordinary built-in functions
-are unresolved; sequence calls (`nextval`, `currval`, `setval`) resolve their
+copied into the desired catalog. A type name is built in when the snapshot's
+`builtin_types` or pgx's type registry knows it, so `regclass` and other types
+pgx lacks resolve to `pg_catalog`, as PostgreSQL's implicit search path does.
+With an empty signature input, calls to ordinary built-in functions are
+unresolved; sequence calls (`nextval`, `currval`, `setval`) resolve their
 constant sequence names directly.
 
 ### Generated builtins
@@ -206,9 +208,17 @@ extractions byte-identical. Unit tests exercise reversed input order and known
 PostgreSQL signatures, version-specific functions and independent loader state.
 Run `cd cmd/ratel && go test -race ./internal/builtins/...`; benchmarks use
 `go test -run '^$' -bench . -benchmem ./internal/builtins/...` in that module.
-The catalog resolver still requires explicit argument casts when its current
-literal matching cannot choose a unique overload; loading complete signatures
-does not itself implement PostgreSQL's overload selection algorithm.
+The catalog resolver chooses an overload for calls in schema expressions
+(defaults, checks, generated columns, index expressions, policies) after
+PostgreSQL's `func_select_candidate`. Arity counts trailing defaults and expands
+a variadic element. Each argument is typed from its column (the column type,
+domains unwrapped to their base), a cast target, or a literal (`int4` or `int8`
+by range, `numeric`, `bool`); string literals and NULL are unknown and match any
+parameter. An exact type scores above a domain over it, which scores above an
+implicit cast from `builtin_casts`; polymorphic parameters accept their type
+family. The single best candidate wins; a tie is `RTL-C03`. Inside view and
+routine query bodies, column types belong to the query's own scope, so a tie
+there leaves the call without a target and query inference types it.
 
 The builder uses `public` as the default schema and search path. It collects
 schema declarations, visits embedded `CREATE SCHEMA` elements with that schema
@@ -222,10 +232,19 @@ cannot represent fail rather than being ignored.
 Serial columns expand into integer columns, defaults and owned sequences;
 identity columns receive owned sequence references. Sequence defaults preserve
 explicit zero-valued options and account for descending increments and integer
-width. Non-null columns receive named not-null constraints. Unnamed constraint
-names are allocated deterministically, reserving explicit names first. Unnamed
-indexes use column-based names and reserve explicit relation names before
-allocating collision suffixes.
+width. Non-null columns receive named not-null constraints. Generated names are
+PostgreSQL's: `<table>_pkey`, `<table>_<columns>_key`, `<table>_<columns>_fkey`,
+`<table>_<column>_not_null`, `<table>_<columns>_excl`, `<table>_<column>_check`
+when the check references exactly one column and `<table>_check` otherwise,
+`<domain>_check` for domain checks, `<table>_<columns>_idx` for indexes (an
+expression element is named after its function, else `expr`) and
+`<table>_<column>_seq` for owned sequences. As in `makeObjectName`, the table
+and column parts lose trailing bytes, the longer first, until the name fits 63
+bytes; the label never shrinks. A collision adds a counter to the label
+(`a_x_check1`). Explicit names are reserved first; unnamed constraints are
+numbered in declaration order (the `CREATE TABLE` elements, then attached
+constraints in sorted order), relation names are unique per schema. Indexes
+attach to tables and materialized views.
 
 `catalog.ObjectID` is the host's object identity formatter. Routine identities
 append their input argument signature. Declaration uniqueness follows
@@ -242,9 +261,9 @@ statement-permutation tests clear only source spans before comparing.
 
 `tests/testdata/catalog/schema.sql` is shared by builder permutation tests and
 `tests/catalog_test.go`. The integration test applies it to PostgreSQL 16, 17
-and 18 and checks catalog facts through `pg_catalog`. The introspection producer
-is not implemented, so this test does not claim the full build/introspect
-round-trip equality. Run it with `make test-integration`.
+and 18 and checks catalog facts through `pg_catalog`. The build/introspect
+round trip is in [Introspection](#introspection). Run it with
+`make test-integration`.
 
 Build parses files serially. Independent concurrent callers inject the same
 parser; its semaphore also bounds embedded-schema scanning, mapper deparsing,
@@ -252,6 +271,49 @@ routine/sequence reference parsing and annotation validation.
 Run builder tests and benchmarks with
 `cd cmd/ratel && go test -race ./internal/catalog` and
 `cd cmd/ratel && go test -run '^$' -bench . -benchmem ./internal/catalog`.
+
+## Introspection
+
+`cmd/ratel/internal/introspect.Load(ctx, parser, source, namespaces)` reads a
+live PostgreSQL 16, 17 or 18 database into a Catalog. It has no mapping of its
+own: `Render` makes PostgreSQL write the namespaces as declarative DDL with its
+own deparse functions (`format_type`, `pg_get_expr`, `pg_get_constraintdef`,
+`pg_get_indexdef`, `pg_get_viewdef`, `pg_get_functiondef`,
+`pg_get_triggerdef`), and that text goes through `catalog.Build` with the
+server's major and builtin snapshot. Source and database share one mapping path,
+so both produce the same shape.
+
+- One `REPEATABLE READ READ ONLY` transaction with `search_path = ''`, so every
+  name is schema-qualified. `source` is a `*pgx.Conn` or `*pgxpool.Pool`; a
+  transaction is not accepted, since its isolation is already fixed. The caller's
+  context carries the deadline. Any failure returns no catalog.
+- Objects created by an extension, and objects with an internal dependency
+  (range constructors, identity sequences, partition clones of constraints,
+  indexes and triggers), are left to their owner. Extensions are database-wide.
+- Clauses equal to PostgreSQL defaults are not rendered. A sequence that is
+  exactly what a `serial` column creates renders as that column; any other
+  sequence renders itself.
+- Privileges of the owner and the defaults of `acldefault` (`EXECUTE` on
+  routines, `USAGE` on types to `PUBLIC`) are not grants.
+- Facts only DDL carries are absent: source spans, annotations and what they
+  derive (named relations, annotation diagnostics). Owners are environment
+  facts and are not read. `Catalog.name` is the database name.
+- The rendered text is ordered by creation dependency (types by type
+  dependencies, routines before tables, views by view dependencies, foreign keys
+  after keys and indexes), so with `check_function_bodies = off` it applies to an
+  empty database.
+
+`cmd/ratel/tests/introspect_test.go` checks, on PostgreSQL 16, 17 and 18, that
+`build(DDL)` equals `Load(apply(DDL))` for `tests/testdata/catalog/schema.sql`
+and `cmd/ratel/tests/testdata/introspect/schema.sql`, after PostgreSQL's
+normalization: expressions are compared without casts (PostgreSQL stores every
+implicit coercion as an explicit cast), query bodies by structure rather than
+deparsed text, an extension declared without `VERSION` matches any installed
+version, and a grant of a default privilege is no grant. It also applies the
+rendered DDL to an empty database and requires the same rendering back, and
+that a lost connection yields an error and no catalog. The migration diff
+compares two catalogs that both went through PostgreSQL ([migrations.md](migrations.md)),
+so it needs none of these normalizations.
 
 ## Annotation scanner and query sources
 
