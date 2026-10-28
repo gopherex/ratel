@@ -17,9 +17,8 @@ specification is [docs/](docs/architecture.md); code follows it.
 ## Status
 
 Pre-release: the runtime, code generation and the migration engine are
-implemented and tested against PostgreSQL 16, 17 and 18; `ratel init` and the
-documentation site are not yet. The API may still change before the first
-tag.
+implemented and tested against PostgreSQL 16, 17 and 18; the documentation
+site is not yet. The API may still change before the first tag.
 
 ## How it fits together
 
@@ -61,7 +60,8 @@ docs/                   the specification
 
 ## Quick start
 
-`ratel.yaml` next to the sources ([docs/cli.md](docs/cli.md) lists every key):
+`ratel init` writes a commented `ratel.yaml` and the source directories; a
+configured one looks like this ([docs/cli.md](docs/cli.md) lists every key):
 
 ```yaml
 version: 1

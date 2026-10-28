@@ -33,6 +33,15 @@ directories they leave empty, and never touches files the manifest does not
 list. A path through a symbolic link, inside the output directory or as the
 directory itself, is refused before anything is written.
 
+### Init
+
+`ratel init [--dir <path>]` writes a commented `ratel.yaml` with the default
+values, creates `schema/` (with an empty `schema.sql`, so the schema pattern
+matches a file), `queries/` and `migrations/`. With a `go.mod` in the
+directory it configures the Go generator with `import_path`
+`<module>/internal/db`; without one the generator is a commented example.
+An existing `ratel.yaml` is never overwritten: `init` fails instead.
+
 ### Migrate
 
 Every `migrate` subcommand reads `ratel.yaml` (`--config <path>`) and the
@@ -59,7 +68,7 @@ migrations directory, created when missing.
 
 ### Dump
 
-`version`, `check`, `generate`, `dump` and `migrate` are implemented commands. `dump` reads `ratel.yaml` from the
+Every command of the table is implemented. `dump` reads `ratel.yaml` from the
 working directory, or the file selected by `--config <path>`. Source patterns
 and plugin paths are relative to that configuration file, not the working
 directory. Schema patterns support `**`, expand in sorted order and deduplicate
