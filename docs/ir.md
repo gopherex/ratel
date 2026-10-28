@@ -368,23 +368,41 @@ A `Relation` is a navigable edge used by the ORM:
 | Field | Meaning |
 |---|---|
 | `name`, `inverse_name` | Go-facing names; from `@ratel.rel` or derived from the FK |
-| `kind` | `ONE` (to-one) or `MANY` (to-many) |
-| `from`, `to` | table ids with column lists |
+| `kind`, `inverse_kind` | `ONE` (to-one) or `MANY` (to-many) cardinality of the navigation from `from` and from `to` |
+| `from`, `to` | table ids with column lists (the FK columns and the referenced columns) |
 | `through` | join table id for many-to-many |
-| `fk` | id of the FK constraint the relation comes from |
+| `fk` | id of the FK constraint the relation comes from (for many-to-many, the first join key) |
 
 Rules:
 
-- Every FK yields a to-one relation on the referencing table and a to-many
-  inverse on the referenced table (to-one when the FK columns are unique),
-  unless `@ratel.norel` is set.
-- A table whose primary key consists of exactly two FK column sets is a join
-  table and yields a many-to-many relation between the two referenced tables.
-  The join table stays an ordinary model with its own columns.
-- Two FKs between the same pair of tables without `@ratel.rel` names are an
-  error.
-- Derived names that collide with each other or with a column name are an
-  error naming both.
+- Every FK (not `@ratel.norel`) yields one relation: `kind` ONE on the
+  referencing table, `inverse_kind` MANY on the referenced table, or ONE when
+  the FK columns are exactly the primary key or a unique constraint.
+- Derived names are Go-facing (`PascalCase`):
+  - to-one name: each FK column without its `_id` suffix, PascalCase, joined in
+    column order (`author_id` -> `Author`, `tenant_id, user_id` -> `TenantUser`);
+  - inverse name: the referencing table name, PascalCase (`posts` -> `Posts`).
+    No pluralization is done.
+- `@ratel.rel name=N inverse=M` replaces the to-one name `N` and inverse `M`.
+  A column-level or constraint-level annotation applies to the whole FK; having
+  more than one relation annotation on one FK is an error.
+- A table whose primary key is covered by exactly two FKs, which are disjoint
+  and together make up the key, is a join table. It yields a many-to-many
+  relation `MANY`/`MANY` from the first referenced table to the second, with
+  `through` set to the join table. Its FK-derived relations stay. The name
+  toward the second table is the `name` of the join key to the second table,
+  or the second table name in PascalCase; the inverse is named by the first
+  join key the same way. A many-to-many relation is suppressed when either
+  join key is `@ratel.norel`.
+- Two FKs between the same pair of tables (ignoring `@ratel.norel` FKs) need
+  `@ratel.rel` on each; a missing one is an error at its FK position.
+- A derived name that is not an exported Go identifier is an error at the FK
+  position; declare `@ratel.rel name=` instead.
+- A relation name that is already taken on its table by a column (compared as
+  PascalCase) or by another relation is an error naming both.
+- Diagnostic codes: `RTL-C05` ambiguous pair, `RTL-C06` conflicting relation
+  annotations, `RTL-C07` underivable name, `RTL-C08` name collision.
+- `Catalog.relations` is ordered by the FK object id, then by `through`.
 - Polymorphic relations (type plus id columns) are not modeled.
 
 ## Versioning

@@ -125,8 +125,10 @@ func (x *RelationEndpoint) GetColumns() []string {
 }
 
 // Relation is one navigable edge used by the ORM. name and inverse_name are
-// Go-facing names, from @ratel.rel or derived from the foreign key; through
-// is set for many-to-many relations resolved through a join table.
+// Go-facing names, from @ratel.rel or derived from the foreign key; kind and
+// inverse_kind give the cardinality of the navigation from `from` and from
+// `to`; through is set for many-to-many relations resolved through a join
+// table.
 type Relation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -136,6 +138,7 @@ type Relation struct {
 	To            *RelationEndpoint      `protobuf:"bytes,5,opt,name=to,proto3" json:"to,omitempty"`
 	Through       *ObjectRef             `protobuf:"bytes,6,opt,name=through,proto3" json:"through,omitempty"` // join table of a many-to-many relation
 	Fk            *ObjectRef             `protobuf:"bytes,7,opt,name=fk,proto3" json:"fk,omitempty"`           // the foreign-key constraint the relation comes from
+	InverseKind   RelationKind           `protobuf:"varint,8,opt,name=inverse_kind,json=inverseKind,proto3,enum=ratel.v1.ir.RelationKind" json:"inverse_kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -219,6 +222,13 @@ func (x *Relation) GetFk() *ObjectRef {
 	return nil
 }
 
+func (x *Relation) GetInverseKind() RelationKind {
+	if x != nil {
+		return x.InverseKind
+	}
+	return RelationKind_RELATION_KIND_UNSPECIFIED
+}
+
 var File_ratel_v1_ir_relation_proto protoreflect.FileDescriptor
 
 const file_ratel_v1_ir_relation_proto_rawDesc = "" +
@@ -226,7 +236,7 @@ const file_ratel_v1_ir_relation_proto_rawDesc = "" +
 	"\x1aratel/v1/ir/relation.proto\x12\vratel.v1.ir\x1a\x18ratel/v1/ir/common.proto\"Z\n" +
 	"\x10RelationEndpoint\x12,\n" +
 	"\x05table\x18\x01 \x01(\v2\x16.ratel.v1.ir.ObjectRefR\x05table\x12\x18\n" +
-	"\acolumns\x18\x02 \x03(\tR\acolumns\"\xac\x02\n" +
+	"\acolumns\x18\x02 \x03(\tR\acolumns\"\xea\x02\n" +
 	"\bRelation\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\finverse_name\x18\x02 \x01(\tR\vinverseName\x12-\n" +
@@ -234,7 +244,8 @@ const file_ratel_v1_ir_relation_proto_rawDesc = "" +
 	"\x04from\x18\x04 \x01(\v2\x1d.ratel.v1.ir.RelationEndpointR\x04from\x12-\n" +
 	"\x02to\x18\x05 \x01(\v2\x1d.ratel.v1.ir.RelationEndpointR\x02to\x120\n" +
 	"\athrough\x18\x06 \x01(\v2\x16.ratel.v1.ir.ObjectRefR\athrough\x12&\n" +
-	"\x02fk\x18\a \x01(\v2\x16.ratel.v1.ir.ObjectRefR\x02fk*\\\n" +
+	"\x02fk\x18\a \x01(\v2\x16.ratel.v1.ir.ObjectRefR\x02fk\x12<\n" +
+	"\finverse_kind\x18\b \x01(\x0e2\x19.ratel.v1.ir.RelationKindR\vinverseKind*\\\n" +
 	"\fRelationKind\x12\x1d\n" +
 	"\x19RELATION_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RELATION_KIND_ONE\x10\x01\x12\x16\n" +
@@ -267,11 +278,12 @@ var file_ratel_v1_ir_relation_proto_depIdxs = []int32{
 	1, // 3: ratel.v1.ir.Relation.to:type_name -> ratel.v1.ir.RelationEndpoint
 	3, // 4: ratel.v1.ir.Relation.through:type_name -> ratel.v1.ir.ObjectRef
 	3, // 5: ratel.v1.ir.Relation.fk:type_name -> ratel.v1.ir.ObjectRef
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	0, // 6: ratel.v1.ir.Relation.inverse_kind:type_name -> ratel.v1.ir.RelationKind
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_ratel_v1_ir_relation_proto_init() }

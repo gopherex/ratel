@@ -22,8 +22,10 @@ CREATE TABLE catalog_fixture.parents (
 );
 CREATE TABLE catalog_fixture.children (
   id integer PRIMARY KEY,
+  -- @ratel.rel name=Parent
   parent_id integer REFERENCES catalog_fixture.parents (id)
 );
+-- @ratel.rel name=Child
 ALTER TABLE catalog_fixture.parents
   ADD CONSTRAINT parents_child FOREIGN KEY (child_id) REFERENCES catalog_fixture.children (id),
   ENABLE ROW LEVEL SECURITY,

@@ -131,6 +131,8 @@ func Build(
 		return nil, err
 	}
 
+	relate(state.catalog)
+
 	return state.catalog, nil
 }
 

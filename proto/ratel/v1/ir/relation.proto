@@ -24,8 +24,10 @@ message RelationEndpoint {
 }
 
 // Relation is one navigable edge used by the ORM. name and inverse_name are
-// Go-facing names, from @ratel.rel or derived from the foreign key; through
-// is set for many-to-many relations resolved through a join table.
+// Go-facing names, from @ratel.rel or derived from the foreign key; kind and
+// inverse_kind give the cardinality of the navigation from `from` and from
+// `to`; through is set for many-to-many relations resolved through a join
+// table.
 message Relation {
   string name = 1;
   string inverse_name = 2;
@@ -34,4 +36,5 @@ message Relation {
   RelationEndpoint to = 5;
   ObjectRef through = 6;  // join table of a many-to-many relation
   ObjectRef fk = 7;       // the foreign-key constraint the relation comes from
+  RelationKind inverse_kind = 8;
 }
