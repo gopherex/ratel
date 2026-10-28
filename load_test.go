@@ -190,13 +190,19 @@ func TestLoadFailureAtomicAttachment(t *testing.T) {
 			name: "invalid ordinal", want: ratel.ErrInvalidQuery,
 			result: &relationBatch{rows: []*relationRows{{values: [][]any{{0, int64(1), int64(1)}}}}},
 		},
+		{
+			name: "unordered ordinals", want: ratel.ErrInvalidQuery,
+			result: &relationBatch{rows: []*relationRows{{values: [][]any{
+				{2, int64(2), int64(2)}, {1, int64(1), int64(1)},
+			}}}},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			users, _ := relationDescriptors()
 			executor := relationExecutor{send: func(context.Context, *pgx.Batch) pgx.BatchResults { return tc.result }}
-			models := []relationUser{{ID: 1}}
+			models := []relationUser{{ID: 1}, {ID: 2}}
 
 			err := ratel.New(executor).Load(t.Context(), models, users.Orders)
 			if !errors.Is(err, tc.want) || !tc.result.closed {
@@ -205,6 +211,58 @@ func TestLoadFailureAtomicAttachment(t *testing.T) {
 
 			if _, err := models[0].Orders(); !errors.Is(err, ratel.ErrNotLoaded) {
 				t.Fatal("attached failed load")
+			}
+		})
+	}
+}
+
+func TestLoadGroupOwnership(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		rows   [][]any
+		counts []int
+	}{
+		{"empty", nil, []int{0, 0}},
+		{"dense", [][]any{{1, int64(11), int64(1)}, {2, int64(21), int64(2)}}, []int{1, 1}},
+		{"sparse", [][]any{
+			{1, int64(11), int64(1)},
+			{1, int64(12), int64(1)},
+			{3, int64(31), int64(3)},
+		}, []int{2, 0, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			users, _ := relationDescriptors()
+			models := make([]relationUser, len(tc.counts))
+			expected := make([]int64, len(models))
+			executor := relationExecutor{send: func(_ context.Context, batch *pgx.Batch) pgx.BatchResults {
+				if !reflect.DeepEqual(batch.QueuedQueries[0].Arguments[0], expected) {
+					t.Fatalf("stale parent keys: %v", batch.QueuedQueries[0].Arguments)
+				}
+
+				return &relationBatch{rows: []*relationRows{{values: tc.rows}}}
+			}}
+			database := ratel.New(executor)
+
+			for round := range 2 {
+				for index := range models {
+					expected[index] = int64(round*len(models) + index + 1)
+					models[index].ID = expected[index]
+				}
+
+				if err := database.Load(t.Context(), models, users.Orders); err != nil {
+					t.Fatal(err)
+				}
+
+				for index, count := range tc.counts {
+					children, err := models[index].Orders()
+					if err != nil || children == nil || len(children) != count || cap(children) != count {
+						t.Fatalf("parent %d: children=%v capacity=%d err=%v", index, children, cap(children), err)
+					}
+				}
 			}
 		})
 	}

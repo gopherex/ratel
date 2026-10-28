@@ -17,18 +17,25 @@ type loadJob struct {
 
 type relationResult[R any] struct {
 	models      []R
-	parents     []int
 	counts      []int
 	parentCount int
+	lastParent  int
 }
 
 type relationRow struct {
 	row    pgx.Row
-	parent *int
+	parent int
+	dest   []any
 }
 
-func (r relationRow) Scan(dest ...any) error {
-	if err := r.row.Scan(append([]any{r.parent}, dest...)...); err != nil {
+func (r *relationRow) Scan(dest ...any) error {
+	if len(dest)+1 != len(r.dest) {
+		return ErrInvalidQuery
+	}
+
+	copy(r.dest[1:], dest)
+
+	if err := r.row.Scan(r.dest...); err != nil {
 		return fmt.Errorf("ratel: scan relation: %w", err)
 	}
 
@@ -41,38 +48,47 @@ func (r Rel[M, R]) ratelRelation(models []M) (loadJob, error) {
 		return loadJob{}, err
 	}
 
-	result := &relationResult[R]{parentCount: len(models), counts: make([]int, len(models))}
+	result := &relationResult[R]{
+		parentCount: len(models), counts: make([]int, len(models)),
+		models: make([]R, 0, len(models)),
+	}
+
+	scan, columns, cardinality := r.query.source.table.scan, len(r.query.source.table.columns), r.cardinality
+	children, attach := r.children, r.attach
 
 	return loadJob{
 		statement: statement,
-		read:      func(rows pgx.Rows) error { return r.readRelated(rows, result) },
-		children:  func() ([]loadJob, error) { return prepareRelations(result.models, r.children) },
-		attach:    func() { r.attachRelated(models, result) },
+		read:      func(rows pgx.Rows) error { return readRelated(rows, result, scan, columns, cardinality) },
+		children:  func() ([]loadJob, error) { return prepareRelations(result.models, children) },
+		attach:    func() { attachRelated(models, result, attach) },
 	}, nil
 }
 
-func (r Rel[M, R]) readRelated(rows pgx.Rows, result *relationResult[R]) error {
-	for rows.Next() {
-		var parent int
+func readRelated[R any](rows pgx.Rows, result *relationResult[R], scan Scanner[R], columns int,
+	cardinality Cardinality,
+) error {
+	row := &relationRow{row: rows, dest: make([]any, columns+1)}
+	row.dest[0] = &row.parent
 
-		model, err := r.query.source.table.scan(relationRow{row: rows, parent: &parent})
+	for rows.Next() {
+		model, err := scan(row)
 		if err != nil {
 			return fmt.Errorf("ratel: scan related model: %w", err)
 		}
 
-		if parent <= 0 || parent > result.parentCount {
+		if row.parent <= 0 || row.parent > result.parentCount || row.parent < result.lastParent {
 			return ErrInvalidQuery
 		}
 
-		parent--
+		parent := row.parent - 1
 
 		result.counts[parent]++
-		if r.cardinality == RelOne && result.counts[parent] > 1 {
+		if cardinality == RelOne && result.counts[parent] > 1 {
 			return ErrMultipleRows
 		}
 
 		result.models = append(result.models, model)
-		result.parents = append(result.parents, parent)
+		result.lastParent = row.parent
 	}
 
 	if err := rows.Err(); err != nil {
@@ -82,19 +98,14 @@ func (r Rel[M, R]) readRelated(rows pgx.Rows, result *relationResult[R]) error {
 	return nil
 }
 
-func (r Rel[M, R]) attachRelated(models []M, result *relationResult[R]) {
-	groups := make([][]R, len(models))
-	for index := range groups {
-		groups[index] = make([]R, 0, result.counts[index])
-	}
+func attachRelated[M, R any](models []M, result *relationResult[R], attach func(*M, []R)) {
+	// Every row-load strategy orders by parent ordinal. Keep each group's capacity
+	// bounded so appending to one loaded relation cannot overwrite another.
+	children := result.models
 
-	for index, model := range result.models {
-		parent := result.parents[index]
-		groups[parent] = append(groups[parent], model)
-	}
-
-	for index := range models {
-		r.attach(&models[index], groups[index])
+	for index, count := range result.counts {
+		attach(&models[index], children[:count:count])
+		children = children[count:]
 	}
 }
 
@@ -105,13 +116,14 @@ func (r countRelation[M, R]) ratelRelation(models []M) (loadJob, error) {
 	}
 
 	counts := make([]int64, len(models))
+	attach := r.relation.count
 
 	return loadJob{
 		statement: statement,
 		read:      func(rows pgx.Rows) error { return readCounts(rows, counts) },
 		attach: func() {
 			for index := range models {
-				r.relation.count(&models[index], counts[index])
+				attach(&models[index], counts[index])
 			}
 		},
 	}, nil
@@ -176,7 +188,7 @@ func (db *DB) Load[M any](ctx context.Context, models []M, relations ...Relation
 		return err
 	}
 
-	ctx, span := db.tracer.Start(ctx, "ratel.load", readSpanOptions("", "")...)
+	ctx, span := db.tracer.Start(ctx, "ratel.load", db.readOptions...)
 	defer span.End()
 
 	if err := db.load(ctx, jobs); err != nil {
@@ -223,7 +235,7 @@ func (db *DB) load(ctx context.Context, jobs []loadJob) error {
 }
 
 func (db *DB) loadDepth(ctx context.Context, jobs []loadJob) error {
-	ctx, span := db.tracer.Start(ctx, "ratel.load.depth", readSpanOptions("", "")...)
+	ctx, span := db.tracer.Start(ctx, "ratel.load.depth", db.readOptions...)
 	defer span.End()
 
 	batch := &pgx.Batch{}

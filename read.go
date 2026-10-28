@@ -96,24 +96,41 @@ func (q Select[M]) List(ctx context.Context, options ...CallOption) ([]M, error)
 }
 
 func (q Select[M]) collect(ctx context.Context, operation string, options []CallOption) ([]M, error) {
+	if q.db == nil {
+		return nil, ErrInvalidQuery
+	}
+
+	ctx, span := q.db.tracer.Start(ctx, operation, q.spanOptions()...)
+	defer span.End()
+
+	rows, err := q.rows(ctx, options)
+	if err != nil {
+		recordFailure(span, err)
+
+		return nil, err
+	}
+
+	defer rows.Close()
+
 	models := make([]M, 0)
 
-	var failure error
+	for rows.Next() {
+		model, scanErr := q.source.table.scan(rows)
+		if scanErr != nil {
+			err = fmt.Errorf("ratel: scan SELECT: %w", scanErr)
+			recordFailure(span, err)
 
-	q.iterate(ctx, operation, options, func(model M, err error) bool {
-		if err != nil {
-			failure = err
-
-			return false
+			return nil, err
 		}
 
 		models = append(models, model)
+	}
 
-		return true
-	})
+	if err = rows.Err(); err != nil {
+		err = fmt.Errorf("ratel: iterate SELECT: %w", err)
+		recordFailure(span, err)
 
-	if failure != nil {
-		return nil, failure
+		return nil, err
 	}
 
 	return models, nil
@@ -157,7 +174,7 @@ func (q Select[M]) single(ctx context.Context, operation string, limit int, opti
 }
 
 func (q Select[M]) spanOptions() []trace.SpanStartOption {
-	return readSpanOptions(q.source.table.schema, q.source.table.name)
+	return q.source.table.readOptions
 }
 
 func readSpanOptions(schema, table string) []trace.SpanStartOption {

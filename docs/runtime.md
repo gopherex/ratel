@@ -179,6 +179,9 @@ non-null key. Static `NewQuery` sources carry no primary-key metadata and
 cannot use `Chunks`; a nested builder SELECT preserves its source's key.
 Constructor inputs are copied;
 descriptors and SELECT builders are immutable and can be shared concurrently.
+Table descriptors precompute their quoted projection, plain SELECT SQL and read
+span options. `InSchema` recomputes schema-dependent SQL and span attributes;
+rendering an unmodified table SELECT reuses its SQL without a per-call cache.
 The caller must not mutate argument values (for example, bound slices) while
 an operation uses them, following pgx's argument ownership rules.
 
@@ -224,6 +227,11 @@ scanning uses `&V`. Thus `T` has exactly the codec support pgx provides,
 including pointer, array and custom JSONB struct targets. The runtime neither
 imports `reflect` nor implements `database/sql.Scanner` or `driver.Valuer`.
 The underlying pgx codecs may use reflection themselves.
+Optional scan plans cache their delegate by OID, format and underlying Go type
+on the registering map; a copied pgx map plans against its own configuration.
+Scans decode directly into `V` and clear it on failure. Concrete built-in scalar
+encoders retain their delegate plan; interfaces and nil-capable values still
+use `Map.Encode` so dynamic types and pgx's native NULL handling remain intact.
 
 A `TryWrapScanPlanFuncs` / `TryWrapEncodePlanFuncs` hook alone is insufficient:
 pgx v5.11 calls the codec before those hooks. Its JSON/JSONB codecs accept
@@ -491,8 +499,11 @@ Generated descriptors construct each edge with
   `targetColumns` match the target's primary-key columns, including composite
   target keys. All tables and PostgreSQL types remain schema-qualified.
 - Constructor metadata, modifiers and requested-relation slices are copied.
-  Descriptors are immutable. Projection and assignment callbacks are generated
-  code and must preserve the declared array lengths and field assignments.
+  Descriptors are immutable. SQL-affecting modifiers precompute row/count SQL
+  and fixed arguments; each load copies the arguments and projects current
+  parent keys. Construction never calls key-projection callbacks.
+  Projection and assignment callbacks are generated code and must preserve
+  the declared array lengths and field assignments.
 
 ### Loading behavior
 
@@ -505,7 +516,10 @@ Generated descriptors construct each edge with
   arrays through `unnest`. Relations of the same depth go in one `pgx.Batch`.
   The parent-key input uses `WITH ORDINALITY`; its ordinal identifies the
   destination model, preserving duplicate parent keys and NULL FK semantics
-  without reflection or Go-key comparability requirements.
+  without reflection or Go-key comparability requirements. Row-load SQL orders
+  by parent ordinal, allowing attachments to use capacity-bounded slices of the
+  scanned model buffer without copying children. Appending to one parent's
+  loaded slice cannot overwrite another parent's children.
 - Each batch and every result cursor closes before the next depth starts.
   Nested relations load before results are attached to parents. Attachments
   happen deepest first, only after the entire graph succeeds. A failed
@@ -630,3 +644,12 @@ exhaustion, failure or early break.
   The generated path builds SQL, traces, scans through generated field
   addresses and attaches loaded values; the handwritten baseline uses the
   same ordinal-key join in one `pgx.Batch` and scans and attaches directly.
+- Compare changes with ten samples from each revision, using identical commands:
+  `go test -run '^$' -bench '^BenchmarkValueCodec$' -benchmem -count=10` and
+  `go -C tests test -tags integration -run '^$' -bench '^(BenchmarkReadScan|BenchmarkRelationLoad)$' -benchmem -count=10`.
+  Feed the saved outputs to `benchstat before.txt after.txt`. Driver baselines
+  also use ratel nullable values, so codec improvements affect both paths.
+  For allocation and CPU attribution, add `-memprofile` and `-cpuprofile`
+  output paths; inspect allocation sites with
+  `go tool pprof -alloc_objects -list 'PlanScan|scanValue|readRelated|qualifiedColumn' <binary> <memory-profile>`.
+  Keep profiles and benchmark output outside version control.

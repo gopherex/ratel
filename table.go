@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Scanner is generated code that reads one model in descriptor column order.
@@ -30,6 +31,9 @@ type Table[M any] struct {
 	keys        []string
 	keyValues   func(M) []any
 	constraints []ConstraintError
+	projection  string
+	selectSQL   string
+	readOptions []trace.SpanStartOption
 }
 
 // TableOption supplies generated table metadata.
@@ -54,27 +58,56 @@ func NewTable[M any](schema, name string, columns []string, scan Scanner[M], opt
 		table = option(table)
 	}
 
+	table.projection = table.renderProjection()
+	table = table.withSchema(table.schema)
+
 	return table
+}
+
+func (t Table[M]) renderProjection() string {
+	writer := &sqlWriter{}
+
+	for index, column := range t.columns {
+		if index > 0 {
+			writer.WriteString(", ")
+		}
+
+		writer.column(column)
+	}
+
+	return writer.String()
+}
+
+func (t Table[M]) withSchema(schema string) Table[M] {
+	t.schema = schema
+	t.readOptions = readSpanOptions(schema, t.name)
+	t.selectSQL = ""
+
+	if t.valid() && validIdentifier(schema) && validIdentifier(t.name) {
+		t.selectSQL = "SELECT " + t.projection + " FROM " + pgx.Identifier{schema, t.name}.Sanitize() + ` AS "q"`
+	}
+
+	return t
 }
 
 // InSchema returns table metadata for another schema. Generated descriptors wrap
 // this method to preserve their typed column and relation fields.
 func (t Table[M]) InSchema(schema string) Table[M] {
-	t.schema = schema
-
-	return t
+	return t.withSchema(schema)
 }
 
 func (t Table[M]) ratelSource() source[M] {
-	return source[M]{table: t, render: func(writer *sqlWriter) error {
-		if !validIdentifier(t.schema) || !validIdentifier(t.name) {
-			return ErrInvalidQuery
-		}
+	return source[M]{table: t}
+}
 
-		writer.WriteString(pgx.Identifier{t.schema, t.name}.Sanitize())
+func (t Table[M]) render(writer *sqlWriter) error {
+	if !validIdentifier(t.schema) || !validIdentifier(t.name) {
+		return ErrInvalidQuery
+	}
 
-		return nil
-	}}
+	writer.qualifiedColumn(t.schema, t.name)
+
+	return nil
 }
 
 func (t Table[M]) valid() bool {
@@ -105,7 +138,7 @@ type Query[M any] struct {
 // NewQuery binds a static SELECT whose output columns match the generated scanner.
 // Its parameters are contiguous $1..$n; SQL is trusted, generated PostgreSQL SQL.
 func NewQuery[M any](columns []string, scan Scanner[M], sql string, args ...any) Query[M] {
-	return Query[M]{table: Table[M]{columns: slices.Clone(columns), scan: scan}, sql: sql, args: slices.Clone(args)}
+	return Query[M]{table: NewTable("", "", columns, scan), sql: sql, args: slices.Clone(args)}
 }
 
 func (q Query[M]) ratelSource() source[M] {

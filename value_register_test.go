@@ -185,11 +185,100 @@ func TestValueCodecPlanContracts(t *testing.T) {
 				t.Fatalf("encode plan misuse: %v", err)
 			}
 
-			scanPlan := typeMap.PlanScan(dataType.OID, tc.format, new(ratel.Null[int64]))
-			if err := scanPlan.Scan(nil, "wrong type"); !errors.Is(err, pgtype.ErrScanTargetTypeChanged) {
-				t.Fatalf("scan plan misuse: %v", err)
+			scanPlan := typeMap.PlanScan(dataType.OID, tc.format, (*ratel.Null[int64])(nil))
+			for _, target := range []any{"wrong type", new(ratel.Null[string]), new(ratel.Opt[string])} {
+				if err := scanPlan.Scan(nil, target); !errors.Is(err, pgtype.ErrScanTargetTypeChanged) {
+					t.Fatalf("scan plan misuse for %T: %v", target, err)
+				}
+			}
+
+			for _, value := range []any{ratel.NullFrom("wrong type"), ratel.OptFrom("wrong type")} {
+				if _, err := encodePlan.Encode(value, nil); !errors.Is(err, pgtype.ErrScanTargetTypeChanged) {
+					t.Fatalf("encode plan misuse for %T: %v", value, err)
+				}
 			}
 		})
+	}
+}
+
+func TestValueScanPlanCached(t *testing.T) {
+	t.Parallel()
+
+	for _, format := range []int16{pgtype.TextFormatCode, pgtype.BinaryFormatCode} {
+		t.Run(string(rune('0'+format)), func(t *testing.T) {
+			t.Parallel()
+
+			typeMap := pgtype.NewMap()
+			if err := ratel.RegisterValue[int64](typeMap, "int8"); err != nil {
+				t.Fatal(err)
+			}
+
+			var value ratel.Null[int64]
+			first := typeMap.PlanScan(pgtype.Int8OID, format, &value)
+			second := typeMap.PlanScan(pgtype.Int8OID, format, &value)
+
+			if first != second {
+				t.Fatal("optional scan plan was rebuilt")
+			}
+		})
+	}
+}
+
+func TestValuePlansUseRequestingMap(t *testing.T) {
+	t.Parallel()
+
+	typeMap := pgtype.NewMap()
+	if err := ratel.RegisterValue[*int64](typeMap, "int8"); err != nil {
+		t.Fatal(err)
+	}
+
+	var original ratel.Null[*int64]
+	if err := typeMap.Scan(pgtype.Int8OID, pgtype.TextFormatCode, []byte("42"), &original); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, disabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "native", true: "no pointer wrappers"}[disabled], func(t *testing.T) {
+			t.Parallel()
+
+			copied := typeMap.Copy()
+			if disabled {
+				copied.TryWrapScanPlanFuncs = nil
+			}
+
+			var value ratel.Null[*int64]
+			err := copied.Scan(pgtype.Int8OID, pgtype.TextFormatCode, []byte("7"), &value)
+
+			if disabled {
+				if err == nil || value.Valid || value.V != nil {
+					t.Fatalf("reused original map's pointer plan: %+v: %v", value, err)
+				}
+			} else if err != nil || !value.Valid || value.V == nil || *value.V != 7 {
+				t.Fatalf("copied map: %+v: %v", value, err)
+			}
+		})
+	}
+}
+
+func TestValueEncodeDynamicType(t *testing.T) {
+	t.Parallel()
+
+	typeMap := pgtype.NewMap()
+	if err := ratel.RegisterValue[any](typeMap, "int8"); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := typeMap.PlanEncode(pgtype.Int8OID, pgtype.TextFormatCode, ratel.Null[any]{})
+	for _, tc := range []struct {
+		value any
+		want  []byte
+	}{
+		{int64(42), []byte("42")}, {int32(42), []byte("42")}, {nil, nil}, {(*int64)(nil), nil},
+	} {
+		encoded, err := plan.Encode(ratel.NullFrom(tc.value), nil)
+		if err != nil || !bytes.Equal(encoded, tc.want) || (encoded == nil) != (tc.want == nil) {
+			t.Fatalf("dynamic %T: %q: %v", tc.value, encoded, err)
+		}
 	}
 }
 

@@ -74,6 +74,12 @@ type Rel[M, R any] struct {
 	targetColumns []string
 	children      []Relation[R]
 	strategy      LoadStrategy
+	statements    *relationStatements
+}
+
+type relationStatements struct {
+	rows  Statement
+	count Statement
 }
 
 // RelOption supplies generated relation metadata.
@@ -97,7 +103,7 @@ func NewRel[M, R any](target RelationTarget[R], cardinality Cardinality, keys []
 		relation = option(relation)
 	}
 
-	return relation
+	return relation.compile()
 }
 
 // RelCount supplies the generated count-field assignment, independently of loaded rows.
@@ -126,28 +132,28 @@ func Through[M, R any](schema, table string, targetColumns ...string) RelOption[
 func (r Rel[M, R]) Where(condition Cond[R]) Rel[M, R] {
 	r.query = r.query.Where(condition)
 
-	return r
+	return r.compile()
 }
 
 // OrderBy appends ordering within each parent.
 func (r Rel[M, R]) OrderBy(orders ...Order[R]) Rel[M, R] {
 	r.query = r.query.OrderBy(orders...)
 
-	return r
+	return r.compile()
 }
 
 // Limit caps children per parent, not the whole batch.
 func (r Rel[M, R]) Limit(count int) Rel[M, R] {
 	r.query = r.query.Limit(count)
 
-	return r
+	return r.compile()
 }
 
 // Offset skips children independently for each parent.
 func (r Rel[M, R]) Offset(count int) Rel[M, R] {
 	r.query = r.query.Offset(count)
 
-	return r
+	return r.compile()
 }
 
 // With requests nested relations, loaded in a later depth batch before attachment.
@@ -187,7 +193,7 @@ func Joined() LoadStrategy { return LoadStrategy{kind: strategyJoined} }
 func (r Rel[M, R]) Strategy(strategy LoadStrategy) Rel[M, R] {
 	r.strategy = strategy
 
-	return r
+	return r.compile()
 }
 
 // CountRelation can project a generated relation's count field.

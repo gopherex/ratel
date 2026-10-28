@@ -48,12 +48,12 @@ func (value Null[T]) IsZero() bool {
 	return !value.Valid
 }
 
-func (value Null[T]) encodeValue(typeMap *pgtype.Map, oid uint32, format int16, buffer []byte) ([]byte, error) {
+func (value Null[T]) encodeValue(plan *valuePlan, buffer []byte) ([]byte, error) {
 	if !value.Valid {
 		return nil, nil
 	}
 
-	encoded, err := typeMap.Encode(oid, format, value.V, buffer)
+	encoded, err := encodeValue(plan, value.V, buffer)
 	if err != nil {
 		return nil, fmt.Errorf("encode Null: %w", err)
 	}
@@ -61,19 +61,20 @@ func (value Null[T]) encodeValue(typeMap *pgtype.Map, oid uint32, format int16, 
 	return encoded, nil
 }
 
-func (value *Null[T]) scanValue(typeMap *pgtype.Map, oid uint32, format int16, source []byte) error {
+func (value *Null[T]) scanValue(plan pgtype.ScanPlan, source []byte) error {
 	*value = Null[T]{}
 
 	if source == nil {
 		return nil
 	}
 
-	var decoded T
-	if err := typeMap.Scan(oid, format, source, &decoded); err != nil {
+	if err := plan.Scan(source, &value.V); err != nil {
+		*value = Null[T]{}
+
 		return fmt.Errorf("scan Null: %w", err)
 	}
 
-	*value = NullFrom(decoded)
+	value.Valid = true
 
 	return nil
 }
@@ -94,12 +95,12 @@ func (value Opt[T]) IsZero() bool {
 	return !value.Set
 }
 
-func (value Opt[T]) encodeValue(typeMap *pgtype.Map, oid uint32, format int16, buffer []byte) ([]byte, error) {
+func (value Opt[T]) encodeValue(plan *valuePlan, buffer []byte) ([]byte, error) {
 	if !value.Set {
 		return nil, UnsetOptError{}
 	}
 
-	encoded, err := typeMap.Encode(oid, format, value.V, buffer)
+	encoded, err := encodeValue(plan, value.V, buffer)
 	if err != nil {
 		return nil, fmt.Errorf("encode Opt: %w", err)
 	}
@@ -107,15 +108,68 @@ func (value Opt[T]) encodeValue(typeMap *pgtype.Map, oid uint32, format int16, b
 	return encoded, nil
 }
 
-func (value *Opt[T]) scanValue(typeMap *pgtype.Map, oid uint32, format int16, source []byte) error {
+func (value *Opt[T]) scanValue(plan pgtype.ScanPlan, source []byte) error {
 	*value = Opt[T]{}
 
-	var decoded T
-	if err := typeMap.Scan(oid, format, source, &decoded); err != nil {
+	if err := plan.Scan(source, &value.V); err != nil {
+		*value = Opt[T]{}
+
 		return fmt.Errorf("scan Opt: %w", err)
 	}
 
-	*value = OptFrom(decoded)
+	value.Set = true
 
 	return nil
+}
+
+func (*Null[T]) scanTarget() any { return new(T) }
+
+func (*Opt[T]) scanTarget() any { return new(T) }
+
+func (Null[T]) encodeType() any { return valueType[T]{} }
+
+func (Opt[T]) encodeType() any { return valueType[T]{} }
+
+func (*Null[T]) valueType() any { return valueType[T]{} }
+
+func (*Opt[T]) valueType() any { return valueType[T]{} }
+
+func (Null[T]) encodePlan(typeMap *pgtype.Map, oid uint32, format int16) pgtype.EncodePlan {
+	return scalarEncodePlan[T](typeMap, oid, format)
+}
+
+func (Opt[T]) encodePlan(typeMap *pgtype.Map, oid uint32, format int16) pgtype.EncodePlan {
+	return scalarEncodePlan[T](typeMap, oid, format)
+}
+
+func scalarEncodePlan[T any](typeMap *pgtype.Map, oid uint32, format int16) pgtype.EncodePlan {
+	// Only concrete, non-nullable types bypass Map.Encode's nil-value handling.
+	// Interfaces and nil-capable types retain pgx's dynamic planning and NULL semantics.
+	switch any((*T)(nil)).(type) {
+	case *bool, *int8, *int16, *int32, *int64, *int, *uint8, *uint16, *uint32, *uint64, *uint,
+		*float32, *float64, *string:
+		var value T
+
+		return typeMap.PlanEncode(oid, format, value)
+	default:
+		return nil
+	}
+}
+
+func encodeValue[T any](plan *valuePlan, value T, buffer []byte) ([]byte, error) {
+	var encoded []byte
+
+	var err error
+
+	if plan.encode != nil {
+		encoded, err = plan.encode.Encode(value, buffer)
+	} else {
+		encoded, err = plan.typeMap.Encode(plan.oid, plan.format, value, buffer)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("encode value: %w", err)
+	}
+
+	return encoded, nil
 }

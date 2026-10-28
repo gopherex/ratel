@@ -25,13 +25,18 @@ func RegisterValue[T any](typeMap *pgtype.Map, name string) error {
 		return ValueTypeError{Name: name}
 	}
 
-	switch dataType.Codec.(type) {
+	var codec pgtype.Codec
+
+	switch wrapped := dataType.Codec.(type) {
 	case *valueCodec:
+		codec = wrapped.Codec
 	default:
-		wrapped := *dataType
-		wrapped.Codec = &valueCodec{Codec: dataType.Codec}
-		typeMap.RegisterType(&wrapped)
+		codec = wrapped
 	}
+
+	wrapped := *dataType
+	wrapped.Codec = &valueCodec{Codec: codec, typeMap: typeMap, scans: make(map[valuePlanKey]*valuePlan)}
+	typeMap.RegisterType(&wrapped)
 
 	for _, value := range []any{
 		Null[T]{}, new(Null[T]), Opt[T]{}, new(Opt[T]), Opt[Null[T]]{}, new(Opt[Null[T]]),
@@ -43,17 +48,31 @@ func RegisterValue[T any](typeMap *pgtype.Map, name string) error {
 }
 
 type valueEncoder interface {
-	encodeValue(typeMap *pgtype.Map, oid uint32, format int16, buffer []byte) ([]byte, error)
+	encodeValue(plan *valuePlan, buffer []byte) ([]byte, error)
+	encodePlan(typeMap *pgtype.Map, oid uint32, format int16) pgtype.EncodePlan
+	encodeType() any
 }
 
 type valueScanner interface {
-	scanValue(typeMap *pgtype.Map, oid uint32, format int16, source []byte) error
+	scanValue(plan pgtype.ScanPlan, source []byte) error
+	scanTarget() any
+	valueType() any
+}
+
+type valueType[T any] struct{}
+
+type valuePlanKey struct {
+	typeID any
+	oid    uint32
+	format int16
 }
 
 // The codec must intercept optionals before JSON's catch-all plans. Map's
 // TryWrap hooks run after codecs, so they cannot handle arbitrary JSON targets.
 type valueCodec struct {
 	pgtype.Codec
+	typeMap *pgtype.Map
+	scans   map[valuePlanKey]*valuePlan
 }
 
 func (codec *valueCodec) PlanEncode(typeMap *pgtype.Map, oid uint32, format int16, value any) pgtype.EncodePlan {
@@ -61,9 +80,12 @@ func (codec *valueCodec) PlanEncode(typeMap *pgtype.Map, oid uint32, format int1
 		return nil
 	}
 
-	switch value.(type) {
+	switch value := value.(type) {
 	case valueEncoder:
-		return &valuePlan{typeMap: typeMap, oid: oid, format: format}
+		return &valuePlan{
+			typeMap: typeMap, oid: oid, format: format,
+			encode: value.encodePlan(typeMap, oid, format), typeID: value.encodeType(),
+		}
 	default:
 		return codec.Codec.PlanEncode(typeMap, oid, format, value)
 	}
@@ -74,9 +96,23 @@ func (codec *valueCodec) PlanScan(typeMap *pgtype.Map, oid uint32, format int16,
 		return nil
 	}
 
-	switch target.(type) {
+	switch target := target.(type) {
 	case valueScanner:
-		return &valuePlan{typeMap: typeMap, oid: oid, format: format}
+		key := valuePlanKey{typeID: target.valueType(), oid: oid, format: format}
+		if typeMap == codec.typeMap {
+			if plan := codec.scans[key]; plan != nil {
+				return plan
+			}
+		}
+
+		plan := &valuePlan{scan: typeMap.PlanScan(oid, format, target.scanTarget()), typeID: key.typeID}
+		// Map.Copy shares codecs, but delegate plans belong to the requesting map.
+		// Only the owning map writes this cache, under pgx's map ownership rules.
+		if typeMap == codec.typeMap {
+			codec.scans[key] = plan
+		}
+
+		return plan
 	default:
 		return codec.Codec.PlanScan(typeMap, oid, format, target)
 	}
@@ -86,12 +122,19 @@ type valuePlan struct {
 	typeMap *pgtype.Map
 	oid     uint32
 	format  int16
+	encode  pgtype.EncodePlan
+	scan    pgtype.ScanPlan
+	typeID  any
 }
 
 func (plan *valuePlan) Encode(value any, buffer []byte) ([]byte, error) {
 	switch value := value.(type) {
 	case valueEncoder:
-		return value.encodeValue(plan.typeMap, plan.oid, plan.format, buffer)
+		if value.encodeType() != plan.typeID {
+			return nil, fmt.Errorf("encode optional: %w", pgtype.ErrScanTargetTypeChanged)
+		}
+
+		return value.encodeValue(plan, buffer)
 	default:
 		return nil, fmt.Errorf("encode optional: %w", pgtype.ErrScanTargetTypeChanged)
 	}
@@ -100,7 +143,11 @@ func (plan *valuePlan) Encode(value any, buffer []byte) ([]byte, error) {
 func (plan *valuePlan) Scan(source []byte, target any) error {
 	switch target := target.(type) {
 	case valueScanner:
-		return target.scanValue(plan.typeMap, plan.oid, plan.format, source)
+		if target.valueType() != plan.typeID {
+			return fmt.Errorf("scan optional: %w", pgtype.ErrScanTargetTypeChanged)
+		}
+
+		return target.scanValue(plan.scan, source)
 	default:
 		return fmt.Errorf("scan optional: %w", pgtype.ErrScanTargetTypeChanged)
 	}

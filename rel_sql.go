@@ -3,8 +3,6 @@ package ratel
 import (
 	"slices"
 	"strconv"
-
-	"github.com/jackc/pgx/v5"
 )
 
 func (r Rel[M, R]) valid(count bool) bool {
@@ -96,7 +94,37 @@ func (r Rel[M, R]) validThrough() bool {
 	return true
 }
 
+func (r Rel[M, R]) compile() Rel[M, R] {
+	rows, _ := r.renderStatement(false)
+	count, _ := r.renderStatement(true)
+	r.statements = &relationStatements{rows: rows, count: count}
+
+	return r
+}
+
 func (r Rel[M, R]) statement(models []M, count bool) (Statement, error) {
+	if r.statements == nil {
+		return Statement{}, ErrInvalidQuery
+	}
+
+	statement := r.statements.rows
+	if count {
+		statement = r.statements.count
+	}
+
+	if statement.SQL == "" {
+		return Statement{}, ErrInvalidQuery
+	}
+
+	statement.Args = slices.Clone(statement.Args)
+	for index, key := range r.keys {
+		statement.Args[index] = key.Values(models)
+	}
+
+	return statement, nil
+}
+
+func (r Rel[M, R]) renderStatement(count bool) (Statement, error) {
 	if !r.valid(count) {
 		return Statement{}, ErrInvalidQuery
 	}
@@ -105,13 +133,13 @@ func (r Rel[M, R]) statement(models []M, count bool) (Statement, error) {
 
 	switch {
 	case count:
-		r.appendCount(writer, models)
+		r.appendCount(writer)
 	case r.strategy.kind == strategyWindow:
-		r.appendWindow(writer, models)
+		r.appendWindow(writer)
 	case r.query.limit.Set || r.query.offset.Set:
-		r.appendLateral(writer, models)
+		r.appendLateral(writer)
 	default:
-		r.appendJoined(writer, models)
+		r.appendJoined(writer)
 	}
 
 	if writer.invalid {
@@ -129,7 +157,7 @@ func (r Rel[M, R]) internalColumn(name string) string {
 	return name
 }
 
-func (r Rel[M, R]) appendInput(writer *sqlWriter, models []M) {
+func (r Rel[M, R]) appendInput(writer *sqlWriter) {
 	writer.WriteString("unnest(")
 
 	for index, key := range r.keys {
@@ -137,9 +165,9 @@ func (r Rel[M, R]) appendInput(writer *sqlWriter, models []M) {
 			writer.WriteString(", ")
 		}
 
-		writer.param(key.Values(models))
+		writer.param(nil)
 		writer.WriteString("::")
-		writer.WriteString(key.Type.Sanitize())
+		writer.qualifiedColumn(key.Type[0], key.Type[1])
 		writer.WriteString("[]")
 	}
 
@@ -150,7 +178,7 @@ func (r Rel[M, R]) appendInput(writer *sqlWriter, models []M) {
 			writer.WriteString(", ")
 		}
 
-		writer.WriteString(pgx.Identifier{relationKeyName(index)}.Sanitize())
+		writer.identifier(relationKeyName(index))
 	}
 
 	writer.WriteString(`, "__ratel_parent")`)
@@ -178,7 +206,7 @@ func (r Rel[M, R]) foreignAlias() string {
 
 func (r Rel[M, R]) appendTarget(writer *sqlWriter) {
 	table := r.query.source.table
-	writer.WriteString(pgx.Identifier{table.schema, table.name}.Sanitize())
+	writer.qualifiedColumn(table.schema, table.name)
 	writer.WriteString(` AS "q"`)
 
 	if len(r.through) == 0 {
@@ -186,7 +214,7 @@ func (r Rel[M, R]) appendTarget(writer *sqlWriter) {
 	}
 
 	writer.WriteString(" JOIN ")
-	writer.WriteString(r.through.Sanitize())
+	writer.qualifiedColumn(r.through[0], r.through[1])
 	writer.WriteString(` AS "l" ON `)
 
 	for index, column := range r.targetColumns {
@@ -220,8 +248,8 @@ func (r Rel[M, R]) appendFilter(writer *sqlWriter) {
 	}
 }
 
-func (r Rel[M, R]) appendBody(writer *sqlWriter, models []M) {
-	r.appendInput(writer, models)
+func (r Rel[M, R]) appendBody(writer *sqlWriter) {
+	r.appendInput(writer)
 	writer.WriteString(" JOIN ")
 
 	if len(r.through) != 0 {
@@ -247,11 +275,11 @@ func (r Rel[M, R]) appendBody(writer *sqlWriter, models []M) {
 	r.appendFilter(writer)
 }
 
-func (r Rel[M, R]) appendJoined(writer *sqlWriter, models []M) {
+func (r Rel[M, R]) appendJoined(writer *sqlWriter) {
 	writer.WriteString(`SELECT "p"."__ratel_parent", `)
 	r.appendColumns(writer, "q")
 	writer.WriteString(" FROM ")
-	r.appendBody(writer, models)
+	r.appendBody(writer)
 	writer.WriteString(` ORDER BY "p"."__ratel_parent"`)
 	r.appendChildOrder(writer, "q", true)
 }
@@ -274,11 +302,11 @@ func (r Rel[M, R]) appendChildOrder(writer *sqlWriter, alias string, comma bool)
 	}
 }
 
-func (r Rel[M, R]) appendLateral(writer *sqlWriter, models []M) {
+func (r Rel[M, R]) appendLateral(writer *sqlWriter) {
 	writer.WriteString(`SELECT "p"."__ratel_parent", `)
 	r.appendColumns(writer, "c")
 	writer.WriteString(" FROM ")
-	r.appendInput(writer, models)
+	r.appendInput(writer)
 	writer.WriteString(" CROSS JOIN LATERAL (SELECT ")
 	r.appendColumns(writer, "q")
 	writer.WriteString(" FROM ")
@@ -292,7 +320,7 @@ func (r Rel[M, R]) appendLateral(writer *sqlWriter, models []M) {
 	r.appendChildOrder(writer, "c", true)
 }
 
-func (r Rel[M, R]) appendWindow(writer *sqlWriter, models []M) {
+func (r Rel[M, R]) appendWindow(writer *sqlWriter) {
 	parent := r.internalColumn("__ratel_parent")
 	rank := r.internalColumn("__ratel_rank")
 
@@ -301,15 +329,15 @@ func (r Rel[M, R]) appendWindow(writer *sqlWriter, models []M) {
 	writer.WriteString(", ")
 	r.appendColumns(writer, "w")
 	writer.WriteString(` FROM (SELECT "p"."__ratel_parent" AS `)
-	writer.WriteString(pgx.Identifier{parent}.Sanitize())
+	writer.identifier(parent)
 	writer.WriteString(", ")
 	r.appendColumns(writer, "q")
 	writer.WriteString(`, row_number() OVER (PARTITION BY "p"."__ratel_parent"`)
 	r.appendChildOrder(writer, "q", false)
 	writer.WriteString(") AS ")
-	writer.WriteString(pgx.Identifier{rank}.Sanitize())
+	writer.identifier(rank)
 	writer.WriteString(" FROM ")
-	r.appendBody(writer, models)
+	r.appendBody(writer)
 	writer.WriteString(`) AS "w" WHERE `)
 	writer.qualifiedColumn("w", rank)
 	writer.WriteString(" > ")
@@ -330,17 +358,17 @@ func (r Rel[M, R]) appendWindow(writer *sqlWriter, models []M) {
 	writer.qualifiedColumn("w", rank)
 }
 
-func (r Rel[M, R]) appendCount(writer *sqlWriter, models []M) {
+func (r Rel[M, R]) appendCount(writer *sqlWriter) {
 	writer.WriteString(`SELECT "p"."__ratel_parent", `)
 
 	if r.strategy.kind == strategyCorrelated {
-		r.appendCorrelatedCount(writer, models)
+		r.appendCorrelatedCount(writer)
 
 		return
 	}
 
 	writer.WriteString("count(*) FROM ")
-	r.appendBody(writer, models)
+	r.appendBody(writer)
 	writer.WriteString(` GROUP BY "p"."__ratel_parent"`)
 
 	for _, key := range r.keys {
@@ -349,10 +377,10 @@ func (r Rel[M, R]) appendCount(writer *sqlWriter, models []M) {
 	}
 }
 
-func (r Rel[M, R]) appendCorrelatedCount(writer *sqlWriter, models []M) {
+func (r Rel[M, R]) appendCorrelatedCount(writer *sqlWriter) {
 	// Bind parent arrays first so child predicates always follow the key parameters.
 	input := &sqlWriter{}
-	r.appendInput(input, models)
+	r.appendInput(input)
 	writer.args = input.args
 	writer.WriteString("(SELECT count(*) FROM ")
 	r.appendTarget(writer)

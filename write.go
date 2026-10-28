@@ -71,7 +71,7 @@ func (q Write[M]) SQL() (Statement, error) {
 
 	writer.WriteByte(' ')
 
-	if err := q.table.ratelSource().render(writer); err != nil {
+	if err := q.table.render(writer); err != nil {
 		return Statement{}, err
 	}
 

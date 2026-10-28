@@ -4,8 +4,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
 )
 
 type refusal string
@@ -36,11 +34,33 @@ func (w *sqlWriter) param(value any) {
 func (w *sqlWriter) column(name string) { w.qualifiedColumn("q", name) }
 
 func (w *sqlWriter) qualifiedColumn(alias, name string) {
-	if !validIdentifier(alias) || !validIdentifier(name) {
+	w.identifier(alias)
+	w.WriteByte('.')
+	w.identifier(name)
+}
+
+func (w *sqlWriter) identifier(name string) {
+	if !validIdentifier(name) {
 		w.invalid = true
 	}
 
-	w.WriteString(pgx.Identifier{alias, name}.Sanitize())
+	w.WriteByte('"')
+
+	for {
+		index := strings.IndexByte(name, '"')
+		if index < 0 {
+			w.WriteString(name)
+
+			break
+		}
+
+		w.WriteString(name[:index+1])
+		w.WriteByte('"')
+
+		name = name[index+1:]
+	}
+
+	w.WriteByte('"')
 }
 
 // Select is an immutable typed SELECT. Branches can be used concurrently.
@@ -100,7 +120,14 @@ type Statement struct {
 
 // SQL renders the query and numbered PostgreSQL arguments without executing it.
 func (q Select[M]) SQL() (Statement, error) {
+	if q.source.render == nil && q.source.table.selectSQL != "" && !q.hasWhere &&
+		len(q.orders) == 0 && !q.limit.Set && !q.offset.Set {
+		return Statement{SQL: q.source.table.selectSQL}, nil
+	}
+
 	writer := &sqlWriter{}
+	writer.Grow(len(q.source.table.selectSQL))
+
 	if err := q.appendSQL(writer); err != nil {
 		return Statement{}, err
 	}
@@ -113,27 +140,27 @@ func (q Select[M]) SQL() (Statement, error) {
 }
 
 func (q Select[M]) appendSQL(writer *sqlWriter) error {
-	if !q.source.table.valid() || q.source.render == nil || q.limit.V < 0 || q.offset.V < 0 {
+	if !q.source.table.valid() || q.limit.V < 0 || q.offset.V < 0 {
 		return ErrInvalidQuery
 	}
 
-	writer.WriteString("SELECT ")
-
-	for index, column := range q.source.table.columns {
-		if index > 0 {
-			writer.WriteString(", ")
+	if q.source.render == nil {
+		if q.source.table.selectSQL == "" {
+			return ErrInvalidQuery
 		}
 
-		writer.column(column)
+		writer.WriteString(q.source.table.selectSQL)
+	} else {
+		writer.WriteString("SELECT ")
+		writer.WriteString(q.source.table.projection)
+		writer.WriteString(" FROM ")
+
+		if err := q.source.render(writer); err != nil {
+			return err
+		}
+
+		writer.WriteString(` AS "q"`)
 	}
-
-	writer.WriteString(" FROM ")
-
-	if err := q.source.render(writer); err != nil {
-		return err
-	}
-
-	writer.WriteString(` AS "q"`)
 
 	if q.hasWhere {
 		writer.WriteString(" WHERE ")

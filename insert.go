@@ -215,7 +215,7 @@ func (q Insert[M, I]) render(fields []int, rows [][]any, inputs []I) (Statement,
 	writer := &sqlWriter{}
 	writer.WriteString("INSERT INTO ")
 
-	if err := q.table.Table.ratelSource().render(writer); err != nil {
+	if err := q.table.render(writer); err != nil {
 		return Statement{}, err
 	}
 

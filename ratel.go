@@ -21,10 +21,11 @@ type Executor interface {
 
 // DB executes operations on a caller-owned executor.
 type DB struct {
-	executor  Executor
-	tracer    trace.Tracer
-	execMode  Opt[pgx.QueryExecMode]
-	batchRows int
+	executor    Executor
+	tracer      trace.Tracer
+	execMode    Opt[pgx.QueryExecMode]
+	batchRows   int
+	readOptions []trace.SpanStartOption
 }
 
 // Option configures a database before it is shared with callers.
@@ -60,7 +61,7 @@ func New(executor Executor, options ...Option) *DB {
 
 	database := &DB{
 		executor: executor, tracer: otel.GetTracerProvider().Tracer("github.com/gopherex/ratel"),
-		batchRows: defaultBatchRows,
+		batchRows: defaultBatchRows, readOptions: readSpanOptions("", ""),
 	}
 	for _, option := range options {
 		option(database)
