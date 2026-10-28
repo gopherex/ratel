@@ -1,0 +1,12 @@
+version: v1
+linters:
+  default: STANDARD
+linters-settings:
+  ENUM_ZERO_VALUE_SUFFIX:
+    suffix: UNSPECIFIED
+  SERVICE_SUFFIX:
+    suffix: API
+issues: {}
+breaking:
+  baseline: git:main
+  categories: [FILE]

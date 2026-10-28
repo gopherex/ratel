@@ -1,0 +1,15 @@
+# protoc-gen-go resolves from PATH. paths=source_relative cannot produce the
+# layout in docs/architecture.md: it maps ratel/v1/ir/*.proto to
+# <out>/ratel/v1/ir/, and protoc-gen-go refuses module= combined with
+# paths=source_relative outright. module= alone strips the Go module prefix
+# from each file's go_package, so the go_package of a proto decides the Go
+# package its code lands in (ir, plugin, ...).
+version: v1
+generate:
+  paths:
+    - ratel
+plugins:
+  - name: go
+    out: ..
+    opts:
+      - module=github.com/gopherex/ratel

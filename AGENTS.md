@@ -12,6 +12,16 @@ divergence is a code bug or a spec change made in the same commit.
 - Proto: easyp v1 built from source into `./bin/easyp` (gitignored); plugins
   such as `protoc-gen-go` from `PATH`; generated Go is committed.
 
+## Task -> tool
+
+| Task | Tool |
+|---|---|
+| Lint | golangci-lint, pinned, via `make lint` (config `.golangci.yaml`) |
+| Proto generation | easyp v1 (`make proto`; built from the local clone into `./bin`) |
+| PostgreSQL in tests | testcontainers-go, postgres module |
+| Driver | pgx v5, native API (`database/sql` is not supported) |
+| Transactions | `github.com/gopherex/pgtx` >= v1.1.4 |
+
 ## Rules specific to this repo
 
 - The runtime package `ratel` and generated code never import `reflect`.

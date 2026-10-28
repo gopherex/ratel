@@ -1,0 +1,246 @@
+# Canonical golangci-lint config for Go repos (source: komeet platform/.golangci.yaml).
+# Copy as .golangci.yaml into the repo. Adapt ONLY the places marked ADAPT; never
+# weaken a linter or a threshold, never add //nolint. A per-file exclusion is allowed
+# only where a library interface makes the rule impossible to satisfy: one rule per
+# file, with the reason in a comment.
+version: "2"
+output:
+  formats:
+    text:
+      path: stdout
+  sort-order:
+    - linter
+    - severity
+    - file
+linters:
+  default: none
+  enable:
+    - asasalint
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - containedctx
+    - contextcheck
+    - cyclop
+    - decorder
+    - dogsled
+    - dupl
+    - dupword
+    - durationcheck
+    - err113
+    - errcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gocheckcompilerdirectives
+    - gochecknoglobals
+    - gochecknoinits
+    - gochecksumtype
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - godox
+    - gomoddirectives
+    - gomodguard
+    - goprintffuncname
+    - gosec
+    - gosmopolitan
+    - govet
+    - grouper
+    - inamedparam
+    - ineffassign
+    - interfacebloat
+    - intrange
+    - ireturn
+    - lll
+    - loggercheck
+    - maintidx
+    - makezero
+    - mirror
+    - misspell
+    - mnd
+    - musttag
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnil
+    - nlreturn
+    - noctx
+    - nolintlint
+    - nonamedreturns
+    - nosprintfhostport
+    - paralleltest
+    - perfsprint
+    - prealloc
+    - predeclared
+    - promlinter
+    - protogetter
+    - reassign
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
+    - tagalign
+    - tagliatelle
+    - testableexamples
+    - testifylint
+    - testpackage
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - varnamelen
+    - wastedassign
+    - whitespace
+    - wrapcheck
+    - wsl
+  settings:
+    errcheck:
+      check-type-assertions: true
+    exhaustive:
+      check:
+        - switch
+        - mapliteral
+      default-signifies-exhaustive: true
+    cyclop:
+      max-complexity: 15
+    funlen:
+      lines: 75
+    gocognit:
+      min-complexity: 30
+    gocritic:
+      disabled-checks:
+        - dupImport
+        - octalLiteral
+        - whyNoLint
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+        - experimental
+        - opinionated
+      settings:
+        # Values immutable after construction (scenarios, ports, configs) are passed by
+        # value; the default threshold of 80 pushed them into pointers and workaround fields.
+        hugeParam:
+          sizeThreshold: 256
+        captLocal:
+          paramsOnly: false
+        underef:
+          skipRecvDeref: false
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+      settings:
+        shadow:
+          strict: true
+    lll:
+      line-length: 120
+    misspell:
+      locale: US
+    nakedret:
+      max-func-lines: 0
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-no-explanation:
+        - funlen
+        - gocognit
+        - lll
+      allow-unused: false
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+    varnamelen:
+      max-distance: 5
+      min-name-length: 3
+      check-receiver: false
+      check-return: false
+      check-type-param: false
+      ignore-names:
+        - err
+        - tc
+      ignore-type-assert-ok: false
+      ignore-map-index-ok: false
+      ignore-chan-recv-ok: false
+      ignore-decls:
+        - t testing.T
+        - e error
+        - i int
+        - T any
+    wrapcheck:
+      # ADAPT: this module and the user's own libraries whose errors pass through unwrapped.
+      ignore-package-globs:
+        - github.com/gopherex/ratel/*
+        - github.com/gopherex/*
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - lll
+        source: ^//\s*go:generate\s
+      - linters:
+          - bodyclose
+          - containedctx
+          - dupl
+          - err113
+          - errcheck
+          - forcetypeassert
+          - funlen
+          - goconst
+          - gosec
+          - noctx
+          - wrapcheck
+        path: _test\.go
+      - linters:
+          - govet
+        text: 'shadow: declaration of "(err|ctx)" shadows declaration at'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-same-issues: 50
+formatters:
+  enable:
+    - gci
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      # ADAPT: the module path from go.mod.
+      module-path: github.com/gopherex/ratel
+    gci:
+      # ADAPT: own-ecosystem prefixes the module imports; localmodule stays last before blank/dot.
+      sections:
+        - standard
+        - default
+        - prefix(github.com/gopherex)
+        - localmodule
+        - blank
+        - dot
+      custom-order: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
