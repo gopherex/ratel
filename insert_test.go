@@ -318,6 +318,62 @@ func BenchmarkBwInsertArrays(b *testing.B) {
 	}
 }
 
+func BenchmarkInsertTerminals(b *testing.B) {
+	users := writeDescriptor()
+	database := ratel.New(benchWriteExecutor())
+	rows := []writeInsert{newWriteInsert("a")}
+
+	for _, tc := range []struct {
+		name string
+		run  func(ctx context.Context) error
+	}{
+		{"exec", func(ctx context.Context) error {
+			_, err := database.Insert(users, rows...).Exec(ctx)
+
+			return err
+		}},
+		{"returning", func(ctx context.Context) error {
+			_, err := database.Insert(users, rows...).Returning(ctx)
+
+			return err
+		}},
+		{"do nothing", func(ctx context.Context) error {
+			_, err := database.Upsert(users, rows...).OnConflict(users.Email).DoNothing().Exec(ctx)
+
+			return err
+		}},
+		{"batch rows", func(ctx context.Context) error {
+			_, err := ratel.New(benchWriteExecutor(), ratel.WithBatchRows(1)).
+				Insert(users, newWriteInsert("a"), newWriteInsert("b")).Exec(ctx)
+
+			return err
+		}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if err := tc.run(b.Context()); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// benchWriteExec serves one inserted row for both Exec and RETURNING.
+type benchWriteExec struct{ ratel.Executor }
+
+func (benchWriteExec) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return &bwRows{readRows: readRows{ids: []int64{1}}, tag: "INSERT 0 1"}, nil
+}
+
+func (benchWriteExec) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
+
+func benchWriteExecutor() benchWriteExec { return benchWriteExec{} }
+
 func BenchmarkInsertSQL(b *testing.B) {
 	users := writeDescriptor()
 	query := ratel.New(readExecutor{}).Upsert(users, newWriteInsert("a"), newWriteInsert("b")).

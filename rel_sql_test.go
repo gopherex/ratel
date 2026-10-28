@@ -314,6 +314,57 @@ func TestRelationInvalidShapes(t *testing.T) {
 	}
 }
 
+func BenchmarkRelationShapes(b *testing.B) {
+	users, orders := relationDescriptors()
+	benchKeys := []ratel.RelKey[relationUser]{{
+		Column: "user_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Values: func(models []relationUser) any {
+			values := make([]int64, len(models))
+			for index, model := range models {
+				values[index] = model.ID
+			}
+
+			return values
+		},
+	}}
+	attach := func(model *relationUser, children []relationOrder) { model.R.Orders = ratel.LoadedFrom(children) }
+	count := ratel.RelCount[relationUser, relationOrder](func(model *relationUser, total int64) {
+		model.R.OrderCount = ratel.LoadedFrom(total)
+	})
+	through := ratel.NewRel(orders, ratel.RelMany, benchKeys, attach, count,
+		ratel.Through[relationUser, relationOrder]("app", "user_orders", "order_id"))
+	joined := ratel.NewRel(orders, ratel.RelOne, benchKeys, attach).Strategy(ratel.Joined())
+	nested := ratel.NewRel(relTable([]string{"id", "user_id"}, []string{"id"}), ratel.RelMany,
+		relInt64Keys("user_id"), func(*relationOrder, []relationOrder) {},
+		ratel.RelCount[relationOrder, relationOrder](func(*relationOrder, int64) {}))
+
+	for _, tc := range []struct {
+		name string
+		rel  ratel.Relation[relationUser]
+	}{
+		{"through", through},
+		{"through count", through.Count()},
+		{"through limit", through.Limit(2)},
+		{"joined", joined},
+		{"nested count", users.Orders.WithCount(nested)},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			database := ratel.New(relationExecutor{
+				send: func(_ context.Context, queued *pgx.Batch) pgx.BatchResults { return eagerXBatch(queued) },
+			})
+			models := []relationUser{{ID: 1}}
+
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if err := database.Load(b.Context(), models, tc.rel); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkRelationStrategies(b *testing.B) {
 	users, _ := relationDescriptors()
 	byID := ratel.NewCol[relationOrder, int64]("id")

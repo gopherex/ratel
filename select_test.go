@@ -516,11 +516,101 @@ func BenchmarkKeyset(b *testing.B) {
 
 func BenchmarkRaw(b *testing.B) {
 	users := userDescriptor()
-	query := ratel.New(&pgx.Conn{}).From(users).Where(ratel.Raw[readUser](`"q"."email" ~ $1 AND '$1' <> $2`, "a", "b"))
 
-	for b.Loop() {
-		if _, err := query.SQL(); err != nil {
-			b.Fatal(err)
-		}
+	for _, tc := range []struct {
+		name string
+		sql  string
+		args []any
+	}{
+		{"quoted", `"q"."email" ~ $1 AND '$1' <> $2`, []any{"a", "b"}},
+		{"comments", "/* a /* nested $1 */ $1 */ \"q\".\"id\" = $1 -- tail $2\n AND TRUE", []any{1}},
+		{"dollar quotes", `$tag$ $1 $tag$ <> "q"."email" AND $$ $2 $$ <> $1`, []any{"a"}},
+		{"escape strings", `E'\'$1' <> "q"."email" AND e'a\\' <> $1`, []any{"a"}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			query := ratel.New(&pgx.Conn{}).From(users).Where(ratel.Raw[readUser](tc.sql, tc.args...))
+
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if _, err := query.SQL(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkSelectJoinLock(b *testing.B) {
+	users, orders := relationDescriptors()
+	userID := ratel.NewCol[relationOrder, int64]("user_id")
+	database := ratel.New(&pgx.Conn{})
+	base := database.From(users)
+
+	cases := []struct {
+		name  string
+		query ratel.Select[relationUser]
+	}{
+		{"join", base.Join(orders, users.ID.EqCol(userID))},
+		{"join subquery", base.Join(database.From(orders).Where(userID.Gt(9)), users.ID.EqCol(userID))},
+		{"for update", base.ForUpdate()},
+		{"for share", base.ForShare()},
+		{"skip locked", base.ForUpdate().SkipLocked()},
+		{"no wait", base.ForShare().NoWait()},
+	}
+
+	for index := range cases {
+		tc := &cases[index]
+
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if _, err := tc.query.SQL(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkSelectScalars(b *testing.B) {
+	users := userDescriptor()
+	sql := ""
+	counted := ratel.New(scalarExecutor{sql: &sql, value: int64(7)}).From(users).Where(users.ID.Gt(1))
+	present := ratel.New(scalarExecutor{sql: &sql, value: true}).From(users).Where(users.ID.Gt(1))
+	plucked := ratel.New(readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
+		return &selXRows{values: []any{int64(3), int64(4)}}, nil
+	}}).From(users).OrderBy(users.ID.Asc()).Pluck(users.ID)
+
+	for _, tc := range []struct {
+		name string
+		run  func(ctx context.Context) error
+	}{
+		{"count", func(ctx context.Context) error {
+			_, err := counted.Count(ctx)
+
+			return err
+		}},
+		{"exists", func(ctx context.Context) error {
+			_, err := present.Exists(ctx)
+
+			return err
+		}},
+		{"pluck", func(ctx context.Context) error {
+			_, err := plucked.List(ctx)
+
+			return err
+		}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if err := tc.run(b.Context()); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

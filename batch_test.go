@@ -476,3 +476,34 @@ func BenchmarkBatch(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkBatchWrites(b *testing.B) {
+	users := writeDescriptor()
+
+	for _, tc := range []struct {
+		name string
+		tag  string
+		item func(db *ratel.DB, count *int64) ratel.BatchItem
+	}{
+		{"update", "UPDATE 1", func(db *ratel.DB, count *int64) ratel.BatchItem {
+			return db.Update(users).Set(users.Email.To("b")).Where(users.ID.Eq(1)).Batch(count)
+		}},
+		{"insert", "INSERT 0 1", func(db *ratel.DB, count *int64) ratel.BatchItem {
+			return db.Insert(users, newWriteInsert("a")).Batch(count)
+		}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				queued := 0
+				db := ratel.New(bwBatchExecutor{results: &bwResults{tags: []string{tc.tag}}, queued: &queued})
+
+				var count int64
+				if err := db.Batch(b.Context(), tc.item(db, &count)); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

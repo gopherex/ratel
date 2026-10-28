@@ -131,3 +131,23 @@ func BenchmarkConstraintError(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkConstraints(b *testing.B) {
+	cause := &pgconn.PgError{Code: "23505", SchemaName: "app", TableName: "users", ConstraintName: "users_email_key"}
+	executor := writeExecutor{exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.CommandTag{}, cause
+	}}
+	table := ratel.NewTable("app", "users", []string{"id", "email", "manager_id"}, scanReadUser,
+		ratel.Constraints[readUser](ratel.ConstraintError{Constraint: "users_email_key", Columns: []string{"email"}}))
+	sentinel := &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Table: "users"}
+	query := ratel.New(executor).Delete(ratel.NewWriteTable(table, func(row writeInsert) bool { return row.valid })).All()
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_, err := query.Exec(b.Context())
+		if !errors.Is(err, sentinel) || err.Error() == "" {
+			b.Fatal("missing constraint error")
+		}
+	}
+}

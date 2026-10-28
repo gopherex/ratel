@@ -659,11 +659,22 @@ func BenchmarkEagerSelect(b *testing.B) {
 	}
 	query := ratel.New(executor).From(users).With(users.Orders)
 
-	b.ReportAllocs()
+	built := query.Where(users.ID.Eq(1)).OrderBy(users.ID.Asc()).Limit(1).Offset(0)
 
-	for b.Loop() {
-		if _, err := query.List(b.Context()); err != nil {
-			b.Fatal(err)
-		}
+	for _, terminal := range []string{"list", "one", "first", "chunks"} {
+		b.Run(terminal, func(b *testing.B) {
+			target := query
+			if terminal != "list" {
+				target = built
+			}
+
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if _, err := eagerTerminal(b.Context(), target, terminal); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

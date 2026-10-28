@@ -318,6 +318,10 @@ func BenchmarkCopyFrom(b *testing.B) {
 	) (int64, error) {
 		var count int64
 		for source.Next() {
+			if _, err := source.Values(); err != nil {
+				return count, err
+			}
+
 			count++
 		}
 

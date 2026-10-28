@@ -215,6 +215,33 @@ func TestRowByKey(t *testing.T) {
 	}
 }
 
+func BenchmarkRowStatements(b *testing.B) {
+	users := keyedDescriptor(true)
+	database := ratel.New(&pgx.Conn{})
+	user := readUser{ID: 7, Email: "a@x"}
+
+	for _, tc := range []struct {
+		name  string
+		query func() ratel.Write[readUser]
+	}{
+		{"delete row", func() ratel.Write[readUser] { return database.DeleteRow(users, user) }},
+		{"expect version", func() ratel.Write[readUser] {
+			return database.Save(users, user).ExpectVersion(users.ID, int64(3))
+		}},
+		{"in schema", func() ratel.Write[readUser] { return database.DeleteRow(users.InSchema("tenant"), user) }},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if _, err := tc.query().SQL(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkSave(b *testing.B) {
 	users := keyedDescriptor(true)
 	database := ratel.New(&pgx.Conn{})

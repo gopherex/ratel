@@ -96,13 +96,34 @@ func TestBwHasCompositeThrough(t *testing.T) {
 }
 
 func BenchmarkHas(b *testing.B) {
-	users, _ := relationDescriptors()
+	users, orders := relationDescriptors()
 	orderID := ratel.NewCol[relationOrder, int64]("id")
-	query := ratel.New(&pgx.Conn{}).From(users).Where(users.Orders.Has(orderID.Gt(5)))
+	join := ratel.NewRel(orders, ratel.RelMany, []ratel.RelKey[relationUser]{{
+		Column: "user_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Values: func([]relationUser) any { return []int64{} },
+	}}, func(*relationUser, []relationOrder) {},
+		ratel.Through[relationUser, relationOrder]("app", "user_orders", "order_id"))
+	database := ratel.New(&pgx.Conn{})
 
-	for b.Loop() {
-		if _, err := query.SQL(); err != nil {
-			b.Fatal(err)
-		}
+	cases := []struct {
+		name  string
+		query ratel.Select[relationUser]
+	}{
+		{"direct", database.From(users).Where(users.Orders.Has(orderID.Gt(5)))},
+		{"through", database.From(users).Where(join.Has(orderID.Gt(5)))},
+	}
+
+	for index := range cases {
+		tc := &cases[index]
+
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if _, err := tc.query.SQL(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
