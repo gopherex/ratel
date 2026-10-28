@@ -390,7 +390,10 @@ n, err := db.From(app.Users).Where(...).Count(ctx)
 - Terminals: `One` (exactly one row; `ErrNotFound` for zero,
   `ErrMultipleRows` for more than one), `First` (at most one row;
   `ErrNotFound` for zero), `List` (slice), `All` (`iter.Seq2`),
-  `Count`, `Exists`, and `Pluck(col)` with `List` and `All`.
+  `Count` and `Exists` (over the result, after `Limit` and `Offset`:
+  `SELECT count(*) FROM (<select>)`), and `Pluck(col)` (non-null column, values
+  `V`) or `PluckNull(col)` (nullable column, values `Null[V]`) with `List` and
+  `All`.
   `One` requests at most two rows; `First` requests at most one. Neither
   increases an existing lower limit. Without `OrderBy`, `First` uses
   PostgreSQL's unspecified row order. `List` returns a non-nil empty slice
@@ -414,10 +417,17 @@ n, err := db.From(app.Users).Where(...).Count(ctx)
   aliases. Even `Cond2[M, M]` is a join predicate, not a `Where` condition.
 - Projections into other shapes go through queries with `@ratel.row` or
   `@go.row` used as builder sources, or through `Pluck`.
-- Pagination: `Limit`, `Offset`, and keyset `After(cols, values)`.
-- Locking: `ForUpdate`, `ForShare`, with `SkipLocked` and `NoWait`.
-- Escape hatch: `ratel.Raw[M](sql, args...)` yields a `Cond[M]` fragment with
-  `$N` renumbered by the builder.
+- Pagination: `Limit`, `Offset`, and keyset `After(values...)`: one value per
+  `OrderBy` term, continuing after that row in the given directions (expanded
+  to `c1 > v1 OR (c1 = v1 AND c2 > v2)`, with `<` for descending terms). Keyset
+  columns are non-null; another number of values than terms is
+  `ErrInvalidQuery`.
+- Locking: `ForUpdate`, `ForShare`, with `SkipLocked` and `NoWait`; a wait
+  policy without a lock is `ErrInvalidQuery`.
+- Escape hatch: `ratel.Raw[M](sql, args...)` yields a `Cond[M]` fragment that
+  references columns as `"q"."column"`; its `$N` markers are renumbered by the
+  builder, markers inside literals, quoted identifiers, dollar-quoted strings
+  and comments stay, and a marker without an argument is `ErrInvalidQuery`.
 
 ## Writes
 

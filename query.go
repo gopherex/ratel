@@ -72,6 +72,9 @@ type Select[M any] struct {
 	orders   []Order[M]
 	limit    Opt[int]
 	offset   Opt[int]
+	after    []any  // keyset values matching orders
+	lock     string // FOR UPDATE / FOR SHARE clause
+	wait     string // SKIP LOCKED / NOWAIT; requires a lock
 }
 
 // From starts a SELECT over a generated descriptor, static query, or another SELECT.
@@ -148,7 +151,8 @@ func (q Select[M]) SQL() (Statement, error) {
 
 // plain reports a SELECT without added clauses.
 func (q Select[M]) plain() bool {
-	return !q.hasWhere && len(q.orders) == 0 && !q.limit.Set && !q.offset.Set
+	return !q.hasWhere && len(q.orders) == 0 && !q.limit.Set && !q.offset.Set && q.after == nil &&
+		q.lock == "" && q.wait == ""
 }
 
 // verbatim reports a plain SELECT over a static query, which runs the
@@ -178,13 +182,26 @@ func (q Select[M]) appendSQL(writer *sqlWriter) error {
 		writer.WriteString(` AS "q"`)
 	}
 
-	if q.hasWhere {
+	if (q.after != nil && len(q.after) != len(q.orders)) || (q.wait != "" && q.lock == "") {
+		return ErrInvalidQuery
+	}
+
+	switch {
+	case q.hasWhere && q.after != nil:
+		writer.WriteString(" WHERE ")
+		q.where.And(q.keyset()).appendSQL(writer)
+	case q.hasWhere:
 		writer.WriteString(" WHERE ")
 		q.where.appendSQL(writer)
+	case q.after != nil:
+		writer.WriteString(" WHERE ")
+		q.keyset().appendSQL(writer)
 	}
 
 	q.appendOrder(writer)
 	q.appendPagination(writer)
+	writer.WriteString(q.lock)
+	writer.WriteString(q.wait)
 
 	return nil
 }
