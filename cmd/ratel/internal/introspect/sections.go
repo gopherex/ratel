@@ -87,6 +87,27 @@ WHERE n.nspname = ANY($1)
 GROUP BY t.oid, n.nspname, t.typname
 ORDER BY n.nspname, t.typname`
 
+// domainParts are each domain's base type, default, NOT NULL and named
+// checks, for the migration diff's domain changes.
+const domainParts = `
+SELECT format('type %I.%I', n.nspname, t.typname),
+       pg_catalog.format_type(t.typbasetype, t.typtypmod) ||
+         CASE WHEN t.typcollation <> bt.typcollation
+           THEN ' COLLATE ' || t.typcollation::regcollation::text ELSE '' END,
+       COALESCE(pg_catalog.pg_get_expr(t.typdefaultbin, 0), ''), t.typnotnull,
+       COALESCE(array_agg(format('%I', c.conname) ORDER BY c.conname) FILTER (WHERE c.oid IS NOT NULL), '{}'),
+       COALESCE(array_agg(pg_catalog.pg_get_constraintdef(c.oid) ORDER BY c.conname)
+         FILTER (WHERE c.oid IS NOT NULL), '{}')
+FROM pg_catalog.pg_type t
+JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+JOIN pg_catalog.pg_type bt ON bt.oid = t.typbasetype
+LEFT JOIN pg_catalog.pg_constraint c ON c.contypid = t.oid AND c.contype = 'c'
+WHERE t.typtype = 'd' AND n.nspname = ANY($1)
+  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d
+    WHERE d.classid = 'pg_catalog.pg_type'::regclass AND d.objid = t.oid AND d.deptype IN ('e', 'i'))
+GROUP BY t.oid, n.nspname, t.typname, bt.typcollation
+ORDER BY n.nspname, t.typname`
+
 const composites = `
 SELECT t.oid, format('type %I.%I', n.nspname, t.typname), format('CREATE TYPE %I.%I AS (%s);', n.nspname, t.typname,
          string_agg(format('%I %s%s', a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod),
@@ -224,57 +245,67 @@ ORDER BY n.nspname, c.relname`
 
 // columnDefinition renders a column as CREATE TABLE and ADD COLUMN take it,
 // over columnSources of table c in namespace n.
-const columnDefinition = `format('%I %s%s%s%s%s', a.attname,
-  ` + columnType + `,
-  CASE WHEN a.attcollation <> at.typcollation
-    THEN ' COLLATE ' || a.attcollation::regcollation::text ELSE '' END,
-  CASE WHEN a.attidentity IN ('a', 'd')
-    THEN (SELECT format(' GENERATED %s AS IDENTITY '
-                        '(START WITH %s INCREMENT BY %s MINVALUE %s MAXVALUE %s CACHE %s%s)',
-                   CASE a.attidentity WHEN 'a' THEN 'ALWAYS' ELSE 'BY DEFAULT' END,
-                   s.seqstart, s.seqincrement, s.seqmin, s.seqmax, s.seqcache,
-                   CASE WHEN s.seqcycle THEN ' CYCLE' ELSE '' END)
-          FROM pg_catalog.pg_sequence s
-          WHERE s.seqrelid = pg_catalog.pg_get_serial_sequence(
-            format('%I.%I', n.nspname, c.relname), a.attname)::regclass)
-    ELSE '' END,
-  CASE
-    WHEN a.attgenerated = 's'
-      THEN ' GENERATED ALWAYS AS (' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) || ') STORED'
-    WHEN a.attgenerated = 'v'
-      THEN ' GENERATED ALWAYS AS (' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) || ') VIRTUAL'
-    WHEN ` + columnDefault + ` IS NOT NULL
-      THEN ' DEFAULT ' || ` + columnDefault + `
-    ELSE '' END,
-  CASE WHEN NOT a.attnotnull THEN ''
-    ELSE COALESCE((SELECT format(' CONSTRAINT %I NOT NULL', nn.conname)
-                   FROM pg_catalog.pg_constraint nn
-                   WHERE nn.conrelid = c.oid AND nn.contype = 'n' AND nn.conkey = ARRAY[a.attnum]),
-                  ' NOT NULL') END)`
+const columnDefinition = `format('%I %s%s%s%s%s', a.attname, ` + columnType + `, ` + columnCollation + `,
+  ` + columnIdentity + `,
+  CASE WHEN a.attgenerated <> '' THEN ` + columnGenerated + `
+       WHEN ` + columnDefault + ` IS NOT NULL THEN ' DEFAULT ' || ` + columnDefault + `
+       ELSE '' END,
+  ` + columnNotNull + `)`
 
 // columnType is a column's type, a serial pseudo-type for a serial column.
 const columnType = `COALESCE(sr.type, pg_catalog.format_type(a.atttypid, a.atttypmod))`
+
+// columnCollation is the COLLATE clause of a column whose collation is not
+// its type's.
+const columnCollation = `CASE WHEN a.attcollation <> at.typcollation
+  THEN ' COLLATE ' || a.attcollation::regcollation::text ELSE '' END`
+
+// columnIdentity is the identity clause with every sequence option.
+const columnIdentity = `CASE WHEN a.attidentity IN ('a', 'd')
+  THEN (SELECT format(' GENERATED %s AS IDENTITY '
+                      '(START WITH %s INCREMENT BY %s MINVALUE %s MAXVALUE %s CACHE %s%s)',
+                 CASE a.attidentity WHEN 'a' THEN 'ALWAYS' ELSE 'BY DEFAULT' END,
+                 s.seqstart, s.seqincrement, s.seqmin, s.seqmax, s.seqcache,
+                 CASE WHEN s.seqcycle THEN ' CYCLE' ELSE '' END)
+        FROM pg_catalog.pg_sequence s
+        WHERE s.seqrelid = pg_catalog.pg_get_serial_sequence(
+          format('%I.%I', n.nspname, c.relname), a.attname)::regclass)
+  ELSE '' END`
+
+// columnGenerated is the GENERATED ALWAYS AS clause of a generated column.
+const columnGenerated = `CASE a.attgenerated
+  WHEN 's' THEN ' GENERATED ALWAYS AS (' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) || ') STORED'
+  WHEN 'v' THEN ' GENERATED ALWAYS AS (' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) || ') VIRTUAL'
+  ELSE '' END`
 
 // columnDefault is a plain column default; generated and serial columns
 // have none of their own.
 const columnDefault = `CASE WHEN a.attgenerated = '' AND sr.type IS NULL
   THEN pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) END`
 
+// columnNotNull is the NOT NULL clause, named on PostgreSQL 18.
+const columnNotNull = `CASE WHEN NOT a.attnotnull THEN ''
+  ELSE COALESCE((SELECT format(' CONSTRAINT %I NOT NULL', nn.conname)
+                 FROM pg_catalog.pg_constraint nn
+                 WHERE nn.conrelid = c.oid AND nn.contype = 'n' AND nn.conkey = ARRAY[a.attnum]),
+                ' NOT NULL') END`
+
 const columnSources = `pg_catalog.pg_attribute a
   JOIN pg_catalog.pg_type at ON at.oid = a.atttypid
   LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
   LEFT JOIN serials sr ON sr.relation = a.attrelid AND sr.attnum = a.attnum`
 
-// columns are each column's definition, type and default, for the
-// migration diff's column changes.
+// columns are each table and view column's definition and its parts, for
+// the migration diff's column changes.
 const columns = `
 WITH ` + serials + `
 SELECT format('%I.%I.%I', n.nspname, c.relname, a.attname), ` + columnDefinition + `,
-       ` + columnType + `, ` + columnDefault + `
+       ` + columnType + `, ` + columnCollation + `, ` + columnIdentity + `,
+       ` + columnGenerated + `, COALESCE(` + columnDefault + `, ''), ` + columnNotNull + `
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 JOIN (` + columnSources + `) ON a.attrelid = c.oid
-WHERE c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped AND n.nspname = ANY($1)
+WHERE c.relkind IN ('r', 'p', 'v') AND a.attnum > 0 AND NOT a.attisdropped AND n.nspname = ANY($1)
 ORDER BY n.nspname, c.relname, a.attnum`
 
 // Constraints cloned onto partitions from their parent are the parent's.

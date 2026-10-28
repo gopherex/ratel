@@ -68,18 +68,51 @@ type Rendering struct {
 	// "table app.users", "index app.users_email_idx", "constraint
 	// app.users.users_pkey", "routine app.f(integer)", "type app.status"...
 	Objects []Object
-	// Columns are column definitions by "schema.table.column".
-	Columns map[string]Column
+	// Columns are column definitions, keyed "schema.table.column", in table
+	// and attribute order.
+	Columns []Column
+	// Domains are the parts of each domain, keyed as its object.
+	Domains []Domain
 }
+
+// Domain is a domain's base type with its collation, default, NOT NULL and
+// checks in name order.
+type Domain struct {
+	Key     string
+	Type    string
+	Default string // empty without one
+	NotNull bool
+	Checks  []Check
+}
+
+// Check is a named check constraint definition.
+type Check struct{ Name, Definition string }
 
 // Object is one rendered statement and the key of the object it creates.
 type Object struct{ Key, SQL string }
 
-// Column is a column as ADD COLUMN takes it, with its type and default.
+// Column is a column as ADD COLUMN takes it and the clauses it is made of;
+// an absent clause is empty.
 type Column struct {
+	Key        string
 	Definition string
 	Type       string
-	Default    string // empty without one
+	Collation  string // " COLLATE ..."
+	Identity   string // " GENERATED ... AS IDENTITY (...)"
+	Generated  string // " GENERATED ALWAYS AS (...) STORED|VIRTUAL"
+	Default    string // the default expression
+	NotNull    string // " [CONSTRAINT name] NOT NULL"
+}
+
+// Column returns the column definition of a "schema.table.column" key.
+func (r Rendering) Column(key string) (Column, bool) {
+	for index := range r.Columns {
+		if r.Columns[index].Key == key {
+			return r.Columns[index], true
+		}
+	}
+
+	return Column{}, false
 }
 
 // Statement returns the rendered statement of an object key.
@@ -139,10 +172,45 @@ func Render(ctx context.Context, source Source, namespaces []string) (Rendering,
 		return Rendering{}, err
 	}
 
+	result.Domains, err = renderDomains(ctx, snapshot, namespaces)
+	if err != nil {
+		return Rendering{}, err
+	}
+
 	return result, nil
 }
 
-func renderColumns(ctx context.Context, snapshot pgx.Tx, namespaces []string) (map[string]Column, error) {
+func renderDomains(ctx context.Context, snapshot pgx.Tx, namespaces []string) ([]Domain, error) {
+	rows, err := snapshot.Query(ctx, domainParts, namespaces)
+	if err != nil {
+		return nil, fmt.Errorf("introspect: domains: %w", err)
+	}
+
+	domains, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Domain, error) {
+		var (
+			domain             Domain
+			names, definitions []string
+		)
+
+		if err := row.Scan(&domain.Key, &domain.Type, &domain.Default, &domain.NotNull,
+			&names, &definitions); err != nil {
+			return Domain{}, fmt.Errorf("scan: %w", err)
+		}
+
+		for index, name := range names {
+			domain.Checks = append(domain.Checks, Check{Name: name, Definition: definitions[index]})
+		}
+
+		return domain, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("introspect: domains: %w", err)
+	}
+
+	return domains, nil
+}
+
+func renderColumns(ctx context.Context, snapshot pgx.Tx, namespaces []string) ([]Column, error) {
 	rows, err := snapshot.Query(ctx, columns, namespaces)
 	if err != nil {
 		return nil, fmt.Errorf("introspect: columns: %w", err)
@@ -150,24 +218,18 @@ func renderColumns(ctx context.Context, snapshot pgx.Tx, namespaces []string) (m
 
 	defer rows.Close()
 
-	result := make(map[string]Column)
+	var result []Column
 
 	for rows.Next() {
-		var (
-			key        string
-			column     Column
-			expression *string
-		)
+		var column Column
 
-		if err := rows.Scan(&key, &column.Definition, &column.Type, &expression); err != nil {
+		err := rows.Scan(&column.Key, &column.Definition, &column.Type, &column.Collation, &column.Identity,
+			&column.Generated, &column.Default, &column.NotNull)
+		if err != nil {
 			return nil, fmt.Errorf("introspect: columns: %w", err)
 		}
 
-		if expression != nil {
-			column.Default = *expression
-		}
-
-		result[key] = column
+		result = append(result, column)
 	}
 
 	if err := rows.Err(); err != nil {

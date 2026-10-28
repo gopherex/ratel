@@ -66,7 +66,7 @@ PostgreSQL sees.
 | query | Parameter and column inference with nullability | sqld `internal/query`, extended |
 | relations | Relation graph from FKs plus annotations | new design |
 | introspect | Live database to the same Catalog shape | sqld `internal/introspect`, extended |
-| diff | Catalog-to-Catalog changes | sqld `internal/diff`, extended |
+| diff | Changes between two PostgreSQL-normalized renderings | sqld `internal/diff`, reworked |
 | safety | `Assess(change, env)`: locks, effect, tx mode, destruction, compatibility | new |
 | planner | Rewrites changes into safe steps and phases | new |
 | lint | `RTL-*` rules over planned steps and hand-written SQL | new rule set |

@@ -11,17 +11,23 @@ lock.
 ## Flow
 
 ```
-schema files ─► build ─► desired Catalog ─┐
-                                          ├─► diff ─► []Change ─► Assess ─► planner ─► steps ─► lint
-migrations dir ─► apply to dev DB ─► introspect ─► current Catalog ┘
+schema files ─► apply to dev DB ─► render ─► desired rendering ─┐
+                                                                ├─► diff ─► []Change ─► Assess ─► planner ─► steps ─► lint
+migrations dir ─► apply to dev DB ─► render ─► current rendering ┘
                                                                    steps ─► ratel migrate apply ─► target DB
 ```
 
-1. **Diff** compares two Catalogs, both normalized by PostgreSQL (each side is
-   applied to its own database on the dev server and introspected). Changes
-   are semantic (`AddIndex`, `SetNotNull`, `ChangeType`, `Rename`, ...), not
-   SQL strings. Renames and type changes come from `@ratel.renamed` and
-   `@ratel.retype`; without them the diff reports drop plus create.
+1. **Diff** compares two renderings, both normalized by PostgreSQL (each side
+   is applied to its own database on the dev server and introspected as keyed
+   DDL statements plus column and domain parts). Each change has a kind
+   (`create index`, `set not null`, `alter column type`, `rename column`,
+   ...) that the planner keys its recipes by, and the plain PostgreSQL that
+   makes it. Renames and `USING` expressions of type changes come from
+   `@ratel.renamed` and `@ratel.retype`; without a rename intent the diff
+   reports drop plus create. An index or constraint dropped and created with
+   the same definition under a new name is a rename. *Check:* an integration
+   test applies the changes of each case to the current database on
+   PostgreSQL 16, 17 and 18 and compares its rendering with the desired one.
 2. **Assess** is a pure function `Assess(change, env) Safety`.
 3. **Planner** rewrites each change into safe steps and assigns phases.
 4. **Lint** checks the steps and hand-written migration files.
@@ -73,6 +79,7 @@ emitted as short DDL under the lock guards.
 | drop index, plain table | `DROP INDEX CONCURRENTLY` |
 | drop index, partitioned table | `DROP INDEX` as short DDL (metadata only; concurrent drop is not supported) |
 | change index definition | new index under a temporary name by the create recipe, drop of the old one by the drop recipe, `ALTER INDEX ... RENAME` (short DDL) |
+| rename index or constraint (same definition, new name) | `ALTER INDEX ... RENAME` or `RENAME CONSTRAINT` (short DDL) |
 | add check | `ADD CONSTRAINT ... NOT VALID` (short DDL), then `VALIDATE CONSTRAINT` (long DDL) |
 | add FK, plain table; partitioned table on 18+ | `ADD CONSTRAINT ... NOT VALID`, then `VALIDATE CONSTRAINT` |
 | add FK, partitioned table on 16 and 17 | no safe recipe (PostgreSQL rejects `NOT VALID` there): `RTL-L04` |
@@ -91,12 +98,15 @@ emitted as short DDL under the lock guards.
 | add column with a volatile default, or `NOT NULL` without default | nullable column, backfill (`@ratel.backfill` required, else error), then the not-null recipe |
 | change type, no rewrite (probe) | short DDL |
 | change type with rewrite | expand: new column, sync trigger; backfill; contract: switch names, drop the old column and trigger (`@ratel.retype` required) |
+| change collation | a type change (`ALTER COLUMN ... TYPE ... COLLATE`) by the type change recipes |
 | rename | expand: new column, sync trigger, backfill; contract: drop the old column (`@ratel.renamed` required) |
 | drop column | short DDL in the contract phase (metadata only) |
 | set or drop default | short DDL |
 | identity: add, set options, drop | short DDL |
 | change generated expression, `VIRTUAL` (18+) | short DDL |
 | change generated expression, `STORED` | rewrites: handled as a type change with rewrite (new column) |
+| drop a `STORED` expression | `DROP EXPRESSION` (short DDL; the values stay) |
+| make a column generated, change its storage, or change its expression on 16 | drop and add the column (`RTL-D01`) |
 
 **Tables, partitions, types, code objects**
 
@@ -105,12 +115,21 @@ emitted as short DDL under the lock guards.
 | create table, sequence, type, function, view | short DDL in expand |
 | drop table, sequence, type | short DDL in the contract phase |
 | alter sequence | short DDL |
+| rename table | `ALTER TABLE ... RENAME TO` (short DDL, `@ratel.renamed` on the table) |
+| set logged or unlogged | rewrites the table: `RTL-R03` |
+| change partition key | no statement changes it: the table is dropped and created (`RTL-D01`) |
+| move a partition to another bound or parent | detach by the detach recipe, then attach by the attach recipe |
 | attach partition | the partition key gets `NOT NULL` and a validated `CHECK` matching the bound first (otherwise `ATTACH` scans under an exclusive lock), then `ATTACH` as short DDL; with a default partition the default is scanned under an exclusive lock: `RTL-L07` |
 | detach partition, no default partition | `DETACH PARTITION ... CONCURRENTLY` (long DDL) |
 | detach partition, default partition exists | concurrent detach is not supported: `DETACH PARTITION` as short DDL |
 | enum: add value | `ALTER TYPE ... ADD VALUE [BEFORE\|AFTER]` in its own step, committed before any step that uses the value (on 17+ not needed when the type is created in the same transaction) |
 | enum: rename value | `ALTER TYPE ... RENAME VALUE` (short DDL, `@ratel.renamed` on the value) |
-| enum: remove value | PostgreSQL has no way to drop a value: `RTL-D05`; written as a hand-written migration |
+| enum: remove or reorder values | PostgreSQL has no way to drop or move a value: `RTL-D05`; written as a hand-written migration |
+| domain: set or drop default, drop not null, drop constraint | short DDL |
+| domain: add check | `ALTER DOMAIN ... ADD CONSTRAINT ... NOT VALID` (short DDL), then `VALIDATE CONSTRAINT` (long DDL) |
+| domain: set not null | scans every column of the domain: `RTL-L06` |
+| domain over another base type, composite or range type change | drop and recreate the type and its dependents, as an incompatible view change |
+| extension: new version or schema | `ALTER EXTENSION ... UPDATE TO` / `SET SCHEMA` (short DDL) |
 | view, compatible change (columns only appended) | `CREATE OR REPLACE VIEW` (short DDL) |
 | view, incompatible change, or a function whose signature or return type changes | drop and recreate the object and every dependent view, function and policy (from `pg_depend`) in one transaction as short DDL |
 | function body change, same signature | `CREATE OR REPLACE FUNCTION` (short DDL) |
@@ -272,6 +291,6 @@ destruction, `C` compatibility, `T` transaction structure, `P` practice.
 
 ## Drift
 
-`ratel migrate drift` introspects the target and diffs it against the Catalog
+`ratel migrate drift` renders the target and diffs it against the rendering
 the applied migrations produce on the dev server. Any difference fails with the
 list of changes.
