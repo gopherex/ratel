@@ -136,12 +136,68 @@ Syntax and IR do not have identical representational capacity:
   schema-wide grants and column-level privileges, which the declarative IR
   cannot represent. It never widens column privileges to table privileges.
   `MapComment` returns an unresolved object reference and metadata; attachment,
-  annotations and declaration validation belong to their host stages.
+  annotations and declaration validation belong to their host stages. Type and
+  domain targets retain their identifier parts in both comments and grants.
+  Their object kind stays unspecified until the catalog resolves whether the
+  target is an enum, domain, composite or range.
 
 Run mapper/parser tests with
 `cd cmd/ratel && go test -race ./internal/...`. Parallel parser users call
 `parse.Warm()` before starting concurrent parsing. Benchmarks use
 `cd cmd/ratel && go test -run '^$' -bench . -benchmem ./internal/mapper`.
+
+## Catalog builder
+
+`cmd/ratel/internal/catalog.Build(files, major, builtins)` accepts complete
+`File{Name, SQL}` sources, a PostgreSQL major from 16 through 18, and schemas
+containing the target server's built-in function signatures. Built-in signatures
+are an explicit input, not a hand-maintained function whitelist. They are not
+copied into the desired catalog. Scalar built-in type names use pgx's type
+registry. With an empty signature input, calls to ordinary built-in functions
+are unresolved; sequence calls (`nextval`, `currval`, `setval`) resolve their
+constant sequence names directly.
+
+The builder uses `public` as the default schema and search path. It collects
+schema declarations, visits embedded `CREATE SCHEMA` elements with that schema
+as their namespace, collects objects, and canonicalizes routine signatures after
+their argument types are available. Only then does it attach additive table
+fragments, indexes, policies, triggers, comments and grants and resolve
+references. FK cycles are valid. Missing objects and columns fail the build;
+roles remain external names. Non-declarative statements and grants that the IR
+cannot represent fail rather than being ignored.
+
+Serial columns expand into integer columns, defaults and owned sequences;
+identity columns receive owned sequence references. Sequence defaults preserve
+explicit zero-valued options and account for descending increments and integer
+width. Non-null columns receive named not-null constraints. Unnamed constraint
+names are allocated deterministically, reserving explicit names first. Unnamed
+indexes use column-based names and reserve explicit relation names before
+allocating collision suffixes.
+
+`catalog.ObjectID` is the host's object identity formatter. Routine identities
+append their input argument signature. Declaration uniqueness follows
+PostgreSQL relation, type and routine namespaces; table-local objects use their
+parent table's identity. Duplicate errors include both source positions. Typed
+`catalog.Error` refusals expose stable codes: `RTL-C01` for the target version,
+`RTL-C02` for duplicates, `RTL-C03` for unresolved references, and `RTL-C04` for
+statements outside the declarative contract.
+
+Catalog expression `node_id` values use canonical catalog field paths after
+sorting, not source statement ordinals. Source spans retain the original
+positions. File-permutation tests compare deterministic protobuf bytes;
+statement-permutation tests clear only source spans before comparing.
+
+`tests/testdata/catalog/schema.sql` is shared by builder permutation tests and
+`tests/catalog_test.go`. The integration test applies it to PostgreSQL 16, 17
+and 18 and checks catalog facts through `pg_catalog`. The introspection producer
+is not implemented, so this test does not claim the full build/introspect
+round-trip equality. Run it with `make test-integration`.
+
+Build parses files serially. Independent concurrent callers warm the parser
+with `parse.Warm()` before starting, as required by the parser's wazero cache.
+Run builder tests and benchmarks with
+`cd cmd/ratel && go test -race ./internal/catalog` and
+`cd cmd/ratel && go test -run '^$' -bench . -benchmem ./internal/catalog`.
 
 ## Relations
 

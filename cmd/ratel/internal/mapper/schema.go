@@ -191,6 +191,10 @@ func namedObject(kind pg.ObjectType, node *pg.Node) *ir.ObjectRef {
 		name = &ir.QualifiedName{Parts: []string{node.GetString_().GetSval()}}
 	}
 
+	if typ := node.GetTypeName(); typ != nil {
+		name = qualified(typ.GetNames())
+	}
+
 	if routine := node.GetObjectWithArgs(); routine != nil {
 		name = qualified(routine.GetObjname())
 

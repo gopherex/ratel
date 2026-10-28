@@ -1,6 +1,7 @@
 package mapper_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/gopherex/ratel/ir"
@@ -135,6 +136,63 @@ func TestUnrepresentableGrants(t *testing.T) {
 				t.Fatal("grant scope changed", got)
 			}
 		})
+	}
+}
+
+func TestTypeObjectReferences(t *testing.T) {
+	parse.Warm()
+	t.Parallel()
+
+	for _, sql := range []string{
+		`COMMENT ON TYPE app.status IS 'state'`,
+		`COMMENT ON DOMAIN app.status IS 'state'`,
+		`GRANT USAGE ON TYPE app.status TO PUBLIC`,
+		`GRANT USAGE ON DOMAIN app.status TO PUBLIC`,
+	} {
+		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
+
+			parsed, err := parse.Parse(sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			raw := parsed.GetStmts()[0]
+			current := mapper.New("type.sql", sql, raw, 0)
+			node := raw.GetStmt()
+
+			var reference *ir.ObjectRef
+			if node.GetCommentStmt() != nil {
+				reference, _ = current.MapComment(node.GetCommentStmt())
+			} else {
+				grants := current.MapGrant(node.GetGrantStmt())
+				if len(grants) != 1 {
+					t.Fatalf("grants = %v", grants)
+				}
+
+				reference = grants[0].GetObject()
+			}
+
+			if !slices.Equal(reference.GetName().GetParts(), []string{"app", "status"}) {
+				t.Fatalf("reference lost identifier parts: %v", reference)
+			}
+		})
+	}
+}
+
+func BenchmarkTypeObjectReferences(b *testing.B) {
+	sql := `COMMENT ON TYPE app.status IS 'state'`
+
+	parsed, err := parse.Parse(sql)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	raw := parsed.GetStmts()[0]
+	current := mapper.New("type.sql", sql, raw, 0)
+
+	for b.Loop() {
+		current.MapComment(raw.GetStmt().GetCommentStmt())
 	}
 }
 
