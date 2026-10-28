@@ -70,18 +70,7 @@ func (q Select[M]) rows(ctx context.Context, options []CallOption) (pgx.Rows, er
 		return nil, err
 	}
 
-	args := statement.Args
-
-	settings := callSettings{mode: q.db.execMode}
-	for _, option := range options {
-		settings = option(settings)
-	}
-
-	if settings.mode.Set {
-		args = append([]any{settings.mode.V}, args...)
-	}
-
-	rows, err := q.db.executor.Query(ctx, statement.SQL, args...)
+	rows, err := q.db.executor.Query(ctx, statement.SQL, q.db.arguments(options, statement.Args)...)
 	if err != nil {
 		return nil, fmt.Errorf("ratel: query SELECT: %w", err)
 	}

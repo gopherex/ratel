@@ -2,7 +2,6 @@ package ratel
 
 import (
 	"context"
-	"errors"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -37,12 +36,7 @@ func executeWrite[M any](ctx context.Context, database *DB, table Table[M], oper
 	for _, statement := range statements {
 		next, err := executeWriteStatement(ctx, database, table, statement, returning, options)
 		if err != nil {
-			var constraint *ConstraintError
-			if !errors.As(err, &constraint) {
-				recordFailure(span, err)
-			}
-
-			return writeResult[M]{}, err
+			return writeResult[M]{}, failure(span, err)
 		}
 
 		result.count += next.count
@@ -55,15 +49,7 @@ func executeWrite[M any](ctx context.Context, database *DB, table Table[M], oper
 func executeWriteStatement[M any](ctx context.Context, database *DB, table Table[M],
 	statement Statement, returning bool, options []CallOption,
 ) (writeResult[M], error) {
-	settings := callSettings{mode: database.execMode}
-	for _, option := range options {
-		settings = option(settings)
-	}
-
-	args := statement.Args
-	if settings.mode.Set {
-		args = append([]any{settings.mode.V}, args...)
-	}
+	args := database.arguments(options, statement.Args)
 
 	if !returning {
 		tag, err := database.executor.Exec(ctx, statement.SQL, args...)

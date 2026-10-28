@@ -454,8 +454,15 @@ n, err = db.Delete(app.Users).Where(app.Users.Email.Eq(email)).Exec(ctx)
 - `Save(model)` and `Delete(model)` address the row by primary key.
 - Optimistic locking: `.ExpectVersion(col, v)` on `Update` and `Save` adds the
   version predicate and returns `ratel.ErrStaleVersion` when no row matched.
-- `CopyFrom(app.Users, seq iter.Seq[UserInsert])` streams rows through COPY
-  without buffering them all.
+- `db.CopyFrom(ctx, app.Users, seq iter.Seq[UserInsert])` streams rows through
+  COPY without buffering them all. COPY sends one column list: the first row's
+  set columns are copied, and a later row that sets other optional columns
+  stops the copy with `ratel.ErrMixedCopyColumns` rather than dropping a value;
+  an invalid insert stops it with `ErrInvalidInsert`. `db.Copy(ctx, table,
+  columns, source)` is the untyped form generated `:copyfrom` queries use.
+- `db.Exec(ctx, statement, options...)` runs a static `Statement`, as generated
+  `:exec` and `:execrows` queries do, and returns the affected row count;
+  integrity violations are `*ConstraintError` like any write.
 - `db.Batch(ctx, items...)` sends several prepared operations (static queries
   and builder statements, each producing a `ratel.BatchItem`) in one round
   trip and scans each result into its own destination.
