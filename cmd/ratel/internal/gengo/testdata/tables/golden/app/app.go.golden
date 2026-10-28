@@ -911,6 +911,10 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 		return err
 	}
 
+	if err := ratel.RegisterValue[string](types, "varchar"); err != nil {
+		return err
+	}
+
 	if err := ratel.RegisterValue[time.Time](types, "timestamptz"); err != nil {
 		return err
 	}

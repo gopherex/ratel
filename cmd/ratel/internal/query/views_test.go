@@ -13,12 +13,9 @@ import (
 )
 
 func TestViews(t *testing.T) {
-	t.Parallel()
+	parser := newParser(t)
 
-	parser, err := parse.New(parse.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
 
 	signatures, err := builtins.For(18)
 	if err != nil {

@@ -116,7 +116,9 @@ Package `github.com/gopherex/ratel/plugin/plugintest` runs any plugin against
 fixed empty-catalog and schema requests, malformed requests and invalid protocol
 ranges. It checks rules 2, 4 and 5, negotiation, repeated-response determinism
 and binary/JSON equivalence. Authors add `plugintest.Case` values with their own
-requests and golden responses, including expected error diagnostics.
+requests and golden responses, including expected error diagnostics. A plugin
+that requires options uses `plugintest.RunWithOptions(t, exchange, options,
+cases...)`: the fixed requests carry those JSON option bytes.
 
 ```go
 func TestPlugin(t *testing.T) {

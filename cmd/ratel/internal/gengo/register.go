@@ -18,12 +18,18 @@ const decimalCodecImport = "github.com/jackc/pgx-shopspring-decimal"
 type registry struct {
 	loads    map[string]int    // qualified PostgreSQL type -> load rank
 	defaults map[string]string // Go type -> qualified PostgreSQL type
-	values   map[string]string // Go type -> PostgreSQL type, for ratel.RegisterValue
-	decimal  bool
+	// values are the Go/PostgreSQL type pairs for ratel.RegisterValue. It
+	// decorates the PostgreSQL type's codec, so every pair registers, even
+	// for one Go type (string as text and as varchar).
+	values  map[valuePair]bool
+	decimal bool
 }
 
+// valuePair is a Go type and the PostgreSQL type it registers for.
+type valuePair struct{ goType, pgType string }
+
 func newRegistry() *registry {
-	return &registry{loads: make(map[string]int), defaults: make(map[string]string), values: make(map[string]string)}
+	return &registry{loads: make(map[string]int), defaults: make(map[string]string), values: make(map[valuePair]bool)}
 }
 
 // pgName is the type name pgx's LoadType and ratel.RegisterValue take.
@@ -61,7 +67,7 @@ func (s *state) use(file *unit, typ *ir.TypeRef, mapped goType, wrapped bool) {
 	}
 
 	if wrapped {
-		file.registry.values[file.use(mapped)] = s.valueName(typ)
+		file.registry.values[valuePair{goType: file.use(mapped), pgType: s.valueName(typ)}] = true
 	}
 }
 
@@ -188,10 +194,14 @@ func writeRegisterTypes(file *unit) {
 		file.printf("\t_ = types\n")
 	}
 
-	for _, goName := range slices.Sorted(maps.Keys(file.registry.values)) {
+	pairs := slices.SortedFunc(maps.Keys(file.registry.values), func(left, right valuePair) int {
+		return cmp.Or(cmp.Compare(left.goType, right.goType), cmp.Compare(left.pgType, right.pgType))
+	})
+
+	for _, pair := range pairs {
 		file.imports = append(file.imports, ratelImport)
 		file.printf("\n\tif err := ratel.RegisterValue[%s](types, %s); err != nil {\n\t\treturn err\n\t}\n",
-			goName, strconv.Quote(file.registry.values[goName]))
+			pair.goType, strconv.Quote(pair.pgType))
 	}
 
 	file.printf("\n\treturn nil\n}\n")

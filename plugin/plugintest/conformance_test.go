@@ -21,6 +21,17 @@ func (generator) Generate(context.Context, *pluginpb.GenerateRequest) (*pluginpb
 	return &pluginpb.GenerateResponse{}, nil
 }
 
+// configured requires the options {"strict":true}.
+type configured struct{ generator }
+
+func (configured) Generate(_ context.Context, request *pluginpb.GenerateRequest) (*pluginpb.GenerateResponse, error) {
+	if string(request.GetOptions()) != `{"strict":true}` {
+		return nil, &plugin.Error{Code: "FIXTURE-1", Message: "options required"}
+	}
+
+	return &pluginpb.GenerateResponse{}, nil
+}
+
 func TestConformance(t *testing.T) {
 	t.Parallel()
 	plugintest.Run(t, func(
@@ -28,4 +39,13 @@ func TestConformance(t *testing.T) {
 	) (*pluginpb.PluginResponse, error) {
 		return plugin.Dispatch(ctx, generator{}, request), nil
 	})
+}
+
+func TestConformanceWithOptions(t *testing.T) {
+	t.Parallel()
+	plugintest.RunWithOptions(t, func(
+		ctx context.Context, _ plugin.Format, request *pluginpb.PluginRequest,
+	) (*pluginpb.PluginResponse, error) {
+		return plugin.Dispatch(ctx, configured{}, request), nil
+	}, []byte(`{"strict":true}`))
 }

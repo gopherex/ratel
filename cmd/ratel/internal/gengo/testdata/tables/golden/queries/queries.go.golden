@@ -417,11 +417,27 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	types.RegisterDefaultPgType(app.Address{}, "app.address")
 	types.RegisterDefaultPgType(app.UserStatus(""), "app.user_status")
 
+	if err := ratel.RegisterValue[[]string](types, "_text"); err != nil {
+		return err
+	}
+
 	if err := ratel.RegisterValue[app.Address](types, "app.address"); err != nil {
 		return err
 	}
 
+	if err := ratel.RegisterValue[app.Email](types, "text"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[app.UserStatus](types, "app.user_status"); err != nil {
+		return err
+	}
+
 	if err := ratel.RegisterValue[decimal.Decimal](types, "numeric"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[doc.Profile](types, "jsonb"); err != nil {
 		return err
 	}
 
@@ -434,6 +450,10 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	}
 
 	if err := ratel.RegisterValue[string](types, "text"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[time.Time](types, "timestamptz"); err != nil {
 		return err
 	}
 

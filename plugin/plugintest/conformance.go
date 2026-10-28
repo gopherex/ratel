@@ -30,6 +30,15 @@ type Case struct {
 func Run(t *testing.T, exchange Exchange, cases ...Case) {
 	t.Helper()
 
+	RunWithOptions(t, exchange, nil, cases...)
+}
+
+// RunWithOptions is Run for a plugin that requires options: the fixed corpus
+// requests carry them, encoded as the host encodes ratel.yaml plugin options
+// (JSON bytes). Author cases keep their own options.
+func RunWithOptions(t *testing.T, exchange Exchange, options []byte, cases ...Case) {
+	t.Helper()
+
 	for _, format := range []plugin.Format{plugin.Binary, plugin.JSON} {
 		t.Run(string(format), func(t *testing.T) {
 			t.Parallel()
@@ -37,8 +46,8 @@ func Run(t *testing.T, exchange Exchange, cases ...Case) {
 			version := negotiate(t, exchange, format)
 
 			corpus := append([]Case{
-				{Name: "empty", Request: &pluginpb.GenerateRequest{Catalog: &ir.Catalog{}}},
-				{Name: "schema", Request: &pluginpb.GenerateRequest{Catalog: &ir.Catalog{
+				{Name: "empty", Request: &pluginpb.GenerateRequest{Catalog: &ir.Catalog{}, Options: options}},
+				{Name: "schema", Request: &pluginpb.GenerateRequest{Options: options, Catalog: &ir.Catalog{
 					Schemas: []*ir.Schema{{Name: "public"}},
 				}}},
 			}, cases...)

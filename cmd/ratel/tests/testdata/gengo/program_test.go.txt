@@ -1,0 +1,124 @@
+package e2e_test
+
+import (
+	"context"
+	"errors"
+	"os"
+	"slices"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
+
+	"github.com/gopherex/ratel"
+
+	"example.com/e2e/db/app"
+	"example.com/e2e/db/queries"
+	"example.com/e2e/doc"
+)
+
+func pool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
+	config, err := pgxpool.ParseConfig(os.Getenv("RATEL_E2E_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if err := app.RegisterTypes(ctx, conn); err != nil {
+			return err
+		}
+
+		return queries.RegisterTypes(ctx, conn)
+	}
+
+	result, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(result.Close)
+
+	return result
+}
+
+func TestGenerated(t *testing.T) {
+	ctx := t.Context()
+	db := ratel.New(pool(t))
+
+	first := app.NewUserInsert("ann@example.com", app.UserStatusActive)
+	first.Balance = ratel.OptFrom(decimal.RequireFromString("12.50"))
+	first.Tags = ratel.OptFrom([]string{"a", "b"})
+	first.Home = ratel.NullFrom(app.Address{Street: ratel.NullFrom("Main"), Zip: ratel.NullFrom("100")})
+	first.Profile = ratel.NullFrom(doc.Profile{Name: "Ann"})
+
+	users, err := db.Insert(app.Users, first, app.NewUserInsert("bob@example.com", app.UserStatusOnHold)).Returning(ctx)
+	if err != nil || len(users) != 2 {
+		t.Fatalf("insert = %v, %v", users, err)
+	}
+
+	ann, err := db.From(app.Users).Where(app.Users.Email.Eq("ann@example.com")).One(ctx)
+	if err != nil || !ann.Balance.Equal(decimal.RequireFromString("12.5")) || !slices.Equal(ann.Tags, []string{"a", "b"}) ||
+		ann.Home.V.Street.V != "Main" || ann.Profile.V.Name != "Ann" || ann.Status != app.UserStatusActive {
+		t.Fatalf("read = %+v, %v", ann, err)
+	}
+
+	_, err = db.Insert(app.Users, app.NewUserInsert("ann@example.com", app.UserStatusActive)).Exec(ctx)
+	if !errors.Is(err, app.ErrUsersEmailKey) {
+		t.Fatalf("duplicate email error = %v", err)
+	}
+
+	bob := users[1]
+
+	for index, owner := range []int64{ann.ID, ann.ID, bob.ID} {
+		row := app.NewOrderInsert(int64(index+1), owner, decimal.NewFromInt(int64(10*(index+1))))
+		if _, err := db.Insert(app.Orders, row).Exec(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	loaded, err := db.From(app.Users).Where(app.Users.ID.Eq(ann.ID)).With(app.Users.Orders).One(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if orders, err := loaded.Orders(); err != nil || len(orders) != 2 {
+		t.Fatalf("relation = %v, %v", orders, err)
+	}
+
+	byEmail, err := queries.UserByEmail(ctx, db, "bob@example.com")
+	if err != nil || byEmail.ID != bob.ID || byEmail.Status != app.UserStatusOnHold {
+		t.Fatalf("UserByEmail = %+v, %v", byEmail, err)
+	}
+
+	if _, err := queries.UserByEmail(ctx, db, "nobody@example.com"); !errors.Is(err, ratel.ErrNotFound) {
+		t.Fatalf("missing user error = %v", err)
+	}
+
+	joined, err := queries.OrdersWithUsers(ctx, db)
+	if err != nil || len(joined) != 3 || joined[0].User == nil || joined[0].User.ID != ann.ID || joined[2].User != nil {
+		t.Fatalf("OrdersWithUsers = %+v, %v", joined, err)
+	}
+
+	emails, err := db.From(queries.EmailsQ.Args()).Where(queries.EmailsQ.ID.Eq(bob.ID)).List(ctx)
+	if err != nil || len(emails) != 1 || emails[0].Email != "bob@example.com" {
+		t.Fatalf("Emails builder = %+v, %v", emails, err)
+	}
+
+	tag, err := queries.CreateTag(ctx, db, 1, "go")
+	if err != nil || tag.Label != "go" {
+		t.Fatalf("CreateTag = %+v, %v", tag, err)
+	}
+
+	copied, err := queries.CopyTags(ctx, db, slices.Values([]queries.CopyTagsParams{{ID: 2, Label: "sql"}, {ID: 3, Label: "pg"}}))
+	if err != nil || copied != 2 {
+		t.Fatalf("CopyTags = %d, %v", copied, err)
+	}
+
+	deleted, err := queries.DeleteTag(ctx, db, 2)
+	if err != nil || deleted != 1 {
+		t.Fatalf("DeleteTag = %d, %v", deleted, err)
+	}
+}

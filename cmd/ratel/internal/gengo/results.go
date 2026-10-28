@@ -436,6 +436,7 @@ func (s *state) nullableGroup(file *unit, value *ir.Query, group tableGroup, tar
 		declared := group.table.GetColumns()[slices.IndexFunc(group.table.GetColumns(),
 			func(c *ir.Column) bool { return c.GetName() == name })]
 		mapped, _ := s.columnType(group.table.GetName(), declared, "")
+		s.use(file, declared.GetType(), mapped, true)
 
 		file.imports = append(file.imports, ratelImport)
 		before.WriteString("\tvar " + temporary + " ratel.Null[" + file.use(mapped) + "]\n")

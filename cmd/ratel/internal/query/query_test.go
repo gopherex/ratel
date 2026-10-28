@@ -41,13 +41,23 @@ CREATE FUNCTION public.widen(value bigint) RETURNS bigint LANGUAGE sql STRICT AS
 
 type inferenceCase struct{ name, sql, params, columns, nullable string }
 
-func TestInfer(t *testing.T) {
-	t.Parallel()
+// newParser constructs a parser before the test goes parallel, so the first
+// one warms wazero serially (see parse.New).
+func newParser(tb testing.TB) parse.Parser {
+	tb.Helper()
 
 	parser, err := parse.New(parse.Config{})
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
+
+	return parser
+}
+
+func TestInfer(t *testing.T) {
+	parser := newParser(t)
+
+	t.Parallel()
 
 	signatures, err := builtins.For(17)
 	if err != nil {
