@@ -18,6 +18,7 @@ const (
 )
 
 type column struct {
+	typ      *ir.TypeRef
 	name     string // PostgreSQL name
 	field    string // Go field name
 	param    string // constructor parameter name
@@ -38,7 +39,8 @@ func (s *state) tableColumns(table *ir.Table) ([]column, error) {
 		}
 
 		columns = append(columns, column{
-			name: value.GetName(), field: pascal(value.GetName()), param: parameterName(value.GetName()),
+			typ: value.GetType(), name: value.GetName(), field: pascal(value.GetName()),
+			param:  parameterName(value.GetName()),
 			goType: mapped, pgType: pgTypeName(value.GetType()), nullable: value.GetNullable(),
 			array: value.GetType().GetElement() != nil, insert: insertKindOf(value),
 		})
@@ -98,13 +100,18 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 		object := objectOf(table.GetName())
 		names := tableNames(object)
 
-		for identifier, source := range names.identifiers() {
+		for identifier, source := range names.all() {
 			if err := file.declare(identifier, source); err != nil {
 				return err
 			}
 		}
 
 		file.imports = append(file.imports, ratelImport, "github.com/jackc/pgx/v5")
+
+		for _, value := range columns {
+			s.use(file, value.typ, value.goType, value.nullable || value.insert == insertOptional)
+		}
+
 		writeModel(file, names, columns)
 		writeScanner(file, names, columns)
 		writeInsert(file, names, columns)
@@ -118,21 +125,21 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 	return nil
 }
 
-// names of a table's generated identifiers.
-type names struct {
+// identifiers are a table's generated Go names.
+type identifiers struct {
 	table, model, insert, descriptor, descriptorType, scanner, constructor string
 }
 
-func tableNames(table string) names {
+func tableNames(table string) identifiers {
 	model := singular(table)
 
-	return names{
+	return identifiers{
 		table: table, model: model, insert: model + "Insert", descriptor: plural(table),
 		descriptorType: camel(plural(table)) + "Table", scanner: "scan" + model, constructor: "New" + model + "Insert",
 	}
 }
 
-func (n names) identifiers() map[string]string {
+func (n identifiers) all() map[string]string {
 	source := "table " + n.table
 
 	return map[string]string{
@@ -141,7 +148,7 @@ func (n names) identifiers() map[string]string {
 	}
 }
 
-func writeModel(file *unit, names names, columns []column) {
+func writeModel(file *unit, names identifiers, columns []column) {
 	file.printf("// %s is a row of %s.\ntype %s struct {\n", names.model, names.table, names.model)
 
 	for _, value := range columns {
@@ -151,7 +158,7 @@ func writeModel(file *unit, names names, columns []column) {
 	file.printf("}\n\n")
 }
 
-func writeScanner(file *unit, names names, columns []column) {
+func writeScanner(file *unit, names identifiers, columns []column) {
 	targets := make([]string, 0, len(columns))
 	for _, value := range columns {
 		targets = append(targets, "&model."+value.field)
@@ -162,7 +169,7 @@ func writeScanner(file *unit, names names, columns []column) {
 		names.scanner, names.model, names.model, strings.Join(targets, ", "))
 }
 
-func writeInsert(file *unit, names names, columns []column) {
+func writeInsert(file *unit, names identifiers, columns []column) {
 	var parameters, assignments []string
 
 	file.printf("// %s is the input of an insert into %s. Construct it with %s.\ntype %s struct {\n",

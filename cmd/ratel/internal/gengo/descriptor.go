@@ -27,7 +27,7 @@ func quotedList(values []string) string {
 	return "[]string{" + strings.Join(quoted, ", ") + "}"
 }
 
-func writeDescriptor(file *unit, schema, table string, names names, columns []column, source *ir.Table) {
+func writeDescriptor(file *unit, schema, table string, names identifiers, columns []column, source *ir.Table) {
 	outputs := make([]string, 0, len(columns))
 	for _, value := range columns {
 		outputs = append(outputs, value.name)
@@ -73,7 +73,7 @@ func columnKind(value column) string {
 	return "NewCol"
 }
 
-func tableOptions(names names, columns []column, table *ir.Table) string {
+func tableOptions(names identifiers, columns []column, table *ir.Table) string {
 	var options strings.Builder
 
 	for _, constraint := range table.GetConstraints() {
@@ -103,7 +103,7 @@ func tableOptions(names names, columns []column, table *ir.Table) string {
 	return options.String()
 }
 
-func writeInsertField(file *unit, names names, value column) {
+func writeInsertField(file *unit, names identifiers, value column) {
 	access := "insert." + value.field
 	set := "true"
 

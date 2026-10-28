@@ -12,9 +12,11 @@ import (
 
 // unit accumulates a generated file's body and imports.
 type unit struct {
-	body    strings.Builder
-	imports []string
-	names   map[string]string // generated identifier -> its source, for collisions
+	schema   string // PostgreSQL schema of the package
+	body     strings.Builder
+	imports  []string
+	names    map[string]string // generated identifier -> its source, for collisions
+	registry *registry
 }
 
 func (u *unit) printf(format string, args ...any) { fmt.Fprintf(&u.body, format, args...) }
@@ -45,14 +47,20 @@ func (s *state) schemaFiles(schema *ir.Schema) ([]*pluginpb.File, error) {
 		return nil, nil
 	}
 
-	file := &unit{names: make(map[string]string)}
+	file := &unit{schema: schema.GetName(), names: make(map[string]string), registry: newRegistry()}
 
-	steps := []func(*unit, *ir.Schema) error{s.enums, s.domains, s.composites, s.tables}
+	steps := []func(*unit, *ir.Schema) error{s.enums, s.domains, s.composites, s.tables, s.views}
 	for _, step := range steps {
 		if err := step(file, schema); err != nil {
 			return nil, err
 		}
 	}
+
+	if err := file.declare("RegisterTypes", "schema "+schema.GetName()); err != nil {
+		return nil, err
+	}
+
+	writeRegisterTypes(file)
 
 	name := packageName(schema.GetName())
 
@@ -140,6 +148,10 @@ func (s *state) composites(file *unit, schema *ir.Schema) error {
 
 		file.printf("// %s is the PostgreSQL composite type %s.%s.\ntype %s struct {\n",
 			typeName, schema.GetName(), object, typeName)
+		s.load(file, &ir.TypeRef{
+			Kind: ir.TypeKind_TYPE_KIND_COMPOSITE, PgName: object,
+			Udt: &ir.ObjectRef{Kind: ir.ObjectKind_OBJECT_KIND_COMPOSITE_TYPE, Name: composite.GetName()},
+		})
 
 		for _, field := range composite.GetFields() {
 			fieldType, err := s.goType(field.GetType(), schema.GetName())
@@ -149,6 +161,7 @@ func (s *state) composites(file *unit, schema *ir.Schema) error {
 
 			// Composite fields are nullable in PostgreSQL.
 			file.imports = append(file.imports, ratelImport)
+			s.use(file, field.GetType(), fieldType, true)
 			file.printf("\t%s ratel.Null[%s] `db:%s`\n", pascal(field.GetName()), file.use(fieldType),
 				strconv.Quote(field.GetName()))
 		}

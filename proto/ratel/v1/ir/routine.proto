@@ -4,6 +4,7 @@ package ratel.v1.ir;
 
 import "ratel/v1/ir/common.proto";
 import "ratel/v1/ir/expr.proto";
+import "ratel/v1/ir/query.proto";
 import "ratel/v1/ir/schema.proto";
 import "ratel/v1/ir/type.proto";
 
@@ -70,6 +71,9 @@ message View {
   CheckOption check_option = 4;
   bool security_barrier = 5;
   Metadata meta = 6;
+  // Result columns inferred by the host before plugins run; catalog.Build
+  // and introspection leave it empty.
+  repeated QueryColumn output = 7;
 }
 
 message MaterializedView {
@@ -80,6 +84,7 @@ message MaterializedView {
   repeated Index indexes = 5; // ordered by object id
   string tablespace = 6;
   Metadata meta = 7;
+  repeated QueryColumn output = 8;  // as View.output
 }
 
 enum ArgMode {

@@ -15,7 +15,8 @@ type userType struct {
 	schema string
 	name   string // Go identifier
 	kind   ir.TypeKind
-	base   *ir.TypeRef // domain base or range subtype
+	base   *ir.TypeRef   // domain base or range subtype
+	fields []*ir.TypeRef // composite field types
 }
 
 type state struct {
@@ -60,6 +61,15 @@ func (s *state) indexTypes(schema *ir.Schema) {
 
 	for _, value := range schema.GetComposites() {
 		add(value.GetName(), ir.TypeKind_TYPE_KIND_COMPOSITE, nil)
+
+		key := schemaOf(value.GetName()) + "." + objectOf(value.GetName())
+		found := s.types[key]
+
+		for _, field := range value.GetFields() {
+			found.fields = append(found.fields, field.GetType())
+		}
+
+		s.types[key] = found
 	}
 
 	for _, value := range schema.GetRanges() {

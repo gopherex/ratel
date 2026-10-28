@@ -11,6 +11,8 @@ const (
 	decimalImport = "github.com/shopspring/decimal"
 	uuidImport    = "github.com/google/uuid"
 	ratelImport   = "github.com/gopherex/ratel"
+
+	numericType = "numeric" // its Go type needs the decimal codec registered
 )
 
 // goType is a Go type expression and the import paths it needs.
@@ -62,7 +64,7 @@ func numeric(name string) (goType, bool) {
 		return goType{expr: "float32"}, true
 	case "float8":
 		return goType{expr: "float64"}, true
-	case "numeric":
+	case numericType:
 		return goType{expr: "decimal.Decimal", imports: []string{decimalImport}}, true
 	case "oid", "xid", "cid":
 		return goType{expr: "uint32"}, true
@@ -109,7 +111,7 @@ func pgtypeScalar(name string) (goType, bool) {
 // subtype's Go type.
 func builtinRange(name string) (goType, bool) {
 	subtypes := map[string]string{
-		"int4range": "int4", "int8range": "int8", "numrange": "numeric",
+		"int4range": "int4", "int8range": "int8", "numrange": numericType,
 		"tsrange": "timestamp", "tstzrange": "timestamptz", "daterange": "date",
 	}
 

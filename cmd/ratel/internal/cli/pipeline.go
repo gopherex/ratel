@@ -71,6 +71,10 @@ func loadProject(configPath string) (project, error) {
 		return project{}, err
 	}
 
+	if err := query.Views(parser, result, snapshot); err != nil {
+		return project{}, err
+	}
+
 	queryFiles, groups, err := queryGroups(root, settings.Queries)
 	if err != nil {
 		return project{}, err

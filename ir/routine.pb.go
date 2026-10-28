@@ -882,8 +882,11 @@ type View struct {
 	CheckOption     CheckOption            `protobuf:"varint,4,opt,name=check_option,json=checkOption,proto3,enum=ratel.v1.ir.CheckOption" json:"check_option,omitempty"`
 	SecurityBarrier bool                   `protobuf:"varint,5,opt,name=security_barrier,json=securityBarrier,proto3" json:"security_barrier,omitempty"`
 	Meta            *Metadata              `protobuf:"bytes,6,opt,name=meta,proto3" json:"meta,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Result columns inferred by the host before plugins run; catalog.Build
+	// and introspection leave it empty.
+	Output        []*QueryColumn `protobuf:"bytes,7,rep,name=output,proto3" json:"output,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *View) Reset() {
@@ -958,6 +961,13 @@ func (x *View) GetMeta() *Metadata {
 	return nil
 }
 
+func (x *View) GetOutput() []*QueryColumn {
+	if x != nil {
+		return x.Output
+	}
+	return nil
+}
+
 type MaterializedView struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          *QualifiedName         `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -967,6 +977,7 @@ type MaterializedView struct {
 	Indexes       []*Index               `protobuf:"bytes,5,rep,name=indexes,proto3" json:"indexes,omitempty"`                    // ordered by object id
 	Tablespace    string                 `protobuf:"bytes,6,opt,name=tablespace,proto3" json:"tablespace,omitempty"`
 	Meta          *Metadata              `protobuf:"bytes,7,opt,name=meta,proto3" json:"meta,omitempty"`
+	Output        []*QueryColumn         `protobuf:"bytes,8,rep,name=output,proto3" json:"output,omitempty"` // as View.output
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1046,6 +1057,13 @@ func (x *MaterializedView) GetTablespace() string {
 func (x *MaterializedView) GetMeta() *Metadata {
 	if x != nil {
 		return x.Meta
+	}
+	return nil
+}
+
+func (x *MaterializedView) GetOutput() []*QueryColumn {
+	if x != nil {
+		return x.Output
 	}
 	return nil
 }
@@ -1841,7 +1859,7 @@ var File_ratel_v1_ir_routine_proto protoreflect.FileDescriptor
 
 const file_ratel_v1_ir_routine_proto_rawDesc = "" +
 	"\n" +
-	"\x19ratel/v1/ir/routine.proto\x12\vratel.v1.ir\x1a\x18ratel/v1/ir/common.proto\x1a\x16ratel/v1/ir/expr.proto\x1a\x18ratel/v1/ir/schema.proto\x1a\x16ratel/v1/ir/type.proto\"}\n" +
+	"\x19ratel/v1/ir/routine.proto\x12\vratel.v1.ir\x1a\x18ratel/v1/ir/common.proto\x1a\x16ratel/v1/ir/expr.proto\x1a\x17ratel/v1/ir/query.proto\x1a\x18ratel/v1/ir/schema.proto\x1a\x16ratel/v1/ir/type.proto\"}\n" +
 	"\bEnumType\x12.\n" +
 	"\x04name\x18\x01 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\x04name\x12\x16\n" +
 	"\x06labels\x18\x02 \x03(\tR\x06labels\x12)\n" +
@@ -1878,14 +1896,15 @@ const file_ratel_v1_ir_routine_proto_rawDesc = "" +
 	"\n" +
 	"multirange\x18\a \x01(\tR\n" +
 	"multirange\x12)\n" +
-	"\x04meta\x18\b \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\x92\x02\n" +
+	"\x04meta\x18\b \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\xc4\x02\n" +
 	"\x04View\x12.\n" +
 	"\x04name\x18\x01 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\x04name\x12\x18\n" +
 	"\acolumns\x18\x02 \x03(\tR\acolumns\x12-\n" +
 	"\x05query\x18\x03 \x01(\v2\x17.ratel.v1.ir.SelectStmtR\x05query\x12;\n" +
 	"\fcheck_option\x18\x04 \x01(\x0e2\x18.ratel.v1.ir.CheckOptionR\vcheckOption\x12)\n" +
 	"\x10security_barrier\x18\x05 \x01(\bR\x0fsecurityBarrier\x12)\n" +
-	"\x04meta\x18\x06 \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\xa1\x02\n" +
+	"\x04meta\x18\x06 \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\x120\n" +
+	"\x06output\x18\a \x03(\v2\x18.ratel.v1.ir.QueryColumnR\x06output\"\xd3\x02\n" +
 	"\x10MaterializedView\x12.\n" +
 	"\x04name\x18\x01 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\x04name\x12\x18\n" +
 	"\acolumns\x18\x02 \x03(\tR\acolumns\x12-\n" +
@@ -1895,7 +1914,8 @@ const file_ratel_v1_ir_routine_proto_rawDesc = "" +
 	"\n" +
 	"tablespace\x18\x06 \x01(\tR\n" +
 	"tablespace\x12)\n" +
-	"\x04meta\x18\a \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\xaa\x01\n" +
+	"\x04meta\x18\a \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\x120\n" +
+	"\x06output\x18\b \x03(\v2\x18.ratel.v1.ir.QueryColumnR\x06output\"\xaa\x01\n" +
 	"\bArgument\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12(\n" +
 	"\x04type\x18\x02 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x04type\x12(\n" +
@@ -2052,8 +2072,9 @@ var file_ratel_v1_ir_routine_proto_goTypes = []any{
 	(*Expr)(nil),               // 27: ratel.v1.ir.Expr
 	(*TypeRef)(nil),            // 28: ratel.v1.ir.TypeRef
 	(*SelectStmt)(nil),         // 29: ratel.v1.ir.SelectStmt
-	(*Index)(nil),              // 30: ratel.v1.ir.Index
-	(*ObjectRef)(nil),          // 31: ratel.v1.ir.ObjectRef
+	(*QueryColumn)(nil),        // 30: ratel.v1.ir.QueryColumn
+	(*Index)(nil),              // 31: ratel.v1.ir.Index
+	(*ObjectRef)(nil),          // 32: ratel.v1.ir.ObjectRef
 }
 var file_ratel_v1_ir_routine_proto_depIdxs = []int32{
 	25, // 0: ratel.v1.ir.EnumType.name:type_name -> ratel.v1.ir.QualifiedName
@@ -2077,45 +2098,47 @@ var file_ratel_v1_ir_routine_proto_depIdxs = []int32{
 	29, // 18: ratel.v1.ir.View.query:type_name -> ratel.v1.ir.SelectStmt
 	0,  // 19: ratel.v1.ir.View.check_option:type_name -> ratel.v1.ir.CheckOption
 	26, // 20: ratel.v1.ir.View.meta:type_name -> ratel.v1.ir.Metadata
-	25, // 21: ratel.v1.ir.MaterializedView.name:type_name -> ratel.v1.ir.QualifiedName
-	29, // 22: ratel.v1.ir.MaterializedView.query:type_name -> ratel.v1.ir.SelectStmt
-	30, // 23: ratel.v1.ir.MaterializedView.indexes:type_name -> ratel.v1.ir.Index
-	26, // 24: ratel.v1.ir.MaterializedView.meta:type_name -> ratel.v1.ir.Metadata
-	28, // 25: ratel.v1.ir.Argument.type:type_name -> ratel.v1.ir.TypeRef
-	1,  // 26: ratel.v1.ir.Argument.mode:type_name -> ratel.v1.ir.ArgMode
-	27, // 27: ratel.v1.ir.Argument.default_value:type_name -> ratel.v1.ir.Expr
-	28, // 28: ratel.v1.ir.SetofType.type:type_name -> ratel.v1.ir.TypeRef
-	28, // 29: ratel.v1.ir.TableColumn.type:type_name -> ratel.v1.ir.TypeRef
-	18, // 30: ratel.v1.ir.TableReturn.columns:type_name -> ratel.v1.ir.TableColumn
-	28, // 31: ratel.v1.ir.ReturnType.scalar:type_name -> ratel.v1.ir.TypeRef
-	17, // 32: ratel.v1.ir.ReturnType.setof:type_name -> ratel.v1.ir.SetofType
-	19, // 33: ratel.v1.ir.ReturnType.table:type_name -> ratel.v1.ir.TableReturn
-	25, // 34: ratel.v1.ir.Function.name:type_name -> ratel.v1.ir.QualifiedName
-	16, // 35: ratel.v1.ir.Function.arguments:type_name -> ratel.v1.ir.Argument
-	20, // 36: ratel.v1.ir.Function.returns:type_name -> ratel.v1.ir.ReturnType
-	2,  // 37: ratel.v1.ir.Function.volatility:type_name -> ratel.v1.ir.Volatility
-	4,  // 38: ratel.v1.ir.Function.null_input:type_name -> ratel.v1.ir.NullInputBehavior
-	3,  // 39: ratel.v1.ir.Function.parallel:type_name -> ratel.v1.ir.ParallelSafety
-	29, // 40: ratel.v1.ir.Function.sql_body:type_name -> ratel.v1.ir.SelectStmt
-	26, // 41: ratel.v1.ir.Function.meta:type_name -> ratel.v1.ir.Metadata
-	28, // 42: ratel.v1.ir.Function.variadic_element:type_name -> ratel.v1.ir.TypeRef
-	22, // 43: ratel.v1.ir.Function.aggregate:type_name -> ratel.v1.ir.AggregateSignature
-	25, // 44: ratel.v1.ir.Procedure.name:type_name -> ratel.v1.ir.QualifiedName
-	16, // 45: ratel.v1.ir.Procedure.arguments:type_name -> ratel.v1.ir.Argument
-	29, // 46: ratel.v1.ir.Procedure.sql_body:type_name -> ratel.v1.ir.SelectStmt
-	26, // 47: ratel.v1.ir.Procedure.meta:type_name -> ratel.v1.ir.Metadata
-	31, // 48: ratel.v1.ir.Trigger.table:type_name -> ratel.v1.ir.ObjectRef
-	5,  // 49: ratel.v1.ir.Trigger.timing:type_name -> ratel.v1.ir.TriggerTiming
-	6,  // 50: ratel.v1.ir.Trigger.events:type_name -> ratel.v1.ir.TriggerEvent
-	7,  // 51: ratel.v1.ir.Trigger.level:type_name -> ratel.v1.ir.TriggerLevel
-	27, // 52: ratel.v1.ir.Trigger.when:type_name -> ratel.v1.ir.Expr
-	31, // 53: ratel.v1.ir.Trigger.function:type_name -> ratel.v1.ir.ObjectRef
-	26, // 54: ratel.v1.ir.Trigger.meta:type_name -> ratel.v1.ir.Metadata
-	55, // [55:55] is the sub-list for method output_type
-	55, // [55:55] is the sub-list for method input_type
-	55, // [55:55] is the sub-list for extension type_name
-	55, // [55:55] is the sub-list for extension extendee
-	0,  // [0:55] is the sub-list for field type_name
+	30, // 21: ratel.v1.ir.View.output:type_name -> ratel.v1.ir.QueryColumn
+	25, // 22: ratel.v1.ir.MaterializedView.name:type_name -> ratel.v1.ir.QualifiedName
+	29, // 23: ratel.v1.ir.MaterializedView.query:type_name -> ratel.v1.ir.SelectStmt
+	31, // 24: ratel.v1.ir.MaterializedView.indexes:type_name -> ratel.v1.ir.Index
+	26, // 25: ratel.v1.ir.MaterializedView.meta:type_name -> ratel.v1.ir.Metadata
+	30, // 26: ratel.v1.ir.MaterializedView.output:type_name -> ratel.v1.ir.QueryColumn
+	28, // 27: ratel.v1.ir.Argument.type:type_name -> ratel.v1.ir.TypeRef
+	1,  // 28: ratel.v1.ir.Argument.mode:type_name -> ratel.v1.ir.ArgMode
+	27, // 29: ratel.v1.ir.Argument.default_value:type_name -> ratel.v1.ir.Expr
+	28, // 30: ratel.v1.ir.SetofType.type:type_name -> ratel.v1.ir.TypeRef
+	28, // 31: ratel.v1.ir.TableColumn.type:type_name -> ratel.v1.ir.TypeRef
+	18, // 32: ratel.v1.ir.TableReturn.columns:type_name -> ratel.v1.ir.TableColumn
+	28, // 33: ratel.v1.ir.ReturnType.scalar:type_name -> ratel.v1.ir.TypeRef
+	17, // 34: ratel.v1.ir.ReturnType.setof:type_name -> ratel.v1.ir.SetofType
+	19, // 35: ratel.v1.ir.ReturnType.table:type_name -> ratel.v1.ir.TableReturn
+	25, // 36: ratel.v1.ir.Function.name:type_name -> ratel.v1.ir.QualifiedName
+	16, // 37: ratel.v1.ir.Function.arguments:type_name -> ratel.v1.ir.Argument
+	20, // 38: ratel.v1.ir.Function.returns:type_name -> ratel.v1.ir.ReturnType
+	2,  // 39: ratel.v1.ir.Function.volatility:type_name -> ratel.v1.ir.Volatility
+	4,  // 40: ratel.v1.ir.Function.null_input:type_name -> ratel.v1.ir.NullInputBehavior
+	3,  // 41: ratel.v1.ir.Function.parallel:type_name -> ratel.v1.ir.ParallelSafety
+	29, // 42: ratel.v1.ir.Function.sql_body:type_name -> ratel.v1.ir.SelectStmt
+	26, // 43: ratel.v1.ir.Function.meta:type_name -> ratel.v1.ir.Metadata
+	28, // 44: ratel.v1.ir.Function.variadic_element:type_name -> ratel.v1.ir.TypeRef
+	22, // 45: ratel.v1.ir.Function.aggregate:type_name -> ratel.v1.ir.AggregateSignature
+	25, // 46: ratel.v1.ir.Procedure.name:type_name -> ratel.v1.ir.QualifiedName
+	16, // 47: ratel.v1.ir.Procedure.arguments:type_name -> ratel.v1.ir.Argument
+	29, // 48: ratel.v1.ir.Procedure.sql_body:type_name -> ratel.v1.ir.SelectStmt
+	26, // 49: ratel.v1.ir.Procedure.meta:type_name -> ratel.v1.ir.Metadata
+	32, // 50: ratel.v1.ir.Trigger.table:type_name -> ratel.v1.ir.ObjectRef
+	5,  // 51: ratel.v1.ir.Trigger.timing:type_name -> ratel.v1.ir.TriggerTiming
+	6,  // 52: ratel.v1.ir.Trigger.events:type_name -> ratel.v1.ir.TriggerEvent
+	7,  // 53: ratel.v1.ir.Trigger.level:type_name -> ratel.v1.ir.TriggerLevel
+	27, // 54: ratel.v1.ir.Trigger.when:type_name -> ratel.v1.ir.Expr
+	32, // 55: ratel.v1.ir.Trigger.function:type_name -> ratel.v1.ir.ObjectRef
+	26, // 56: ratel.v1.ir.Trigger.meta:type_name -> ratel.v1.ir.Metadata
+	57, // [57:57] is the sub-list for method output_type
+	57, // [57:57] is the sub-list for method input_type
+	57, // [57:57] is the sub-list for extension type_name
+	57, // [57:57] is the sub-list for extension extendee
+	0,  // [0:57] is the sub-list for field type_name
 }
 
 func init() { file_ratel_v1_ir_routine_proto_init() }
@@ -2125,6 +2148,7 @@ func file_ratel_v1_ir_routine_proto_init() {
 	}
 	file_ratel_v1_ir_common_proto_init()
 	file_ratel_v1_ir_expr_proto_init()
+	file_ratel_v1_ir_query_proto_init()
 	file_ratel_v1_ir_schema_proto_init()
 	file_ratel_v1_ir_type_proto_init()
 	file_ratel_v1_ir_routine_proto_msgTypes[12].OneofWrappers = []any{

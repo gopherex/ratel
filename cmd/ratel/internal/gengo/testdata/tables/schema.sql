@@ -16,3 +16,4 @@ CREATE TABLE app.users (
   profile jsonb,
   doubled bigint GENERATED ALWAYS AS (id * 2) STORED
 );
+CREATE VIEW app.active_users AS SELECT id, email, home FROM app.users WHERE status = 'active';

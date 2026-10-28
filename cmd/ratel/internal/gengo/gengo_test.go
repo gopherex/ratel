@@ -18,6 +18,7 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/gengo"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
+	"github.com/gopherex/ratel/cmd/ratel/internal/query"
 )
 
 const options = `{"import_path": "example.com/app/db"}`
@@ -87,6 +88,10 @@ func generate(tb testing.TB, parser parse.Parser, schemaPath string) []*pluginpb
 
 	built, err := catalog.Build(parser, []catalog.File{{Name: "schema.sql", SQL: string(ddl)}}, 18, signatures, gengo.Name)
 	if err != nil {
+		tb.Fatal(err)
+	}
+
+	if err := query.Views(parser, built, signatures); err != nil {
 		tb.Fatal(err)
 	}
 

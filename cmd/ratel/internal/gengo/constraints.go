@@ -47,7 +47,7 @@ func constraintLiteral(schema, table string, constraint *ir.Constraint) string {
 		", Columns: " + quotedList(constraintColumns(constraint)) + "}"
 }
 
-func constraintList(names names, table *ir.Table) string {
+func constraintList(names identifiers, table *ir.Table) string {
 	schema := schemaOf(table.GetName())
 	items := make([]string, 0, len(table.GetConstraints()))
 
@@ -62,7 +62,7 @@ func constraintList(names names, table *ir.Table) string {
 
 // writeConstraints declares one sentinel per named constraint, matched with
 // errors.Is against the error a write returns.
-func writeConstraints(file *unit, schema, table string, names names, source *ir.Table) error {
+func writeConstraints(file *unit, schema, table string, names identifiers, source *ir.Table) error {
 	for _, constraint := range source.GetConstraints() {
 		if constraintKind(constraint) == "" {
 			continue

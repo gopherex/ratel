@@ -356,6 +356,12 @@ Run scanner tests and benchmarks with
 
 ## Named-query inference
 
+`query.Views(parser, catalog, builtins)` sets `View.output` and
+`MaterializedView.output`: the result columns of `SELECT *` from each view,
+inferred like a named query. The host calls it after `catalog.Build` and before
+plugins run; it is the only change made to a built catalog. `catalog.Build` and
+introspection leave `output` empty.
+
 `cmd/ratel/internal/query.Infer(parser, catalog, builtins, sources)` accepts the
 shared `parse.Parser`, a built catalog, the matching `builtins.For(major)`
 signatures and `annotate.QuerySource` records. It returns caller-owned

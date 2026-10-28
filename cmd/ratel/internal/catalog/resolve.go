@@ -456,7 +456,16 @@ func (b *builder) resolveReference(reference *ir.ObjectRef, scope string, meta *
 func (b *builder) resolveRoutineReference(reference *ir.ObjectRef, scope string, meta *ir.Metadata) error {
 	parts := reference.GetName().GetParts()
 	signature := parts[len(parts)-1]
-	sql := "CREATE FUNCTION ratel_reference(" + signature + ") RETURNS int LANGUAGE sql AS 'SELECT 1'"
+
+	// "any" is a reserved word, so the pseudo-type is written quoted.
+	types := strings.Split(signature, ",")
+	for index, name := range types {
+		if strings.TrimSpace(name) == "any" {
+			types[index] = `"any"`
+		}
+	}
+
+	sql := "CREATE FUNCTION ratel_reference(" + strings.Join(types, ",") + ") RETURNS int LANGUAGE sql AS 'SELECT 1'"
 
 	parsed, err := b.parser.Parse(sql)
 	if err != nil || len(parsed.GetStmts()) != 1 {

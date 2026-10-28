@@ -3,10 +3,13 @@
 package app
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"github.com/acme/doc"
 	"github.com/gopherex/ratel"
+	pgxdecimal "github.com/jackc/pgx-shopspring-decimal"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 )
@@ -264,3 +267,95 @@ var ErrUsersStatusNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull
 
 // ErrUsersTagsNotNull matches a violation of users_tags_not_null on app.users.
 var ErrUsersTagsNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_tags_not_null", Columns: []string{"tags"}}
+
+// ActiveUser is a row of active_users.
+type ActiveUser struct {
+	ID    int64
+	Email Email
+	Home  ratel.Null[Address]
+}
+
+func scanActiveUser(row pgx.Row) (ActiveUser, error) {
+	var model ActiveUser
+
+	err := row.Scan(&model.ID, &model.Email, &model.Home)
+
+	return model, err
+}
+
+// ActiveUsers describes the view app.active_users; it is read-only.
+var ActiveUsers = activeUsersTable{
+	Table: ratel.NewTable("app", "active_users", []string{"id", "email", "home"}, scanActiveUser),
+	ID:    ratel.NewCol[ActiveUser, int64]("id"),
+	Email: ratel.NewCol[ActiveUser, Email]("email"),
+	Home:  ratel.NewNullCol[ActiveUser, Address]("home"),
+}
+
+type activeUsersTable struct {
+	ratel.Table[ActiveUser]
+	ID    ratel.Col[ActiveUser, int64]
+	Email ratel.Col[ActiveUser, Email]
+	Home  ratel.NullCol[ActiveUser, Address]
+}
+
+// InSchema is the descriptor for a copy of active_users in another schema.
+func (t activeUsersTable) InSchema(schema string) activeUsersTable {
+	t.Table = t.Table.InSchema(schema)
+
+	return t
+}
+
+// RegisterTypes registers the PostgreSQL types of this package and the
+// ratel value wrappers its fields use. Call it on every connection, for
+// example from pgxpool.Config.AfterConnect.
+func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
+	types := conn.TypeMap()
+
+	pgxdecimal.Register(types)
+
+	for _, name := range []string{"app.address", "app.email", "app.user_status", "app._address", "app._email", "app._user_status"} {
+		loaded, err := conn.LoadType(ctx, name)
+		if err != nil {
+			return fmt.Errorf("load type %s: %w", name, err)
+		}
+
+		types.RegisterType(loaded)
+	}
+
+	types.RegisterDefaultPgType(Address{}, "app.address")
+	types.RegisterDefaultPgType(UserStatus(""), "app.user_status")
+	types.RegisterDefaultPgType([]*Address(nil), "app._address")
+	types.RegisterDefaultPgType([]*UserStatus(nil), "app._user_status")
+	types.RegisterDefaultPgType([]Address(nil), "app._address")
+	types.RegisterDefaultPgType([]UserStatus(nil), "app._user_status")
+
+	if err := ratel.RegisterValue[Address](types, "app.address"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[[]string](types, "_text"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[decimal.Decimal](types, "numeric"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[doc.Profile](types, "jsonb"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[int64](types, "int8"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[string](types, "text"); err != nil {
+		return err
+	}
+
+	if err := ratel.RegisterValue[time.Time](types, "timestamptz"); err != nil {
+		return err
+	}
+
+	return nil
+}
