@@ -127,7 +127,7 @@ func TestDumpConfiguration(t *testing.T) {
 		{"unmatched", "version: 1\nschema: [missing/**/*.sql]", "", "matched no files", 1},
 		{"unknown key", "version: 1\ninvalid: true", "", "unknown", 1},
 		{"unknown plugin", "version: 1\nschema: []", "missing", "not configured", 1},
-		{"queries", "version: 1\nschema: []\nqueries: [{files: [q.sql], package: q}]", "", "schema-only", 0},
+		{"unmatched queries", "version: 1\nschema: []\nqueries: [{files: [q.sql], package: q}]", "", "matched no files", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

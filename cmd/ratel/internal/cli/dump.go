@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -17,12 +16,9 @@ import (
 
 	"github.com/gopherex/ratel/ir"
 	sdk "github.com/gopherex/ratel/plugin"
-	"github.com/gopherex/ratel/plugin/pluginpb"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
-	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 	host "github.com/gopherex/ratel/cmd/ratel/internal/plugin"
 )
 
@@ -60,63 +56,28 @@ func dump(args []string, stdout, stderr io.Writer) int {
 }
 
 func dumpCatalog(configPath, name string, format sdk.Format, stdout, stderr io.Writer) error {
-	settings, err := config.Load(configPath)
+	project, err := loadProject(configPath)
 	if err != nil {
 		return err
 	}
 
-	parser, err := parse.New(settings.Parser)
-	if err != nil {
-		return err
+	for _, warning := range project.warnings {
+		fmt.Fprintf(stderr, "ratel dump: warning %s: %s\n", warning.GetCode(), warning.GetMessage())
 	}
-
-	root, err := filepath.Abs(filepath.Dir(configPath))
-	if err != nil {
-		return fmt.Errorf("configuration directory: %w", err)
-	}
-
-	files, err := schemaFiles(root, settings.Schema)
-	if err != nil {
-		return err
-	}
-
-	snapshot, err := builtins.For(settings.Postgres.Version)
-	if err != nil {
-		return err
-	}
-
-	owned := make([]string, 0, len(settings.Plugins))
-	for _, entry := range settings.Plugins {
-		owned = append(owned, entry.Name)
-	}
-
-	result, err := catalog.Build(parser, files, settings.Postgres.Version, snapshot, owned...)
-	if err != nil {
-		return err
-	}
-
-	if len(settings.Queries) > 0 {
-		fmt.Fprintln(stderr, "ratel dump: schema-only; configured queries are not inferred")
-	}
-	// Query inference attaches Queries here, reusing parser and the built catalog.
-	input := &pluginpb.GenerateRequest{Catalog: result, HostVersion: Version()}
 
 	if name == "" {
-		return sdk.Write(stdout, format, result)
+		return sdk.Write(stdout, format, project.catalog)
 	}
 
-	entry, err := findPlugin(settings.Plugins, name, root)
+	entry, err := findPlugin(project.settings.Plugins, name, project.root)
 	if err != nil {
 		return err
 	}
 
-	options, err := json.Marshal(entry.Options)
+	input, err := project.request(entry)
 	if err != nil {
-		return fmt.Errorf("encode plugin options: %w", err)
+		return err
 	}
-
-	input.Options = options
-	input.Annotations = annotations(result.ProtoReflect(), name)
 
 	runner := host.New(nil)
 	defer runner.Close(context.Background())

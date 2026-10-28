@@ -28,11 +28,14 @@ directory. Schema patterns support `**`, expand in sorted order and deduplicate
 files; a pattern matching no files is an error. An explicit `schema: []` builds
 an empty catalog.
 
-`dump` currently builds the schema Catalog, including validated core annotations
-and parsed plugin annotations, using the configured PostgreSQL built-in snapshot.
-It does not infer configured queries; when query groups exist it prints a
-schema-only warning to stderr. The query-inference integration point is immediately
-after `catalog.Build` in `internal/cli/dump.go`, using the same parser and catalog.
+`dump` builds the schema Catalog, including validated core annotations and parsed
+plugin annotations, using the configured PostgreSQL built-in snapshot, then infers
+every configured query (`annotate.Queries`, `query.Infer`) with the same parser and
+catalog. Query files of each group are read once; a file matched by two groups is an
+error. Plain dump serializes the Catalog only. `--plugin` requests carry the inferred
+queries, and each query gets a plugin-namespace annotation `package <group>` (target
+`query_name`) so the plugin knows its configured Go package. Warnings from query
+annotation go to stderr.
 Plain dump serializes `Catalog`; `--plugin <name>` negotiates Info and serializes
 a `PluginRequest` with its Generate payload, filtered namespace annotations,
 JSON options, host version and configured output directory. It does not invoke
