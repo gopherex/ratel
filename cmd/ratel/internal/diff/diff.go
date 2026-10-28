@@ -41,7 +41,7 @@ func Diff(current, desired introspect.Rendering, intents Intents) []Change {
 
 		switch {
 		case !exists:
-			changes = append(changes, created(object))
+			changes = append(changes, Created(object))
 		case previous != object.SQL || columnsDiffer(current, desired, object.Key):
 			step := altered(current, desired, intents, object.Key, previous, object.SQL)
 			changes = append(changes, step.changes...)
@@ -56,7 +56,7 @@ func Diff(current, desired introspect.Rendering, intents Intents) []Change {
 		drops = append(drops, deferred[object.Key]...)
 
 		if _, exists := after[object.Key]; !exists {
-			drops = append(drops, dropped(object))
+			drops = append(drops, Dropped(object))
 		}
 	}
 
@@ -129,12 +129,13 @@ func parentOf(name string) string {
 // replaced is the old object dropped and the new one created.
 func replaced(key, before, after string) []Change {
 	return []Change{
-		dropped(introspect.Object{Key: key, SQL: before}),
-		created(introspect.Object{Key: key, SQL: after}),
+		Dropped(introspect.Object{Key: key, SQL: before}),
+		Created(introspect.Object{Key: key, SQL: after}),
 	}
 }
 
-func created(object introspect.Object) Change {
+// Created is the change creating a rendered object.
+func Created(object introspect.Object) Change {
 	kind, name := kindOf(object.Key), nameOf(object.Key)
 	change := Change{Kind: createKind(kind, object.SQL), Key: object.Key, SQL: object.SQL, After: object.SQL}
 

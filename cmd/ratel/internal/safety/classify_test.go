@@ -193,18 +193,21 @@ func dropCases() []struct {
 }
 
 func TestClassifier(t *testing.T) {
+	parser := newParser(t)
+
 	t.Parallel()
-	checkClassified(t, classifyCases())
+	checkClassified(t, parser, classifyCases())
 }
 
-func checkClassified(t *testing.T, cases []struct {
+// checkClassified takes a parser built before the test went parallel:
+// wazero's first runtime must not race another.
+func checkClassified(t *testing.T, parser parse.Parser, cases []struct {
 	sql  string
 	want []safety.Operation
 },
 ) {
 	t.Helper()
 
-	parser := newParser(t)
 	env := safety.Env{Indexes: map[string]string{"app.i": "app.t"}}
 
 	for _, tc := range cases {

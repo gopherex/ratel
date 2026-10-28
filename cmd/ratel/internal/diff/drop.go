@@ -6,8 +6,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/introspect"
 )
 
-// dropped is the change removing an object the desired state lacks.
-func dropped(object introspect.Object) Change {
+// Dropped is the change removing a rendered object the desired state lacks.
+func Dropped(object introspect.Object) Change {
 	kind, name := kindOf(object.Key), nameOf(object.Key)
 	change := Change{Key: object.Key, Before: object.SQL}
 

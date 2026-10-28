@@ -40,8 +40,6 @@ func KindOf(key string) string { return string(kindOf(key)) }
 func NameOf(key string) string { return nameOf(key) }
 
 func ParentOf(name string) string                     { return parentOf(name) }
-func Created(object introspect.Object) Change         { return created(object) }
-func Dropped(object introspect.Object) Change         { return dropped(object) }
 func AlteredRLS(key, name, after string) Change       { return alteredRLS(key, name, after) }
 func SequenceAlteration(create string) string         { return alterSequence(create) }
 func Signature(definition string) string              { return signature(definition) }

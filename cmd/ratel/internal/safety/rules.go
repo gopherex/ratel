@@ -89,9 +89,11 @@ func ruleOf(kind Kind, major int) rule {
 // objectRule covers schemas, extensions, types, sequences and routines.
 func objectRule(kind Kind) (rule, bool) {
 	switch kind {
-	case CreateSchema, CreateExtension, AlterExtension, CreateType, RenameEnumValue, AlterDomain,
-		CreateRoutine, ReplaceRoutine, DomainCheckNotValid:
+	case CreateSchema, CreateExtension, AlterExtension, CreateType, AlterDomain, CreateRoutine, ReplaceRoutine,
+		DomainCheckNotValid:
 		return metadata(NoLock), true
+	case RenameEnumValue:
+		return rule{compat: Breaking, codes: []string{codeRename}}, true
 	case DropSchema:
 		return dropping(NoLock, Data, codeDropData), true
 	case DropExtension, DropType, DropRoutine:

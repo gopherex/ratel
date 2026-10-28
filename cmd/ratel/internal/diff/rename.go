@@ -35,15 +35,15 @@ func renameTables(current, desired introspect.Rendering, intents Intents) ([]Cha
 			Kind: RenameTable, Key: object.Key, Table: from, Before: tableObject.key(from), After: object.Key,
 			SQL: "ALTER TABLE " + from + " RENAME TO " + table + ";",
 		})
-		current = requalified(current, from, name)
+		current = Requalified(current, from, name)
 	}
 
 	return renames, current
 }
 
-// requalified is the rendering with the qualified name from replaced by
-// target.
-func requalified(rendering introspect.Rendering, from, target string) introspect.Rendering {
+// Requalified is the rendering with the qualified name from replaced by
+// target, as it is after renaming a table.
+func Requalified(rendering introspect.Rendering, from, target string) introspect.Rendering {
 	result := introspect.Rendering{
 		SQL: rendering.SQL, Major: rendering.Major, Database: rendering.Database, Domains: rendering.Domains,
 	}

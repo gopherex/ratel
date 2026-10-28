@@ -66,12 +66,20 @@ type Safety struct {
   partition, and its partition key columns; the relations created earlier in
   the plan; and the table of each existing index. Recipes are chosen by these
   facts.
-- Rewrite detection for type changes: a probe on the dev server (running the
-  `postgres.version` image) creates an empty temporary table with the old
-  column type, runs the same `ALTER COLUMN ... TYPE ... USING ...` with
-  `TimeZone = 'UTC'`, and compares `relfilenode`. Other rewrites come from the
-  table. Every applied step also runs with `SET LOCAL TimeZone = 'UTC'`, so the
-  probe and production see the same conversion.
+- Rewrite detection for column changes (added columns, type, collation and
+  generation changes): a probe on the dev database of the current state
+  creates an empty temporary copy of the table (`LIKE ... INCLUDING ALL`),
+  runs the same statement against it with `TimeZone = 'UTC'` in a
+  transaction it rolls back, and compares the `relfilenode` of the table and
+  of its indexes: a new table file is a rewrite, a new index file an index
+  rebuild. Other rewrites come from the table. Every applied step also runs
+  with `SET LOCAL TimeZone = 'UTC'`, so the probe and production see the same
+  conversion.
+- The same probe reads, from `pg_depend`, the objects using each view,
+  routine and type, so a replacement knows what to recreate.
+- Columns are compared by name. A column a migration adds comes last in its
+  table whatever its place in the schema files; diff and drift ignore column
+  order.
 - Tables created in the same plan are exempt from lock rules.
 
 ## Safe recipes
@@ -92,6 +100,7 @@ emitted as short DDL under the lock guards.
 | drop index, plain table | `DROP INDEX CONCURRENTLY` |
 | drop index, partitioned table | `DROP INDEX` as short DDL (metadata only; concurrent drop is not supported) |
 | change index definition | new index under a temporary name by the create recipe, drop of the old one by the drop recipe, `ALTER INDEX ... RENAME` (short DDL) |
+| change check, foreign key or unique constraint | the new one under a temporary name by the add recipe beside the old one; in contract the old one is dropped and the new one renamed (short DDL); a primary key is dropped and added again in contract, its index built in expand |
 | rename index or constraint (same definition, new name) | `ALTER INDEX ... RENAME` or `RENAME CONSTRAINT` (short DDL) |
 | add check | `ADD CONSTRAINT ... NOT VALID` (short DDL), then `VALIDATE CONSTRAINT` (long DDL) |
 | add FK, plain table; partitioned table on 18+ | `ADD CONSTRAINT ... NOT VALID`, then `VALIDATE CONSTRAINT` |
@@ -108,14 +117,14 @@ emitted as short DDL under the lock guards.
 | Change | Planned steps |
 |---|---|
 | add nullable column, column with a non-volatile default | short DDL |
-| add column with a volatile default, or `NOT NULL` without default | nullable column, backfill (`@ratel.backfill` required, else error), then the not-null recipe |
-| change type, no rewrite (probe) | short DDL |
-| change type with rewrite | expand: new column, sync trigger; backfill; contract: switch names, drop the old column and trigger (`@ratel.retype` required) |
-| change collation | a type change (`ALTER COLUMN ... TYPE ... COLLATE`) by the type change recipes |
-| rename | expand: new column, sync trigger, backfill; contract: drop the old column (`@ratel.renamed` required) |
+| add column with a volatile default, or `NOT NULL` without default | nullable column with its default for new rows, backfill (`@ratel.backfill` required, batched by the primary key, else error), then the not-null recipe in contract, where old code no longer inserts without the column |
+| add identity or stored generated column to an existing table | filled by a table rewrite: `RTL-R01` |
+| change type or collation, no rewrite and no index rebuild (probe) | short DDL |
+| change type with rewrite, or a change rebuilding indexes | expand: a new column of the new type, filled for new and changed rows by a trigger, and a copy of each index and constraint of the old column built over it without blocking; backfill; contract: in one short transaction, drop the trigger and the views, policies and triggers using the column, drop the old column, give the new one its name and the copies theirs, and create the users again (`@ratel.retype` required for a type change; `RTL-R02` or `RTL-R04` when the column is referenced by another table's foreign key or the table has no primary key) |
+| rename | expand: a column under the new name, a trigger keeping both names in step both ways, backfill; contract, after every object using the old column is replaced: drop the trigger and the old column (`@ratel.renamed` required) |
 | drop column | short DDL in the contract phase (metadata only) |
 | set or drop default | short DDL |
-| identity: add, set options, drop | short DDL |
+| identity: add, set options, drop | short DDL; an identity added to a column the plan makes `NOT NULL` is added in contract, after it |
 | change generated expression, `VIRTUAL` (18+) | short DDL |
 | change generated expression, `STORED` | rewrites: handled as a type change with rewrite (new column) |
 | drop a `STORED` expression | `DROP EXPRESSION` (short DDL; the values stay) |
@@ -128,23 +137,25 @@ emitted as short DDL under the lock guards.
 | create table, sequence, type, function, view | short DDL in expand |
 | drop table, sequence, type | short DDL in the contract phase |
 | alter sequence | short DDL |
-| rename table | `ALTER TABLE ... RENAME TO` (short DDL, `@ratel.renamed` on the table) |
+| rename table | `ALTER TABLE ... RENAME TO` (short DDL, `@ratel.renamed` on the table), first in expand: every later change names the table by its new name; the intent is the consent to `RTL-C01` |
 | set logged or unlogged | rewrites the table: `RTL-R03` |
 | change partition key | no statement changes it: the table is dropped and created (`RTL-D01`) |
 | move a partition to another bound or parent | detach by the detach recipe, then attach by the attach recipe |
-| attach partition | the partition key gets `NOT NULL` and a validated `CHECK` matching the bound first (otherwise `ATTACH` scans under an exclusive lock), then `ATTACH` as short DDL; with a default partition the default is scanned under an exclusive lock: `RTL-L07` |
-| detach partition, no default partition | `DETACH PARTITION ... CONCURRENTLY` (long DDL) |
+| attach partition | a `CHECK` matching the bound, including `IS NOT NULL` of the key, is added `NOT VALID` and validated first (otherwise `ATTACH` scans under an exclusive lock), then `ATTACH` and the drop of the check as short DDL; a bound the check cannot express (several key columns, hash, `DEFAULT`) or a default partition, which is scanned under an exclusive lock: `RTL-L07` |
+| create partition | `CREATE TABLE ... PARTITION OF` (short DDL); with a default partition the default is scanned under an exclusive lock: `RTL-L07` |
+| partition's not-null constraint names | renamed while the table is detached: PostgreSQL refuses renaming inherited constraints |
+| detach partition, no default partition | `DETACH PARTITION ... CONCURRENTLY` (long DDL), then the drop of the `CHECK` it leaves behind (short DDL); a partition moving to another bound or parent moves in expand, one becoming a plain table leaves in contract |
 | detach partition, default partition exists | concurrent detach is not supported: `DETACH PARTITION` as short DDL |
 | enum: add value | `ALTER TYPE ... ADD VALUE [BEFORE\|AFTER]` in its own step, committed before any step that uses the value (on 17+ not needed when the type is created in the same transaction) |
-| enum: rename value | `ALTER TYPE ... RENAME VALUE` (short DDL, `@ratel.renamed` on the value) |
+| enum: rename value | `ALTER TYPE ... RENAME VALUE` (short DDL in expand, before the values added next to it; `@ratel.renamed` on the value is the consent to `RTL-C01`) |
 | enum: remove or reorder values | PostgreSQL has no way to drop or move a value: `RTL-D05`; written as a hand-written migration |
 | domain: set or drop default, drop not null, drop constraint | short DDL |
 | domain: add check | `ALTER DOMAIN ... ADD CONSTRAINT ... NOT VALID` (short DDL), then `VALIDATE CONSTRAINT` (long DDL) |
 | domain: set not null | scans every column of the domain: `RTL-L06` |
-| domain over another base type, composite or range type change | drop and recreate the type and its dependents, as an incompatible view change |
+| domain over another base type, composite or range type change | dropped and created again with its users, as an incompatible view change |
 | extension: new version or schema | `ALTER EXTENSION ... UPDATE TO` / `SET SCHEMA` (short DDL) |
 | view, compatible change (columns only appended) | `CREATE OR REPLACE VIEW` (short DDL) |
-| view, incompatible change, or a function whose signature or return type changes | drop and recreate the object and every dependent view, function and policy (from `pg_depend`) in one transaction as short DDL |
+| view, incompatible change, or a function whose signature or return type changes | drop and recreate the object and every view, function, policy and trigger using it, transitively (from `pg_depend`), in one transaction as short DDL; an object used by a table column, a default or a constraint has no recipe: `RTL-D01` |
 | function body change, same signature | `CREATE OR REPLACE FUNCTION` (short DDL) |
 | enable RLS | policies first, then `ENABLE ROW LEVEL SECURITY` |
 | create, alter, drop policy; disable RLS | short DDL |

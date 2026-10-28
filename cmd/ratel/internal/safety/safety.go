@@ -134,6 +134,7 @@ type Relation struct {
 	Partitioned      bool
 	DefaultPartition bool
 	PartitionKey     []string
+	Partitions       []string // "schema.name" of each partition, in name order
 }
 
 // Env is the target the statements run against.
