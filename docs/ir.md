@@ -65,6 +65,84 @@ a lower-case simple identifier). Functions append the argument type list.
    `pg_operator` and `pg_cast` of each supported PostgreSQL major version, not
    maintained by hand.
 
+## Syntax mapper
+
+`cmd/ratel/internal/mapper` adapts the libpg_query AST returned by
+`cmd/ratel/internal/parse` to the generated Go messages in `ir/`. It does not
+assemble a catalog, resolve references, infer types, derive relations, invent
+constraint names, expand serial columns, or apply server-dependent defaults.
+The AST is read-only; each call builds a fresh IR tree.
+
+Create a mapper with `mapper.New(file, sql, rawStmt, ordinal)` for each
+`ParseResult.stmts` entry. `sql` is the complete original file, not a statement
+substring; `ordinal` is the zero-based position in that file. `MapStatement`
+handles SELECT, INSERT, UPDATE, DELETE and MERGE. Dedicated `MapCreate*`,
+`MapColumn`, `MapConstraint`, `MapIndex`, `MapView` and `MapMaterializedView`
+methods map schema declarations. `MapAlterTable` returns an additive table
+fragment for ADD CONSTRAINT, ENABLE ROW LEVEL SECURITY and FORCE ROW LEVEL
+SECURITY; applying the fragment belongs to the catalog builder. Policy and
+index targets remain available on their original AST statements. Embedded
+`CreateSchemaStmt.schema_elts` are visited separately by the caller.
+
+Identity and provenance follow these rules:
+
+- `node_id` is the quoted file name followed by `/statement/<ordinal>` and the
+  protobuf field path, including zero-based repeated-field indexes. Every
+  message with a `node_id` field receives its own path. Object references use
+  `QualifiedName.parts`, not this syntax-tree identity.
+- Source offsets are zero-based byte offsets, with an exclusive end. Lines and
+  columns are one-based; columns count Unicode code points. The root span is
+  the `RawStmt` range, excluding its terminating semicolon. Zero statement
+  length means the rest of the file, as in libpg_query.
+- Objects without their own AST range inherit the enclosing statement span.
+  Columns and constraints use their AST start location and the statement end:
+  PostgreSQL supplies a start, not an exact element end. Messages without a
+  metadata field, such as expressions, use their containing object's source.
+- `SourceSQL()` exposes the original statement slice. Top-level SELECT
+  `raw_sql` and raw statements retain that slice. Nested SELECTs and fallback
+  expressions use libpg_query's deparser. A deparse failure retains the
+  enclosing original SQL, never a placeholder string.
+
+The mapper preserves exact decimal literals as text. Arrays carry an
+underscore-prefixed PostgreSQL name and their element type. Explicitly
+schema-qualified user types retain that qualification; other type categories
+are provisional until catalog resolution. Function identities append the
+input argument signature, excluding OUT and TABLE arguments. RETURNS TABLE
+keeps its column list, and standard SQL RETURN expressions become SELECT
+bodies.
+
+Syntax and IR do not have identical representational capacity:
+
+- The current parser AST is PostgreSQL 17. Generated columns therefore map to
+  STORED; PostgreSQL 18 VIRTUAL syntax requires a parser supporting it.
+- Missing owner, implicit sequence, implicit multirange name, resolved target,
+  inferred literal type and server-dependent defaults stay absent. New
+  declarative indexes are valid and ready; NOT VALID constraints retain their
+  unvalidated state.
+- The IR's unsigned numeric scale cannot hold a negative scale. Such a type
+  keeps its name but omits the modifier. Fractional or out-of-range function
+  cost/row estimates cannot fit the IR's integer fields and stay zero. Their
+  declarations remain available through the source span and `SourceSQL()`.
+- C-language AS strings share one body field and are joined with a newline.
+  Standard SQL routine bodies keep the deparsed declaration in `body` as well
+  as the SELECT/RETURN portions in `sql_body`; non-SELECT atomic statements
+  remain in that declaration because `sql_body` accepts SELECT messages only.
+- SELECT has only one structured locking clause; additional clauses remain in
+  `raw_sql`. GROUP BY DISTINCT remains in `raw_sql`; it never sets
+  `group_by_all`. FROM shapes without an IR variant and expression conflict
+  targets remain recoverable from the original SQL rather than being resolved
+  or reinterpreted by the mapper.
+- `MapGrant` expands explicit object grants. It returns nil for REVOKE,
+  schema-wide grants and column-level privileges, which the declarative IR
+  cannot represent. It never widens column privileges to table privileges.
+  `MapComment` returns an unresolved object reference and metadata; attachment,
+  annotations and declaration validation belong to their host stages.
+
+Run mapper/parser tests with
+`cd cmd/ratel && go test -race ./internal/...`. Parallel parser users call
+`parse.Warm()` before starting concurrent parsing. Benchmarks use
+`cd cmd/ratel && go test -run '^$' -bench . -benchmem ./internal/mapper`.
+
 ## Relations
 
 A `Relation` is a navigable edge used by the ORM:
