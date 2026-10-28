@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -258,6 +259,389 @@ func BenchmarkRelationBuilder(b *testing.B) {
 
 		query := database.From(users).With(relation).WithCount(users.Orders)
 		if _, err := query.List(b.Context()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+var errEagerParent = errors.New("parent offline")
+
+// eagerXParents serves parent rows and records each parent statement.
+type eagerXParents struct {
+	ids   []int64
+	err   error
+	calls int
+	sql   string
+	args  []any
+}
+
+func (p *eagerXParents) query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	p.calls++
+	p.sql, p.args = sql, args
+
+	if p.err != nil {
+		return nil, p.err
+	}
+
+	return &readRows{ids: p.ids}, nil
+}
+
+// eagerXBatch answers every queued depth statement with one orders row and one count row.
+func eagerXBatch(queued *pgx.Batch) *relationBatch {
+	rows := make([]*relationRows, len(queued.QueuedQueries))
+
+	for index, query := range queued.QueuedQueries {
+		if strings.Contains(query.SQL, "count(*)") {
+			rows[index] = &relationRows{values: [][]any{{1, int64(3)}}}
+		} else {
+			rows[index] = &relationRows{values: [][]any{{1, int64(11), int64(1)}}}
+		}
+	}
+
+	return &relationBatch{rows: rows}
+}
+
+func TestEagerWithAppends(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+
+	for _, tc := range []struct {
+		name       string
+		build      func(ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser]
+		statements int
+		orders     bool
+		count      bool
+	}{
+		{
+			name:       "unchanged base",
+			build:      func(q ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser] { return q },
+			statements: 1, orders: true,
+		},
+		{
+			name: "with appends relation",
+			build: func(q ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser] {
+				return q.With(users.Orders.Limit(1))
+			},
+			statements: 2, orders: true,
+		},
+		{
+			name: "with count appends count",
+			build: func(q ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser] {
+				return q.WithCount(users.Orders)
+			},
+			statements: 2, orders: true, count: true,
+		},
+		{
+			name: "with nothing",
+			build: func(q ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser] {
+				return q.With().WithCount()
+			},
+			statements: 1, orders: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parents := &eagerXParents{ids: []int64{1}}
+			statements := 0
+			executor := relationExecutor{
+				readExecutor: readExecutor{query: parents.query},
+				send: func(_ context.Context, queued *pgx.Batch) pgx.BatchResults {
+					statements = len(queued.QueuedQueries)
+
+					return eagerXBatch(queued)
+				},
+			}
+			base := ratel.New(executor).From(users).With(users.Orders)
+
+			models, err := tc.build(base).List(t.Context())
+			if err != nil || len(models) != 1 || statements != tc.statements {
+				t.Fatalf("models=%v statements=%d err=%v", models, statements, err)
+			}
+
+			orders, failure := models[0].Orders()
+			if tc.orders && (failure != nil || len(orders) != 1) {
+				t.Fatalf("orders=%v err=%v", orders, failure)
+			}
+
+			count, failure := models[0].R.OrderCount.Get()
+			if tc.count && (failure != nil || count != 3) {
+				t.Fatalf("count=%d err=%v", count, failure)
+			}
+
+			if !tc.count && !errors.Is(failure, ratel.ErrNotLoaded) {
+				t.Fatalf("count loaded unexpectedly: %d %v", count, failure)
+			}
+
+			// The base builder is not changed by any branch.
+			statements = 0
+
+			if _, err := base.List(t.Context()); err != nil || statements != 1 {
+				t.Fatalf("base statements=%d err=%v", statements, err)
+			}
+		})
+	}
+}
+
+func TestEagerWithCountOnSelect(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+	parents := &eagerXParents{ids: []int64{1}}
+	executor := relationExecutor{
+		readExecutor: readExecutor{query: parents.query},
+		send: func(_ context.Context, queued *pgx.Batch) pgx.BatchResults {
+			if len(queued.QueuedQueries) != 2 || !strings.Contains(queued.QueuedQueries[1].SQL, "count(*)") {
+				t.Fatalf("statements: %v", queued.QueuedQueries)
+			}
+
+			return eagerXBatch(queued)
+		},
+	}
+
+	models, err := ratel.New(executor).From(users).WithCount(users.Orders).WithCount(users.Orders).List(t.Context())
+	if err != nil || len(models) != 1 {
+		t.Fatalf("models=%v err=%v", models, err)
+	}
+
+	if count, failure := models[0].R.OrderCount.Get(); failure != nil || count != 3 {
+		t.Fatalf("count=%d err=%v", count, failure)
+	}
+}
+
+func TestEagerSingle(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+	limit := func(count int) func(ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser] {
+		return func(q ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser] { return q.Limit(count) }
+	}
+	unlimited := func(q ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser] { return q }
+
+	for _, tc := range []struct {
+		name       string
+		terminal   string
+		prepare    func(ratel.EagerSelect[relationUser]) ratel.EagerSelect[relationUser]
+		parents    eagerXParents
+		batchError error
+		wantErr    error
+		wantLimit  any
+		wantBatch  int
+	}{
+		{
+			name: "first adds limit 1", terminal: "first", prepare: unlimited,
+			parents: eagerXParents{ids: []int64{1}}, wantLimit: 1, wantBatch: 1,
+		},
+		{
+			name: "one adds limit 2", terminal: "one", prepare: unlimited,
+			parents: eagerXParents{ids: []int64{1}}, wantLimit: 2, wantBatch: 1,
+		},
+		{
+			name: "first lowers larger limit", terminal: "first", prepare: limit(9),
+			parents: eagerXParents{ids: []int64{1}}, wantLimit: 1, wantBatch: 1,
+		},
+		{
+			name: "one lowers larger limit", terminal: "one", prepare: limit(9),
+			parents: eagerXParents{ids: []int64{1}}, wantLimit: 2, wantBatch: 1,
+		},
+		{
+			name: "one keeps smaller limit", terminal: "one", prepare: limit(1),
+			parents: eagerXParents{ids: []int64{1}}, wantLimit: 1, wantBatch: 1,
+		},
+		{
+			name: "first not found", terminal: "first", prepare: unlimited,
+			parents: eagerXParents{}, wantErr: ratel.ErrNotFound, wantLimit: 1,
+		},
+		{
+			name: "one not found", terminal: "one", prepare: unlimited,
+			parents: eagerXParents{}, wantErr: ratel.ErrNotFound, wantLimit: 2,
+		},
+		{
+			name: "one multiple rows", terminal: "one", prepare: unlimited,
+			parents: eagerXParents{ids: []int64{1, 2}}, wantErr: ratel.ErrMultipleRows, wantLimit: 2,
+		},
+		{
+			name: "first parent failure", terminal: "first", prepare: unlimited,
+			parents: eagerXParents{err: errEagerParent}, wantErr: errEagerParent, wantLimit: 1,
+		},
+		{
+			name: "one parent failure", terminal: "one", prepare: unlimited,
+			parents: eagerXParents{err: errEagerParent}, wantErr: errEagerParent, wantLimit: 2,
+		},
+		{
+			name: "first load failure", terminal: "first", prepare: unlimited,
+			parents: eagerXParents{ids: []int64{1}}, batchError: errEagerParent, wantErr: errEagerParent,
+			wantLimit: 1, wantBatch: 1,
+		},
+		{
+			name: "one load failure", terminal: "one", prepare: unlimited,
+			parents: eagerXParents{ids: []int64{1}}, batchError: errEagerParent, wantErr: errEagerParent,
+			wantLimit: 2, wantBatch: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			batches := 0
+			parents := tc.parents
+			executor := relationExecutor{
+				readExecutor: readExecutor{query: parents.query},
+				send: func(_ context.Context, queued *pgx.Batch) pgx.BatchResults {
+					batches++
+
+					if tc.batchError != nil {
+						return &relationBatch{failure: tc.batchError}
+					}
+
+					return eagerXBatch(queued)
+				},
+			}
+			query := tc.prepare(ratel.New(executor).From(users).With(users.Orders))
+
+			var (
+				model relationUser
+				err   error
+			)
+
+			if tc.terminal == "one" {
+				model, err = query.One(t.Context())
+			} else {
+				model, err = query.First(t.Context())
+			}
+
+			if !errors.Is(err, tc.wantErr) || batches != tc.wantBatch {
+				t.Fatalf("err=%v batches=%d", err, batches)
+			}
+
+			if !strings.HasSuffix(parents.sql, " LIMIT $1") || !reflect.DeepEqual(parents.args, []any{tc.wantLimit}) {
+				t.Fatalf("parent statement %q args %v", parents.sql, parents.args)
+			}
+
+			if tc.wantErr != nil {
+				if model.ID != 0 {
+					t.Fatalf("model returned with error: %v", model)
+				}
+
+				return
+			}
+
+			if orders, failure := model.Orders(); failure != nil || len(orders) != 1 {
+				t.Fatalf("orders=%v err=%v", orders, failure)
+			}
+		})
+	}
+}
+
+func TestEagerChunksFailures(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+
+	for _, tc := range []struct {
+		name       string
+		parentErr  error
+		batchErr   error
+		wantBatch  int
+		wantTarget error
+	}{
+		{name: "parent page failure", parentErr: errEagerParent, wantTarget: errEagerParent},
+		{name: "load failure", batchErr: errEagerParent, wantBatch: 1, wantTarget: errEagerParent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parents := &eagerXParents{ids: []int64{1}, err: tc.parentErr}
+			batches := 0
+			executor := relationExecutor{
+				readExecutor: readExecutor{query: parents.query},
+				send: func(_ context.Context, queued *pgx.Batch) pgx.BatchResults {
+					batches++
+
+					if tc.batchErr != nil {
+						return &relationBatch{failure: tc.batchErr}
+					}
+
+					return eagerXBatch(queued)
+				},
+			}
+
+			yields := 0
+
+			for page, err := range ratel.New(executor).From(users).With(users.Orders).Chunks(t.Context(), 1) {
+				yields++
+
+				if page != nil || !errors.Is(err, tc.wantTarget) {
+					t.Fatalf("page=%v err=%v", page, err)
+				}
+			}
+
+			if yields != 1 || batches != tc.wantBatch {
+				t.Fatalf("yields=%d batches=%d", yields, batches)
+			}
+		})
+	}
+}
+
+func TestEagerChunksStopsEarly(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+	parents := &eagerXParents{ids: []int64{1}}
+	executor := relationExecutor{
+		readExecutor: readExecutor{query: parents.query},
+		send:         func(_ context.Context, queued *pgx.Batch) pgx.BatchResults { return eagerXBatch(queued) },
+	}
+
+	pages := 0
+
+	// A full page of size 1 would make the iterator read a second page unless the consumer stops.
+	for page, err := range ratel.New(executor).From(users).With(users.Orders).Chunks(t.Context(), 1) {
+		if err != nil || len(page) != 1 {
+			t.Fatalf("page=%v err=%v", page, err)
+		}
+
+		pages++
+
+		break
+	}
+
+	if pages != 1 || parents.calls != 1 {
+		t.Fatalf("pages=%d parent queries=%d", pages, parents.calls)
+	}
+}
+
+func BenchmarkEagerWith(b *testing.B) {
+	users, _ := relationDescriptors()
+	parents := &eagerXParents{ids: []int64{1}}
+	executor := relationExecutor{
+		readExecutor: readExecutor{query: parents.query},
+		send:         func(_ context.Context, queued *pgx.Batch) pgx.BatchResults { return eagerXBatch(queued) },
+	}
+	database := ratel.New(executor)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, err := database.From(users).With(users.Orders).With(users.Orders.Limit(2)).List(b.Context()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEagerWithCount(b *testing.B) {
+	users, _ := relationDescriptors()
+	parents := &eagerXParents{ids: []int64{1}}
+	executor := relationExecutor{
+		readExecutor: readExecutor{query: parents.query},
+		send:         func(_ context.Context, queued *pgx.Batch) pgx.BatchResults { return eagerXBatch(queued) },
+	}
+	database := ratel.New(executor)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, err := database.From(users).WithCount(users.Orders).WithCount(users.Orders).List(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}

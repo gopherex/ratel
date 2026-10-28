@@ -77,6 +77,25 @@ func TestDescriptorCopiesInputs(t *testing.T) {
 	}
 }
 
+func TestBwStaticSourceInvalid(t *testing.T) {
+	t.Parallel()
+
+	database := ratel.New(&pgx.Conn{})
+	columns := []string{"id", "email", "manager_id"}
+
+	for name, query := range map[string]ratel.Select[readUser]{
+		"nested empty SQL": database.From(database.From(ratel.NewQuery(columns, scanReadUser, ""))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := query.SQL(); !errors.Is(err, ratel.ErrInvalidQuery) {
+				t.Fatalf("SQL() error = %v, want ErrInvalidQuery", err)
+			}
+		})
+	}
+}
+
 func BenchmarkStaticSource(b *testing.B) {
 	database := ratel.New(&pgx.Conn{})
 	users := userDescriptor()

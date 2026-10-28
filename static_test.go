@@ -140,6 +140,157 @@ func TestCopyFrom(t *testing.T) {
 	}
 }
 
+func TestBwStaticInvalid(t *testing.T) {
+	t.Parallel()
+
+	executor := staticExecutor{
+		exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+			t.Fatal("exec reached the executor")
+
+			return pgconn.CommandTag{}, nil
+		},
+		copy: func(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+			t.Fatal("copy reached the executor")
+
+			return 0, nil
+		},
+	}
+	database := ratel.New(executor)
+	source := pgx.CopyFromRows([][]any{{"a"}})
+	unvalidated := ratel.NewWriteTable[readUser, writeInsert](userDescriptor().Table, nil)
+	empty := ratel.NewWriteTable(ratel.NewTable[readUser]("app", "users", nil, scanReadUser),
+		func(writeInsert) bool { return true })
+
+	var missing *ratel.DB
+
+	for name, run := range map[string]func() error{
+		"exec without a database": func() error {
+			_, err := missing.Exec(t.Context(), ratel.Statement{SQL: "DELETE FROM app.users"})
+
+			return err
+		},
+		"copy without a database": func() error {
+			_, err := missing.Copy(t.Context(), pgx.Identifier{"app", "users"}, []string{"email"}, source)
+
+			return err
+		},
+		"copy into an unqualified table": func() error {
+			_, err := database.Copy(t.Context(), pgx.Identifier{"users"}, []string{"email"}, source)
+
+			return err
+		},
+		"copy without columns": func() error {
+			_, err := database.Copy(t.Context(), pgx.Identifier{"app", "users"}, nil, source)
+
+			return err
+		},
+		"copy without rows": func() error {
+			_, err := database.Copy(t.Context(), pgx.Identifier{"app", "users"}, []string{"email"}, nil)
+
+			return err
+		},
+		"copy from without a database": func() error {
+			_, err := missing.CopyFrom(t.Context(), writeDescriptor(), slices.Values([]writeInsert{newWriteInsert("a")}))
+
+			return err
+		},
+		"copy from without a sequence": func() error {
+			_, err := database.CopyFrom(t.Context(), writeDescriptor(), nil)
+
+			return err
+		},
+		"copy from a table without insert validation": func() error {
+			_, err := database.CopyFrom(t.Context(), unvalidated, slices.Values([]writeInsert{newWriteInsert("a")}))
+
+			return err
+		},
+		"copy from a table without columns": func() error {
+			_, err := database.CopyFrom(t.Context(), empty, slices.Values([]writeInsert{newWriteInsert("a")}))
+
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := run(); !errors.Is(err, ratel.ErrInvalidQuery) {
+				t.Fatalf("error = %v, want ErrInvalidQuery", err)
+			}
+		})
+	}
+}
+
+func TestBwCopy(t *testing.T) {
+	t.Parallel()
+
+	offline := errors.New("offline")
+	unique := &pgconn.PgError{Code: "23505", SchemaName: "app", TableName: "users", ConstraintName: "users_email_key"}
+
+	for _, tc := range []struct {
+		name    string
+		count   int64
+		failure error
+		check   func(error) bool
+	}{
+		{name: "copied", count: 2, check: func(err error) bool { return err == nil }},
+		{name: "technical", failure: offline, check: func(err error) bool { return errors.Is(err, offline) }},
+		{
+			name: "constraint", failure: unique,
+			check: func(err error) bool {
+				return errors.Is(err, &ratel.ConstraintError{
+					Kind: ratel.ConstraintUnique, Schema: "app", Table: "users", Constraint: "users_email_key",
+				})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			executor := staticExecutor{copy: func(
+				_ context.Context, table pgx.Identifier, columns []string, _ pgx.CopyFromSource,
+			) (int64, error) {
+				if !slices.Equal(table, pgx.Identifier{"app", "users"}) || !slices.Equal(columns, []string{"email"}) {
+					t.Fatalf("copy(%v, %v)", table, columns)
+				}
+
+				return tc.count, tc.failure
+			}}
+
+			got, err := ratel.New(executor).Copy(t.Context(), pgx.Identifier{"app", "users"}, []string{"email"},
+				pgx.CopyFromRows([][]any{{"a"}, {"b"}}))
+			if !tc.check(err) || got != tc.count {
+				t.Fatalf("Copy() = %d, %v", got, err)
+			}
+		})
+	}
+}
+
+func BenchmarkBwCopy(b *testing.B) {
+	executor := staticExecutor{copy: func(
+		_ context.Context, _ pgx.Identifier, _ []string, source pgx.CopyFromSource,
+	) (int64, error) {
+		var count int64
+		for source.Next() {
+			count++
+		}
+
+		return count, source.Err()
+	}}
+	database := ratel.New(executor)
+	rows := make([][]any, 1000)
+
+	for index := range rows {
+		rows[index] = []any{"a"}
+	}
+
+	for b.Loop() {
+		if _, err := database.Copy(b.Context(), pgx.Identifier{"app", "users"}, []string{"email"},
+			pgx.CopyFromRows(rows)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func withID(email string, id int64) writeInsert {
 	row := newWriteInsert(email)
 	row.ID = ratel.OptFrom(id)

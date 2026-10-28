@@ -129,6 +129,45 @@ func TestWriteTelemetry(t *testing.T) {
 	}
 }
 
+func TestBwWriteWithoutDB(t *testing.T) {
+	t.Parallel()
+
+	var database *ratel.DB
+
+	users := writeDescriptor()
+
+	for name, run := range map[string]func() error{
+		"update exec": func() error {
+			_, err := database.Update(users).Set(users.Email.To("a")).All().Exec(t.Context())
+
+			return err
+		},
+		"delete returning": func() error {
+			_, err := database.Delete(users).All().Returning(t.Context())
+
+			return err
+		},
+		"insert exec": func() error {
+			_, err := database.Insert(users, newWriteInsert("a")).Exec(t.Context())
+
+			return err
+		},
+		"insert returning": func() error {
+			_, err := database.Insert(users, newWriteInsert("a")).Returning(t.Context())
+
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := run(); !errors.Is(err, ratel.ErrInvalidQuery) {
+				t.Fatalf("error = %v, want ErrInvalidQuery", err)
+			}
+		})
+	}
+}
+
 func BenchmarkWriteExec(b *testing.B) {
 	executor := writeExecutor{exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
 		return pgconn.NewCommandTag("DELETE 1"), nil

@@ -125,6 +125,305 @@ func TestBatchInvalid(t *testing.T) {
 	}
 }
 
+// bwResults replays scripted batch results, one per queued statement.
+type bwResults struct {
+	pgx.BatchResults
+	rows     []*readRows
+	tags     []string
+	queryErr error
+	execErr  error
+	closeErr error
+	closed   bool
+}
+
+func (r *bwResults) Query() (pgx.Rows, error) {
+	if r.queryErr != nil {
+		return nil, r.queryErr
+	}
+
+	rows := r.rows[0]
+	r.rows = r.rows[1:]
+
+	return rows, nil
+}
+
+func (r *bwResults) Exec() (pgconn.CommandTag, error) {
+	if r.execErr != nil {
+		return pgconn.CommandTag{}, r.execErr
+	}
+
+	tag := r.tags[0]
+	r.tags = r.tags[1:]
+
+	return pgconn.NewCommandTag(tag), nil
+}
+
+func (r *bwResults) Close() error {
+	r.closed = true
+
+	return r.closeErr
+}
+
+type bwBatchExecutor struct {
+	ratel.Executor
+	results *bwResults
+	queued  *int
+}
+
+func (e bwBatchExecutor) SendBatch(_ context.Context, batch *pgx.Batch) pgx.BatchResults {
+	*e.queued = batch.Len()
+
+	return e.results
+}
+
+func TestBwBatchOutcomes(t *testing.T) {
+	t.Parallel()
+
+	users := userDescriptor()
+	writes := writeDescriptor()
+	offline := errors.New("offline")
+	closeFailure := errors.New("close failed")
+	unique := &pgconn.PgError{Code: "23505", ConstraintName: "users_email_key"}
+	scanFailure := errors.New("scan failed")
+	iterFailure := errors.New("iteration failed")
+
+	type outcome struct {
+		items func(db *ratel.DB) ([]ratel.BatchItem, func() bool)
+		res   func() *bwResults
+		want  error
+		// queued is the statement count expected at the executor, -1 when nothing may be sent.
+		queued int
+	}
+
+	for name, tc := range map[string]outcome{
+		"empty batch": {
+			items:  func(*ratel.DB) ([]ratel.BatchItem, func() bool) { return nil, nil },
+			res:    func() *bwResults { return &bwResults{} },
+			queued: -1,
+		},
+		"invalid select": {
+			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var all []readUser
+
+				return []ratel.BatchItem{ratel.Select[readUser]{}.Batch(&all)}, nil
+			},
+			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidQuery, queued: -1,
+		},
+		"invalid item after a valid one": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var all, none []readUser
+
+				return []ratel.BatchItem{db.From(users).Batch(&all), ratel.Select[readUser]{}.Batch(&none)}, nil
+			},
+			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidQuery, queued: -1,
+		},
+		"invalid one": {
+			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var one readUser
+
+				return []ratel.BatchItem{ratel.Select[readUser]{}.BatchOne(&one)}, nil
+			},
+			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidQuery, queued: -1,
+		},
+		"invalid write": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var count int64
+
+				return []ratel.BatchItem{db.Update(writes).Set(writes.Email.To("a")).Batch(&count)}, nil
+			},
+			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidQuery, queued: -1,
+		},
+		"invalid insert": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var count int64
+
+				return []ratel.BatchItem{db.Insert(writes).Batch(&count)}, nil
+			},
+			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidInsert, queued: -1,
+		},
+		"query failure": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var all []readUser
+
+				return []ratel.BatchItem{db.From(users).Batch(&all)}, nil
+			},
+			res: func() *bwResults { return &bwResults{queryErr: offline} }, want: offline, queued: 1,
+		},
+		"scan failure": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var all []readUser
+
+				return []ratel.BatchItem{db.From(users).Batch(&all)}, func() bool { return all == nil }
+			},
+			res: func() *bwResults {
+				return &bwResults{rows: []*readRows{{ids: []int64{1}, scanFailure: scanFailure}}}
+			},
+			want: scanFailure, queued: 1,
+		},
+		"iteration failure": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var all []readUser
+
+				return []ratel.BatchItem{db.From(users).Batch(&all)}, func() bool { return all == nil }
+			},
+			res:  func() *bwResults { return &bwResults{rows: []*readRows{{failure: iterFailure}}} },
+			want: iterFailure, queued: 1,
+		},
+		"one without rows": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var one readUser
+
+				return []ratel.BatchItem{db.From(users).BatchOne(&one)}, func() bool { return one == readUser{} }
+			},
+			res:  func() *bwResults { return &bwResults{rows: []*readRows{{}}} },
+			want: ratel.ErrNotFound, queued: 1,
+		},
+		"one with many rows": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var one readUser
+
+				return []ratel.BatchItem{db.From(users).BatchOne(&one)}, func() bool { return one == readUser{} }
+			},
+			res:  func() *bwResults { return &bwResults{rows: []*readRows{{ids: []int64{1, 2}}}} },
+			want: ratel.ErrMultipleRows, queued: 1,
+		},
+		"one query failure": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var one readUser
+
+				return []ratel.BatchItem{db.From(users).BatchOne(&one)}, nil
+			},
+			res: func() *bwResults { return &bwResults{queryErr: offline} }, want: offline, queued: 1,
+		},
+		"exec item": {
+			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var count int64
+
+				item := ratel.ExecItem(ratel.Statement{SQL: "DELETE FROM app.users WHERE id = $1", Args: []any{1}}, &count)
+
+				return []ratel.BatchItem{item}, func() bool { return count == 3 }
+			},
+			res: func() *bwResults { return &bwResults{tags: []string{"DELETE 3"}} }, queued: 1,
+		},
+		"exec item constraint": {
+			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var count int64
+
+				return []ratel.BatchItem{ratel.ExecItem(ratel.Statement{SQL: "INSERT INTO app.users"}, &count)},
+					func() bool { return count == 0 }
+			},
+			res:  func() *bwResults { return &bwResults{execErr: unique} },
+			want: &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Constraint: "users_email_key"}, queued: 1,
+		},
+		"exec item technical failure": {
+			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var count int64
+
+				return []ratel.BatchItem{ratel.ExecItem(ratel.Statement{SQL: "DELETE FROM app.users"}, &count)}, nil
+			},
+			res: func() *bwResults { return &bwResults{execErr: offline} }, want: offline, queued: 1,
+		},
+		"close failure": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var all []readUser
+
+				return []ratel.BatchItem{db.From(users).Batch(&all)}, nil
+			},
+			res:  func() *bwResults { return &bwResults{rows: []*readRows{{ids: []int64{1}}}, closeErr: closeFailure} },
+			want: closeFailure, queued: 1,
+		},
+		"item failure wins over close failure": {
+			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+				var all []readUser
+
+				return []ratel.BatchItem{db.From(users).Batch(&all)}, nil
+			},
+			res:  func() *bwResults { return &bwResults{queryErr: offline, closeErr: closeFailure} },
+			want: offline, queued: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			queued := -1
+			results := tc.res()
+			db := ratel.New(bwBatchExecutor{results: results, queued: &queued})
+			items, verify := tc.items(db)
+
+			err := db.Batch(t.Context(), items...)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Batch() = %v, want %v", err, tc.want)
+			}
+
+			if queued != tc.queued {
+				t.Fatalf("queued = %d, want %d", queued, tc.queued)
+			}
+
+			if sent := tc.queued != -1; results.closed != sent {
+				t.Fatalf("closed = %v, sent = %v", results.closed, sent)
+			}
+
+			if verify != nil && !verify() {
+				t.Fatal("destination does not match the outcome")
+			}
+		})
+	}
+}
+
+func TestBwBatchNilDB(t *testing.T) {
+	t.Parallel()
+
+	var db *ratel.DB
+
+	if err := db.Batch(t.Context()); !errors.Is(err, ratel.ErrInvalidQuery) {
+		t.Fatalf("Batch() = %v", err)
+	}
+}
+
+func TestBwBatchEmptyRowsKeepEmptySlice(t *testing.T) {
+	t.Parallel()
+
+	queued := 0
+	db := ratel.New(bwBatchExecutor{results: &bwResults{rows: []*readRows{{}}}, queued: &queued})
+	all := []readUser{{ID: 9}}
+
+	if err := db.Batch(t.Context(), db.From(userDescriptor()).Batch(&all)); err != nil {
+		t.Fatal(err)
+	}
+
+	if all == nil || len(all) != 0 {
+		t.Fatalf("destination = %#v, want empty non-nil slice", all)
+	}
+}
+
+func BenchmarkBwBatchOne(b *testing.B) {
+	users := userDescriptor()
+
+	for b.Loop() {
+		queued := 0
+		db := ratel.New(bwBatchExecutor{results: &bwResults{rows: []*readRows{{ids: []int64{1}}}}, queued: &queued})
+
+		var one readUser
+		if err := db.Batch(b.Context(), db.From(users).BatchOne(&one)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBwExecItem(b *testing.B) {
+	statement := ratel.Statement{SQL: "DELETE FROM app.users WHERE id = $1", Args: []any{1}}
+
+	for b.Loop() {
+		queued := 0
+		db := ratel.New(bwBatchExecutor{results: &bwResults{tags: []string{"DELETE 1"}}, queued: &queued})
+
+		var count int64
+		if err := db.Batch(b.Context(), ratel.ExecItem(statement, &count)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkBatch(b *testing.B) {
 	users := userDescriptor()
 

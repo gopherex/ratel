@@ -3,6 +3,7 @@ package ratel_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,6 +81,36 @@ func TestConstraintErrors(t *testing.T) {
 				if errors.Is(err, sentinel) {
 					t.Fatalf("unexpected match: %v", sentinel)
 				}
+			}
+		})
+	}
+}
+
+func TestBwConstraintColumn(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		column  string
+		columns []string
+	}{
+		{"driver reports the column", "email", []string{"email"}},
+		{"driver reports none", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cause := &pgconn.PgError{Code: "23502", ColumnName: tc.column, TableName: "users"}
+			executor := staticExecutor{exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, cause
+			}}
+
+			_, err := ratel.New(executor).Exec(t.Context(), ratel.Statement{SQL: "INSERT INTO app.users DEFAULT VALUES"})
+
+			var constraint *ratel.ConstraintError
+			if !errors.As(err, &constraint) || constraint.Kind != ratel.ConstraintNotNull ||
+				!slices.Equal(constraint.Columns, tc.columns) {
+				t.Fatalf("Exec() = %+v", err)
 			}
 		})
 	}

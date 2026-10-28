@@ -1,7 +1,9 @@
 package ratel_test
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -111,5 +113,125 @@ func BenchmarkLoaded(b *testing.B) {
 		if _, err := value.Get(); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// relCapture loads one parent through the relation and returns the first queued
+// statement with its arguments.
+func relCapture[M any](t *testing.T, relation ratel.Relation[M]) (pgx.QueuedQuery, error) {
+	t.Helper()
+
+	var queued pgx.QueuedQuery
+
+	executor := relationExecutor{send: func(_ context.Context, batch *pgx.Batch) pgx.BatchResults {
+		queued = *batch.QueuedQueries[0]
+
+		return &relationBatch{rows: []*relationRows{{}}}
+	}}
+	err := ratel.New(executor).Load(t.Context(), make([]M, 1), relation)
+
+	return queued, err
+}
+
+func TestRelOrderBy(t *testing.T) {
+	t.Parallel()
+
+	byID := ratel.NewCol[relationOrder, int64]("id")
+	owner := ratel.NewCol[relationOrder, int64]("user_id")
+
+	for _, tc := range []struct {
+		name      string
+		build     func(ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder]
+		want      string
+		forbidden string
+		invalid   bool
+	}{
+		{
+			name: "single",
+			build: func(rel ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder] {
+				return rel.OrderBy(byID.Desc())
+			},
+			want: `ORDER BY "p"."__ratel_parent", "q"."id" DESC`,
+		},
+		{
+			name: "several terms",
+			build: func(rel ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder] {
+				return rel.OrderBy(byID.Asc(), owner.Desc())
+			},
+			want: `ORDER BY "p"."__ratel_parent", "q"."id" ASC, "q"."user_id" DESC`,
+		},
+		{
+			name: "calls append",
+			build: func(rel ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder] {
+				return rel.OrderBy(byID.Asc()).OrderBy(owner.Desc())
+			},
+			want: `"q"."id" ASC, "q"."user_id" DESC`,
+		},
+		{
+			name: "no terms",
+			build: func(rel ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder] {
+				return rel.OrderBy()
+			},
+			want:      `ORDER BY "p"."__ratel_parent"`,
+			forbidden: ` ASC`,
+		},
+		{
+			name: "invalid column",
+			build: func(rel ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder] {
+				return rel.OrderBy(ratel.NewCol[relationOrder, int64]("").Asc())
+			},
+			invalid: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			users, _ := relationDescriptors()
+			queued, err := relCapture[relationUser](t, tc.build(users.Orders))
+			statement := queued.SQL
+
+			if tc.invalid {
+				if !errors.Is(err, ratel.ErrInvalidQuery) || statement != "" {
+					t.Fatalf("statement=%q err=%v", statement, err)
+				}
+
+				return
+			}
+
+			if err != nil || !strings.Contains(statement, tc.want) ||
+				(tc.forbidden != "" && strings.Contains(statement, tc.forbidden)) {
+				t.Fatalf("want %q forbidden %q: %v\n%s", tc.want, tc.forbidden, err, statement)
+			}
+		})
+	}
+}
+
+func TestRelOrderByKeepsOriginal(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+	byID := ratel.NewCol[relationOrder, int64]("id")
+	ordered := users.Orders.OrderBy(byID.Desc())
+
+	queued, err := relCapture[relationUser](t, users.Orders)
+	if err != nil || strings.Contains(queued.SQL, "DESC") {
+		t.Fatalf("original relation mutated: %v\n%s", err, queued.SQL)
+	}
+
+	queued, err = relCapture[relationUser](t, ordered)
+	if err != nil || !strings.Contains(queued.SQL, `"q"."id" DESC`) {
+		t.Fatalf("ordered relation lost its order: %v\n%s", err, queued.SQL)
+	}
+}
+
+func BenchmarkRelOrderBy(b *testing.B) {
+	users, _ := relationDescriptors()
+	byID := ratel.NewCol[relationOrder, int64]("id")
+	owner := ratel.NewCol[relationOrder, int64]("user_id")
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = users.Orders.OrderBy(byID.Desc(), owner.Asc())
 	}
 }

@@ -130,6 +130,91 @@ func TestRowWriteMissing(t *testing.T) {
 	}
 }
 
+// rowXDescriptor is keyedDescriptor with a caller-chosen key declaration.
+func rowXDescriptor(keys []string, values func(readUser) []any) keyedUsers {
+	options := []ratel.TableOption[readUser]{
+		ratel.ModelValues(func(user readUser) []any { return []any{user.ID, user.Email, user.ManagerID} }),
+	}
+	if keys != nil {
+		options = append(options, ratel.PrimaryKey(keys, values))
+	}
+
+	table := ratel.NewTable("app", "users", []string{"id", "email", "manager_id"}, scanReadUser, options...)
+	columns := writeDescriptor()
+
+	return keyedUsers{KeyedTable: ratel.NewKeyedTable(withFields(table)), ID: columns.ID, Email: columns.Email}
+}
+
+func TestRowInSchema(t *testing.T) {
+	t.Parallel()
+
+	users := keyedDescriptor(true)
+	moved := users.InSchema("tenant")
+	database := ratel.New(&pgx.Conn{})
+	user := readUser{ID: 7, Email: "a@x"}
+
+	save, err := database.Save(moved, user).SQL()
+	if err != nil || save.SQL != `UPDATE "tenant"."users" AS "q" SET "email" = $1 WHERE "q"."id" = $2` ||
+		!reflect.DeepEqual(save.Args, []any{"a@x", int64(7)}) {
+		t.Fatalf("Save() = %+v, %v", save, err)
+	}
+
+	del, err := database.DeleteRow(moved, user).SQL()
+	if err != nil || del.SQL != `DELETE FROM "tenant"."users" AS "q" WHERE "q"."id" = $1` {
+		t.Fatalf("DeleteRow() = %+v, %v", del, err)
+	}
+
+	original, err := database.DeleteRow(users, user).SQL()
+	if err != nil || original.SQL != `DELETE FROM "app"."users" AS "q" WHERE "q"."id" = $1` {
+		t.Fatalf("original schema changed: %+v, %v", original, err)
+	}
+}
+
+func TestRowByKey(t *testing.T) {
+	t.Parallel()
+
+	database := ratel.New(&pgx.Conn{})
+	user := readUser{ID: 7, Email: "a@x"}
+
+	for _, tc := range []struct {
+		name      string
+		users     keyedUsers
+		sql       string
+		args      []any
+		wantError error
+	}{
+		{
+			name:      "no key",
+			users:     rowXDescriptor(nil, nil),
+			wantError: ratel.ErrInvalidQuery,
+		},
+		{
+			name:      "key values count differs",
+			users:     rowXDescriptor([]string{"id", "email"}, func(user readUser) []any { return []any{user.ID} }),
+			wantError: ratel.ErrInvalidQuery,
+		},
+		{
+			name:  "composite key",
+			users: rowXDescriptor([]string{"id", "email"}, func(user readUser) []any { return []any{user.ID, user.Email} }),
+			sql:   `DELETE FROM "app"."users" AS "q" WHERE ("q"."id" = $1 AND "q"."email" = $2)`,
+			args:  []any{int64(7), "a@x"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			statement, err := database.DeleteRow(tc.users, user).SQL()
+			if !errors.Is(err, tc.wantError) || statement.SQL != tc.sql || !reflect.DeepEqual(statement.Args, tc.args) {
+				t.Fatalf("DeleteRow() = %+v, %v; want %s, %#v, %v", statement, err, tc.sql, tc.args, tc.wantError)
+			}
+
+			if _, saveErr := database.Save(tc.users, user).SQL(); tc.wantError != nil && !errors.Is(saveErr, tc.wantError) {
+				t.Fatalf("Save() error = %v, want %v", saveErr, tc.wantError)
+			}
+		})
+	}
+}
+
 func BenchmarkSave(b *testing.B) {
 	users := keyedDescriptor(true)
 	database := ratel.New(&pgx.Conn{})

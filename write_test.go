@@ -3,6 +3,7 @@ package ratel_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -199,6 +200,208 @@ func TestWriteExecution(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// bwRows is readRows that also reports a command tag, as RETURNING reads need.
+type bwRows struct {
+	readRows
+	tag string
+}
+
+func (r *bwRows) CommandTag() pgconn.CommandTag { return pgconn.NewCommandTag(r.tag) }
+
+func TestBwWriteSQL(t *testing.T) {
+	t.Parallel()
+
+	users := writeDescriptor()
+	database := ratel.New(readExecutor{})
+	noSchema := ratel.NewWriteTable(ratel.NewTable("", "users", []string{"id", "email"}, scanReadUser),
+		func(row writeInsert) bool { return row.valid })
+
+	for _, tc := range []struct {
+		name  string
+		query ratel.Write[readUser]
+		sql   string
+		args  []any
+		want  error
+	}{
+		{
+			name:  "several assignments",
+			query: database.Update(users).Set(users.Email.To("b"), users.ID.To(9)).Where(users.ID.Eq(1)),
+			sql:   `UPDATE "app"."users" AS "q" SET "email" = $1, "id" = $2 WHERE "q"."id" = $3`,
+			args:  []any{"b", int64(9), int64(1)},
+		},
+		{
+			name: "set in several calls", query: database.Update(users).Set(users.Email.To("b")).Set(users.ID.To(9)).All(),
+			sql:  `UPDATE "app"."users" AS "q" SET "email" = $1, "id" = $2`,
+			args: []any{"b", int64(9)},
+		},
+		{name: "update without schema", query: database.Update(noSchema).All(), want: ratel.ErrInvalidQuery},
+		{name: "delete without schema", query: database.Delete(noSchema).All(), want: ratel.ErrInvalidQuery},
+		{
+			name:  "invalid condition",
+			query: database.Delete(users).Where(ratel.Col[readUser, int64]{}.Eq(1)),
+			want:  ratel.ErrInvalidQuery,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			statement, err := tc.query.SQL()
+			if !errors.Is(err, tc.want) || statement.SQL != tc.sql || !reflect.DeepEqual(statement.Args, tc.args) {
+				t.Fatalf("SQL() = %+v, %v; want %q, %#v, %v", statement, err, tc.sql, tc.args, tc.want)
+			}
+		})
+	}
+}
+
+func TestBwWriteInvalidNeverExecutes(t *testing.T) {
+	t.Parallel()
+
+	users := writeDescriptor()
+	executor := writeExecutor{exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		t.Fatal("exec reached the executor")
+
+		return pgconn.CommandTag{}, nil
+	}}
+	database := ratel.New(executor)
+	unsafe := database.Delete(users)
+
+	count, err := unsafe.Exec(t.Context())
+	if count != 0 || !errors.Is(err, ratel.ErrInvalidQuery) {
+		t.Fatalf("Exec() = %d, %v", count, err)
+	}
+
+	models, err := unsafe.Returning(t.Context())
+	if models != nil || !errors.Is(err, ratel.ErrInvalidQuery) {
+		t.Fatalf("Returning() = %v, %v", models, err)
+	}
+}
+
+func TestBwWriteReturning(t *testing.T) {
+	t.Parallel()
+
+	const returning = ` RETURNING "q"."id", "q"."email", "q"."manager_id"`
+
+	offline := errors.New("offline")
+	scanFailure := errors.New("scan failed")
+	iterFailure := errors.New("iteration failed")
+	unique := &pgconn.PgError{Code: "23505", ConstraintName: "users_email_key"}
+	users := keyedDescriptor(true)
+
+	for _, tc := range []struct {
+		name    string
+		write   func(db *ratel.DB) ratel.Write[readUser]
+		rows    *bwRows
+		queryEr error
+		sql     string
+		want    []int64
+		wantErr error
+	}{
+		{
+			name:  "updated rows",
+			write: func(db *ratel.DB) ratel.Write[readUser] { return db.Update(users).Set(users.Email.To("b")).All() },
+			rows:  &bwRows{readRows: readRows{ids: []int64{1, 2}}, tag: "UPDATE 2"},
+			sql:   `UPDATE "app"."users" AS "q" SET "email" = $1` + returning,
+			want:  []int64{1, 2},
+		},
+		{
+			name:  "no rows is an empty result",
+			write: func(db *ratel.DB) ratel.Write[readUser] { return db.Delete(users).All() },
+			rows:  &bwRows{tag: "DELETE 0"},
+			sql:   `DELETE FROM "app"."users" AS "q"` + returning,
+			want:  []int64{},
+		},
+		{
+			name:  "row write without a match",
+			write: func(db *ratel.DB) ratel.Write[readUser] { return db.DeleteRow(users, readUser{ID: 7}) },
+			rows:  &bwRows{tag: "DELETE 0"},
+			sql:   `DELETE FROM "app"."users" AS "q" WHERE "q"."id" = $1` + returning, wantErr: ratel.ErrNotFound,
+		},
+		{
+			name:  "row write with a match",
+			write: func(db *ratel.DB) ratel.Write[readUser] { return db.DeleteRow(users, readUser{ID: 7}) },
+			rows:  &bwRows{readRows: readRows{ids: []int64{7}}, tag: "DELETE 1"},
+			sql:   `DELETE FROM "app"."users" AS "q" WHERE "q"."id" = $1` + returning, want: []int64{7},
+		},
+		{
+			name:  "query failure",
+			write: func(db *ratel.DB) ratel.Write[readUser] { return db.Delete(users).All() },
+			sql:   `DELETE FROM "app"."users" AS "q"` + returning, queryEr: offline, wantErr: offline,
+		},
+		{
+			name:  "constraint refusal",
+			write: func(db *ratel.DB) ratel.Write[readUser] { return db.Update(users).Set(users.Email.To("b")).All() },
+			sql:   `UPDATE "app"."users" AS "q" SET "email" = $1` + returning, queryEr: unique,
+			wantErr: &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Constraint: "users_email_key"},
+		},
+		{
+			name:  "scan failure",
+			write: func(db *ratel.DB) ratel.Write[readUser] { return db.Delete(users).All() },
+			rows:  &bwRows{readRows: readRows{ids: []int64{1}, scanFailure: scanFailure}, tag: "DELETE 1"},
+			sql:   `DELETE FROM "app"."users" AS "q"` + returning, wantErr: scanFailure,
+		},
+		{
+			name:  "iteration failure",
+			write: func(db *ratel.DB) ratel.Write[readUser] { return db.Delete(users).All() },
+			rows:  &bwRows{readRows: readRows{failure: iterFailure}, tag: "DELETE 0"},
+			sql:   `DELETE FROM "app"."users" AS "q"` + returning, wantErr: iterFailure,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			executor := readExecutor{query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if sql != tc.sql {
+					t.Fatalf("sql = %q, want %q", sql, tc.sql)
+				}
+
+				if tc.queryEr != nil {
+					return nil, tc.queryEr
+				}
+
+				return tc.rows, nil
+			}}
+
+			models, err := tc.write(ratel.New(executor)).Returning(t.Context())
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Returning() error = %v, want %v", err, tc.wantErr)
+			}
+
+			if tc.wantErr != nil {
+				if models != nil {
+					t.Fatalf("partial result on failure: %v", models)
+				}
+
+				return
+			}
+
+			ids := make([]int64, len(models))
+			for index, model := range models {
+				ids[index] = model.ID
+			}
+
+			if !reflect.DeepEqual(ids, tc.want) || models == nil {
+				t.Fatalf("ids = %v, want %v", ids, tc.want)
+			}
+		})
+	}
+}
+
+func BenchmarkBwWriteReturning(b *testing.B) {
+	users := writeDescriptor()
+	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
+		return &bwRows{readRows: readRows{ids: []int64{1, 2, 3}}, tag: "UPDATE 3"}, nil
+	}}
+	query := ratel.New(executor).Update(users).Set(users.Email.To("b")).All()
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, err := query.Returning(b.Context()); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

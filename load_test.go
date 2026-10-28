@@ -438,6 +438,106 @@ func assertLoadSpanStatus(t *testing.T, spans []*observedSpan, status codes.Code
 	}
 }
 
+func TestBwLoadRejects(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+	failure := errors.New("offline")
+	nested := users.Orders.With(ratel.Relation[relationOrder](nil))
+
+	// narrow scans fewer values than the table declares columns.
+	narrow := ratel.NewTable("app", "users", []string{"id", "email"}, func(row pgx.Row) (readUser, error) {
+		var user readUser
+
+		err := row.Scan(&user.ID)
+
+		return user, err
+	}, ratel.PrimaryKey([]string{"id"}, func(user readUser) []any { return []any{user.ID} }))
+	arity := ratel.NewRel(narrow, ratel.RelMany, []ratel.RelKey[readUser]{{
+		Column: "email", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Values: func([]readUser) any { return []int64{1} },
+	}}, func(*readUser, []readUser) {})
+
+	for _, tc := range []struct {
+		name  string
+		rows  []*relationRows
+		load  func(*ratel.DB) error
+		want  error
+		first bool // the first depth runs and must close
+	}{
+		{
+			name: "count scan failure", rows: []*relationRows{{values: [][]any{{1, int64(3)}}, scanFailure: failure}},
+			load: func(db *ratel.DB) error {
+				return db.Load(t.Context(), []relationUser{{ID: 1}}, users.Orders.Count())
+			},
+			want: failure, first: true,
+		},
+		{
+			name: "count iteration failure", rows: []*relationRows{{failure: failure}},
+			load: func(db *ratel.DB) error {
+				return db.Load(t.Context(), []relationUser{{ID: 1}}, users.Orders.Count())
+			},
+			want: failure, first: true,
+		},
+		{
+			name: "nil nested relation", rows: []*relationRows{{values: [][]any{{1, int64(11), int64(1)}}}},
+			load: func(db *ratel.DB) error {
+				return db.Load(t.Context(), []relationUser{{ID: 1}}, nested)
+			},
+			want: ratel.ErrInvalidQuery, first: true,
+		},
+		{
+			name: "scanner reads fewer columns than selected", rows: []*relationRows{{values: [][]any{{1, int64(1), "x"}}}},
+			load: func(db *ratel.DB) error { return db.Load(t.Context(), []readUser{{ID: 1}}, arity) },
+			want: ratel.ErrInvalidQuery, first: true,
+		},
+		{
+			name: "nil relation",
+			load: func(db *ratel.DB) error {
+				return db.Load(t.Context(), []relationUser{{ID: 1}}, ratel.Relation[relationUser](nil))
+			},
+			want: ratel.ErrInvalidQuery,
+		},
+		{
+			name: "no database",
+			load: func(*ratel.DB) error {
+				var missing *ratel.DB
+
+				return missing.Load(t.Context(), []relationUser{{ID: 1}}, users.Orders)
+			},
+			want: ratel.ErrInvalidQuery,
+		},
+		{
+			name: "no models sends nothing",
+			load: func(db *ratel.DB) error { return db.Load(t.Context(), []relationUser{}, users.Orders) },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			batch := &relationBatch{rows: tc.rows}
+			sent := 0
+			executor := relationExecutor{send: func(context.Context, *pgx.Batch) pgx.BatchResults {
+				sent++
+
+				return batch
+			}}
+
+			if err := tc.load(ratel.New(executor)); !errors.Is(err, tc.want) {
+				t.Fatalf("Load() = %v, want %v", err, tc.want)
+			}
+
+			if tc.first && (sent != 1 || !batch.closed) {
+				t.Fatalf("depth batches = %d, closed = %v", sent, batch.closed)
+			}
+
+			if !tc.first && sent != 0 {
+				t.Fatalf("sent %d batches", sent)
+			}
+		})
+	}
+}
+
 func BenchmarkLoad(b *testing.B) {
 	users, _ := relationDescriptors()
 	executor := relationExecutor{send: func(context.Context, *pgx.Batch) pgx.BatchResults {

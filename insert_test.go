@@ -3,10 +3,13 @@ package ratel_test
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/gopherex/ratel"
 )
@@ -151,6 +154,167 @@ func TestInsertDefaultValues(t *testing.T) {
 	statements, err := query.Statements()
 	if err != nil || len(statements) != 2 || !strings.HasSuffix(statements[0].SQL, "DEFAULT VALUES") {
 		t.Fatalf("%+v %v", statements, err)
+	}
+}
+
+func bwEmailField() ratel.InsertField[writeInsert] {
+	return ratel.InsertField[writeInsert]{
+		Name: "email", Type: pgx.Identifier{"pg_catalog", "text"},
+		Value: func(row writeInsert) (any, bool) { return row.email, true }, Values: writeEmails,
+	}
+}
+
+func bwEmailWith(mutate func(*ratel.InsertField[writeInsert])) ratel.InsertField[writeInsert] {
+	field := bwEmailField()
+	mutate(&field)
+
+	return field
+}
+
+func bwArrayField() ratel.InsertField[writeInsert] {
+	return ratel.InsertField[writeInsert]{
+		Name: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"}, Array: true,
+		Value: func(writeInsert) (any, bool) { return []int64{7}, true },
+	}
+}
+
+func bwTable(schema string, fields ...ratel.InsertField[writeInsert]) ratel.WriteTable[readUser, writeInsert] {
+	return ratel.NewWriteTable(
+		ratel.NewTable(schema, "users", []string{"id", "email", "manager_id"}, scanReadUser),
+		func(row writeInsert) bool { return row.valid }, fields...)
+}
+
+func TestBwInsertRendering(t *testing.T) {
+	t.Parallel()
+
+	users := writeDescriptor()
+	arrays := bwTable("app", bwEmailField(), bwArrayField())
+	database := ratel.New(readExecutor{})
+	first, second := withID("a", 1), withID("b", 2)
+
+	for _, tc := range []struct {
+		name  string
+		query ratel.Insert[readUser, writeInsert]
+		sql   string
+		args  []any
+		want  error
+	}{
+		{
+			name:  "unnest of several columns",
+			query: database.Insert(users, first, second),
+			sql: `INSERT INTO "app"."users" AS "q" ("email", "id") SELECT * FROM unnest(` +
+				`$1::"pg_catalog"."text"[], $2::"pg_catalog"."int8"[])`,
+			args: []any{[]string{"a", "b"}, []int64{1, 2}},
+		},
+		{
+			name:  "array column falls back to VALUES",
+			query: database.Insert(arrays, newWriteInsert("a"), newWriteInsert("b")),
+			sql:   `INSERT INTO "app"."users" AS "q" ("email", "manager_id") VALUES ($1, $2), ($3, $4)`,
+			args:  []any{"a", []int64{7}, "b", []int64{7}},
+		},
+		{
+			name: "composite conflict target and update",
+			query: database.Upsert(users, newWriteInsert("a")).
+				OnConflict(users.Email, users.ID).Update(users.Email, users.ID),
+			sql: `INSERT INTO "app"."users" AS "q" ("email") VALUES ($1) ON CONFLICT ("email", "id") ` +
+				`DO UPDATE SET "email" = EXCLUDED."email", "id" = EXCLUDED."id"`,
+			args: []any{"a"},
+		},
+		{
+			name:  "update after do nothing replaces it",
+			query: database.Upsert(users, newWriteInsert("a")).OnConflict(users.Email).DoNothing().Update(users.ID),
+			sql: `INSERT INTO "app"."users" AS "q" ("email") VALUES ($1) ON CONFLICT ("email") ` +
+				`DO UPDATE SET "id" = EXCLUDED."id"`,
+			args: []any{"a"},
+		},
+		{
+			name:  "schema is required",
+			query: database.Insert(bwTable("", bwEmailField()), newWriteInsert("a")),
+			want:  ratel.ErrInvalidQuery,
+		},
+		{
+			name: "invalid type identifier",
+			query: database.Insert(bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
+				f.Type = pgx.Identifier{""}
+			})), newWriteInsert("a")),
+			want: ratel.ErrInvalidQuery,
+		},
+		{
+			name: "field outside the table columns",
+			query: database.Insert(bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
+				f.Name = "unknown"
+			})), newWriteInsert("a")),
+			want: ratel.ErrInvalidQuery,
+		},
+		{
+			name:  "duplicate field",
+			query: database.Insert(bwTable("app", bwEmailField(), bwEmailField()), newWriteInsert("a")),
+			want:  ratel.ErrInvalidQuery,
+		},
+		{
+			name: "scalar field without Values",
+			query: database.Insert(bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
+				f.Values = nil
+			})), newWriteInsert("a")),
+			want: ratel.ErrInvalidQuery,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			statement, err := tc.query.SQL()
+			if !errors.Is(err, tc.want) || statement.SQL != tc.sql || !reflect.DeepEqual(statement.Args, tc.args) {
+				t.Fatalf("SQL() = %+v, %v; want %q, %#v, %v", statement, err, tc.sql, tc.args, tc.want)
+			}
+		})
+	}
+}
+
+// TestBwInsertParameterLimit checks that array-column inserts, which cannot use
+// unnest, stay under the 65535 parameters of one extended-protocol statement.
+func TestBwInsertParameterLimit(t *testing.T) {
+	t.Parallel()
+
+	const perStatement = 65535 / 2
+
+	arrays := bwTable("app", bwEmailField(), bwArrayField())
+	rows := slices.Repeat([]writeInsert{newWriteInsert("a")}, perStatement+1)
+
+	statements, err := ratel.New(readExecutor{}, ratel.WithBatchRows(1_000_000)).Insert(arrays, rows...).Statements()
+	if err != nil || len(statements) != 2 {
+		t.Fatalf("statements = %d, %v", len(statements), err)
+	}
+
+	if len(statements[0].Args) != perStatement*2 || len(statements[1].Args) != 2 {
+		t.Fatalf("args = %d and %d", len(statements[0].Args), len(statements[1].Args))
+	}
+}
+
+func TestBwInsertExecInvalid(t *testing.T) {
+	t.Parallel()
+
+	executor := writeExecutor{exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		t.Fatal("exec reached the executor")
+
+		return pgconn.CommandTag{}, nil
+	}}
+
+	count, err := ratel.New(executor).Insert(writeDescriptor()).Exec(t.Context())
+	if count != 0 || !errors.Is(err, ratel.ErrInvalidInsert) {
+		t.Fatalf("Exec() = %d, %v", count, err)
+	}
+}
+
+func BenchmarkBwInsertArrays(b *testing.B) {
+	arrays := bwTable("app", bwEmailField(), bwArrayField())
+	query := ratel.New(readExecutor{}).Insert(arrays, slices.Repeat([]writeInsert{newWriteInsert("a")}, 100)...)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, err := query.Statements(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

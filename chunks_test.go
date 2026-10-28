@@ -143,6 +143,94 @@ func TestChunksTermination(t *testing.T) {
 	}
 }
 
+func bwCompositeUsers(values func(readUser) []any) ratel.Table[readUser] {
+	return ratel.NewTable("app", "users", []string{"id", "email", "manager_id"}, scanReadUser,
+		ratel.PrimaryKey([]string{"id", "email"}, values))
+}
+
+func TestBwChunksCompositeKey(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	executor := readExecutor{query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+		calls++
+		if calls == 1 {
+			return &readRows{ids: []int64{1, 2}}, nil
+		}
+
+		const want = `WHERE ("q"."id", "q"."email") > ($1, $2) ORDER BY "q"."id" ASC, "q"."email" ASC LIMIT $3`
+		if !strings.HasSuffix(sql, want) || !reflect.DeepEqual(args, []any{int64(2), "", 2}) {
+			t.Fatalf("%s %v", sql, args)
+		}
+
+		return &readRows{}, nil
+	}}
+	table := bwCompositeUsers(func(user readUser) []any { return []any{user.ID, user.Email} })
+
+	pages := 0
+
+	for page, err := range ratel.New(executor).From(table).Chunks(t.Context(), 2) {
+		if err != nil || len(page) != 2 {
+			t.Fatalf("%v %v", page, err)
+		}
+
+		pages++
+	}
+
+	if pages != 1 || calls != 2 {
+		t.Fatalf("pages = %d, queries = %d", pages, calls)
+	}
+}
+
+func TestBwChunksKeyValuesMismatch(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
+		calls++
+
+		return &readRows{ids: []int64{1, 2}}, nil
+	}}
+	table := bwCompositeUsers(func(user readUser) []any { return []any{user.ID} })
+
+	yields := 0
+
+	for page, err := range ratel.New(executor).From(table).Chunks(t.Context(), 2) {
+		yields++
+
+		if page != nil || !errors.Is(err, ratel.ErrInvalidQuery) {
+			t.Fatalf("%v %v", page, err)
+		}
+	}
+
+	if yields != 1 || calls != 1 {
+		t.Fatalf("yields = %d, queries = %d", yields, calls)
+	}
+}
+
+func BenchmarkBwChunksCompositeKey(b *testing.B) {
+	calls := 0
+	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
+		calls++
+		if calls%2 == 1 {
+			return &readRows{ids: []int64{1, 2}}, nil
+		}
+
+		return &readRows{}, nil
+	}}
+	query := ratel.New(executor).From(bwCompositeUsers(func(user readUser) []any { return []any{user.ID, user.Email} }))
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		for _, err := range query.Chunks(b.Context(), 2) {
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
 func BenchmarkChunks(b *testing.B) {
 	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
 		return &readRows{ids: []int64{1}}, nil

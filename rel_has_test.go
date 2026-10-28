@@ -3,6 +3,7 @@ package ratel_test
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -66,6 +67,31 @@ func TestHas(t *testing.T) {
 
 	if _, err := database.From(users).Where(unkeyed.Has(orderID.Gt(1))).SQL(); !errors.Is(err, ratel.ErrInvalidQuery) {
 		t.Fatalf("Has without a parent column = %v", err)
+	}
+}
+
+func TestBwHasCompositeThrough(t *testing.T) {
+	t.Parallel()
+
+	users := ratel.NewTable("app", "users", []string{"id", "email", "manager_id"}, scanReadUser,
+		ratel.PrimaryKey([]string{"id", "email"}, func(user readUser) []any { return []any{user.ID, user.Email} }))
+	friends := ratel.NewRel(users, ratel.RelMany, []ratel.RelKey[readUser]{{
+		Column: "user_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Values: func([]readUser) any { return []int64{} },
+	}}, func(*readUser, []readUser) {}, ratel.Through[readUser, readUser]("app", "friends", "friend_id", "friend_email"))
+	id := ratel.NewCol[readUser, int64]("id")
+
+	statement, err := ratel.New(&pgx.Conn{}).From(users).Where(friends.Has(id.Gt(5))).SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const exists = `WHERE EXISTS (SELECT 1 FROM "app"."users" AS "h0" JOIN "app"."friends" AS "h0l" ON ` +
+		`"h0l"."friend_id" = "h0"."id" AND "h0l"."friend_email" = "h0"."email" ` +
+		`WHERE "h0l"."user_id" = "q"."id" AND "h0"."id" > $1)`
+
+	if !strings.HasSuffix(statement.SQL, exists) || !reflect.DeepEqual(statement.Args, []any{int64(5)}) {
+		t.Fatalf("got %+v", statement)
 	}
 }
 

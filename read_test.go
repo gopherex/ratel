@@ -179,6 +179,113 @@ func TestAllStopsAndReleases(t *testing.T) {
 	}
 }
 
+func TestAllErrors(t *testing.T) {
+	t.Parallel()
+
+	failure := errors.New("connection lost")
+
+	for _, tc := range []struct {
+		name        string
+		nilDB       bool
+		invalid     bool
+		ids         []int64
+		queryError  error
+		failure     error
+		scanFailure error
+		wantIDs     []int64
+		wantError   error
+		wantQueried bool
+		wantClosed  bool
+	}{
+		{name: "no database", nilDB: true, wantError: ratel.ErrInvalidQuery},
+		{name: "invalid query", invalid: true, wantError: ratel.ErrInvalidQuery},
+		{name: "query error", queryError: failure, wantError: failure, wantQueried: true},
+		{
+			name: "scan error", ids: []int64{1, 2}, scanFailure: failure, wantError: failure,
+			wantQueried: true, wantClosed: true,
+		},
+		{
+			name: "rows error after rows", ids: []int64{1, 2}, failure: failure, wantIDs: []int64{1, 2},
+			wantError: failure, wantQueried: true, wantClosed: true,
+		},
+		{name: "rows error empty", failure: failure, wantError: failure, wantQueried: true, wantClosed: true},
+		{name: "all rows", ids: []int64{1, 2, 3}, wantIDs: []int64{1, 2, 3}, wantQueried: true, wantClosed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rows := &readRows{ids: tc.ids, failure: tc.failure, scanFailure: tc.scanFailure}
+
+			var queried bool
+
+			executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
+				queried = true
+
+				if tc.queryError != nil {
+					return nil, tc.queryError
+				}
+
+				return rows, nil
+			}}
+
+			query := ratel.New(executor).From(userDescriptor())
+			if tc.nilDB {
+				query = ratel.Select[readUser]{}
+			}
+
+			if tc.invalid {
+				query = query.SkipLocked()
+			}
+
+			users, errs := selXDrain(query.All(t.Context()), 0)
+
+			gotIDs := make([]int64, 0, len(users))
+			for _, user := range users {
+				gotIDs = append(gotIDs, user.ID)
+			}
+
+			if len(gotIDs) != len(tc.wantIDs) || (len(gotIDs) > 0 && !reflect.DeepEqual(gotIDs, tc.wantIDs)) {
+				t.Fatalf("ids = %v, want %v", gotIDs, tc.wantIDs)
+			}
+
+			selXExpectErrors(t, errs, tc.wantError)
+
+			if queried != tc.wantQueried || rows.closed != tc.wantClosed {
+				t.Fatalf("queried = %v closed = %v", queried, rows.closed)
+			}
+		})
+	}
+}
+
+func TestAllNoErrorWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	rows := &readRows{}
+	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) { return rows, nil }}
+
+	for user, err := range ratel.New(executor).From(userDescriptor()).All(t.Context()) {
+		t.Fatalf("unexpected yield %+v, %v", user, err)
+	}
+
+	if !rows.closed {
+		t.Fatal("cursor was not released")
+	}
+}
+
+func TestReadNoDatabase(t *testing.T) {
+	t.Parallel()
+
+	var query ratel.Select[readUser]
+
+	if _, err := query.List(t.Context()); !errors.Is(err, ratel.ErrInvalidQuery) {
+		t.Fatalf("List() error = %v", err)
+	}
+
+	if _, err := query.One(t.Context()); !errors.Is(err, ratel.ErrInvalidQuery) {
+		t.Fatalf("One() error = %v", err)
+	}
+}
+
 func TestReadQueryFailure(t *testing.T) {
 	t.Parallel()
 
