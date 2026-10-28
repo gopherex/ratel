@@ -79,6 +79,12 @@ func TestSelectSQL(t *testing.T) {
 			projection + `(SELECT id, email, manager_id FROM app.users WHERE id > $1) AS "q" WHERE "q"."id" < $2`,
 			[]any{int64(4), int64(8)},
 		},
+		{
+			"verbatim static source", database.From(ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser,
+				`INSERT INTO app.users (email) VALUES ($1) RETURNING id, email, manager_id`, "a")),
+			`INSERT INTO app.users (email) VALUES ($1) RETURNING id, email, manager_id`,
+			[]any{"a"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

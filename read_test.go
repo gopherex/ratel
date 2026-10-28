@@ -116,6 +116,50 @@ func TestReadTerminals(t *testing.T) {
 	}
 }
 
+// TestStaticTerminals runs a static query verbatim: One and First add no
+// LIMIT, since DML with RETURNING takes none, and stop reading instead.
+func TestStaticTerminals(t *testing.T) {
+	t.Parallel()
+
+	const sql = `INSERT INTO app.users (email) VALUES ($1) RETURNING id, email, manager_id`
+
+	for _, tc := range []struct {
+		name      string
+		ids       []int64
+		first     bool
+		wantError error
+		read      int
+	}{
+		{name: "one", ids: []int64{1}, read: 1},
+		{name: "one of many", ids: []int64{1, 2, 3}, wantError: ratel.ErrMultipleRows, read: 2},
+		{name: "none", wantError: ratel.ErrNotFound},
+		{name: "first of many", ids: []int64{1, 2, 3}, first: true, read: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rows := &readRows{ids: tc.ids}
+			executor := readExecutor{query: func(_ context.Context, got string, _ ...any) (pgx.Rows, error) {
+				if got != sql {
+					t.Fatalf("SQL = %s", got)
+				}
+
+				return rows, nil
+			}}
+			query := ratel.New(executor).From(ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser, sql, "a"))
+
+			terminal := query.One
+			if tc.first {
+				terminal = query.First
+			}
+
+			if _, err := terminal(t.Context()); !errors.Is(err, tc.wantError) || rows.index != tc.read || !rows.closed {
+				t.Fatalf("error = %v, read = %d, closed = %v", err, rows.index, rows.closed)
+			}
+		})
+	}
+}
+
 func TestAllStopsAndReleases(t *testing.T) {
 	t.Parallel()
 

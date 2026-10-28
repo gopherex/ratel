@@ -81,10 +81,11 @@ func (q Select[M]) rows(ctx context.Context, options []CallOption) (pgx.Rows, er
 // List collects the result. Empty results are a non-nil empty slice.
 // An error returns no partial result.
 func (q Select[M]) List(ctx context.Context, options ...CallOption) ([]M, error) {
-	return q.collect(ctx, "ratel.select.list", options)
+	return q.collect(ctx, "ratel.select.list", 0, options)
 }
 
-func (q Select[M]) collect(ctx context.Context, operation string, options []CallOption) ([]M, error) {
+// collect reads the result; a positive atMost stops after that many rows.
+func (q Select[M]) collect(ctx context.Context, operation string, atMost int, options []CallOption) ([]M, error) {
 	if q.db == nil {
 		return nil, ErrInvalidQuery
 	}
@@ -113,6 +114,9 @@ func (q Select[M]) collect(ctx context.Context, operation string, options []Call
 		}
 
 		models = append(models, model)
+		if len(models) == atMost {
+			break
+		}
 	}
 
 	if err = rows.Err(); err != nil {
@@ -142,11 +146,13 @@ func (q Select[M]) First(ctx context.Context, options ...CallOption) (M, error) 
 func (q Select[M]) single(ctx context.Context, operation string, limit int, options []CallOption) (M, error) {
 	var zero M
 
-	if !q.limit.Set || q.limit.V > limit {
+	// A static query runs verbatim and stops reading instead: its SQL may be
+	// DML with RETURNING, which takes no LIMIT.
+	if !q.verbatim() && (!q.limit.Set || q.limit.V > limit) {
 		q = q.Limit(limit)
 	}
 
-	models, err := q.collect(ctx, operation, options)
+	models, err := q.collect(ctx, operation, limit, options)
 	if err != nil {
 		return zero, err
 	}

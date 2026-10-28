@@ -120,8 +120,15 @@ type Statement struct {
 
 // SQL renders the query and numbered PostgreSQL arguments without executing it.
 func (q Select[M]) SQL() (Statement, error) {
-	if q.source.render == nil && q.source.table.selectSQL != "" && !q.hasWhere &&
-		len(q.orders) == 0 && !q.limit.Set && !q.offset.Set {
+	if q.verbatim() {
+		if q.source.static.SQL == "" {
+			return Statement{}, ErrInvalidQuery
+		}
+
+		return Statement{SQL: q.source.static.SQL, Args: slices.Clone(q.source.static.Args)}, nil
+	}
+
+	if q.source.render == nil && q.source.table.selectSQL != "" && q.plain() {
 		return Statement{SQL: q.source.table.selectSQL}, nil
 	}
 
@@ -138,6 +145,15 @@ func (q Select[M]) SQL() (Statement, error) {
 
 	return Statement{SQL: writer.String(), Args: writer.args}, nil
 }
+
+// plain reports a SELECT without added clauses.
+func (q Select[M]) plain() bool {
+	return !q.hasWhere && len(q.orders) == 0 && !q.limit.Set && !q.offset.Set
+}
+
+// verbatim reports a plain SELECT over a static query, which runs the
+// query's own statement.
+func (q Select[M]) verbatim() bool { return q.source.static != nil && q.plain() }
 
 func (q Select[M]) appendSQL(writer *sqlWriter) error {
 	if !q.source.table.valid() || q.limit.V < 0 || q.offset.V < 0 {

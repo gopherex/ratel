@@ -20,6 +20,9 @@ type Source[M any] interface {
 type source[M any] struct {
 	table  Table[M]
 	render func(*sqlWriter) error
+	// static is a static query's own statement. A SELECT without clauses runs
+	// it verbatim, so DML with RETURNING, which cannot be a subquery, runs too.
+	static *Statement
 }
 
 // Table describes an immutable, schema-qualified result and its generated scanner.
@@ -142,7 +145,7 @@ func NewQuery[M any](columns []string, scan Scanner[M], sql string, args ...any)
 }
 
 func (q Query[M]) ratelSource() source[M] {
-	return source[M]{table: q.table, render: func(writer *sqlWriter) error {
+	return source[M]{table: q.table, static: &Statement{SQL: q.sql, Args: q.args}, render: func(writer *sqlWriter) error {
 		if q.sql == "" || len(writer.args) != 0 {
 			return ErrInvalidQuery
 		}

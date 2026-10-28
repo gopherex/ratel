@@ -127,11 +127,11 @@ func (q EagerSelect[M]) single(ctx context.Context, limit int, options []CallOpt
 	ctx, span := q.query.db.tracer.Start(ctx, "ratel.select.with.single", q.query.spanOptions()...)
 	defer span.End()
 
-	if !q.query.limit.Set || q.query.limit.V > limit {
+	if !q.query.verbatim() && (!q.query.limit.Set || q.query.limit.V > limit) {
 		q.query = q.query.Limit(limit)
 	}
 	// Check cardinality before loading children, so invalid One results do no eager I/O.
-	models, err := q.query.collect(ctx, "ratel.select.parents", options)
+	models, err := q.query.collect(ctx, "ratel.select.parents", limit, options)
 	if err != nil {
 		recordFailure(span, err)
 

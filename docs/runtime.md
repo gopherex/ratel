@@ -210,7 +210,10 @@ Generated static query `.Args(...)` methods return
 `ratel.NewQuery(columns, scan, sql, args...)`. SQL is trusted generated SQL
 with contiguous `$1..$n` parameters, no trailing statement delimiter, and
 schema-qualified physical table references. It is embedded unchanged; outer
-builder predicates continue parameter numbering. A builder SELECT itself
+builder predicates continue parameter numbering. Without added clauses,
+`db.From(query)` runs the query's statement verbatim, so DML with `RETURNING`,
+which cannot be a subquery, runs too; there `One` and `First` add no `LIMIT`
+and stop reading after two rows and one row. A builder SELECT itself
 also implements `ratel.Source[M]`, so `db.From(selectBuilder)` nests it while
 preserving its result model and scanner.
 
