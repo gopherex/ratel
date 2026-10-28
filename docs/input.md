@@ -92,6 +92,29 @@ SELECT id, email FROM app.users WHERE email = @email;
 rewriting. It checks lexical SQL, headers and statement boundaries; inference
 parses the statement after named-parameter rewriting.
 
+A query uses either named or positional parameters, never both. Named parameters
+receive numbers in first-occurrence order; rewriting leaves comments, quoted
+identifiers, SQL strings and dollar-quoted bodies unchanged. Positional numbers
+must form the contiguous range `$1..$N`. Operators from the target builtin
+snapshot keep their spelling: write `id < @maximum` with a space, because `<@`
+is itself a PostgreSQL operator. Non-operator combinations such as `+@value`
+rewrite the trailing named parameter without changing the preceding operator.
+
+Use an SQL cast (`@value::int8`, `$1::uuid`) when context cannot determine a
+parameter's type. As in PostgreSQL, an unconstrained SELECT or RETURNING output
+parameter defaults to `text`; unknown sort/group expressions use the same default.
+A conflicting occurrence is an error, not permission to retype an earlier
+parameter. A nullability annotation does not supply a missing type.
+`@ratel.nullable` and `@ratel.notnull` address a named parameter by its bare name,
+or a positional parameter as `$N`; `@ratel.notnull` also addresses output column
+labels. An annotation that matches no parameter or output column is an error.
+
+Nullability is conservative: nullable means that SQL NULL is possible or that
+inference cannot prove otherwise. Outer joins, missing scalar-subquery rows and
+aggregates other than `count` can produce NULL. `STRICT` alone does not prove a
+function's result non-null for non-null arguments. A caller can state that
+stronger contract with `@ratel.notnull`.
+
 There is no dynamic-query syntax. Optional filters, dynamic ordering and
 pagination are added at runtime by using a `SELECT` query as a builder source
 ([runtime.md](runtime.md#queries-as-builder-sources)). Parameter and column

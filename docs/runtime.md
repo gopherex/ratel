@@ -303,6 +303,13 @@ fits:
 | any shape, query annotated `@ratel.row <Name>` | shared type `<Name>`; every query with that name must have the same shape, else a generation error |
 | any shape, query annotated `@go.row <import path>.<Type>` | the user's own struct; fields are matched to columns by name and type through `go/types`, and a mismatch is a generation error |
 
+Inference supplies this decision through `QueryColumn.source_column` and
+`table_alias`, not through output labels. Selecting `u.id AS other_id` keeps the
+identity of `u.id`; computing `u.id + 1 AS id` does not. Aliases distinguish
+self-join instances, while column nullability records outer-join effects.
+`@ratel.row` and `@go.row` remain query metadata for the output plugin; they do
+not change PostgreSQL type inference or manufacture column provenance.
+
 Two queries with identical shapes and no `@ratel.row` produce a warning that
 suggests one.
 

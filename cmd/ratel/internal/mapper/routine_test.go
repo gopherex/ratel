@@ -22,6 +22,7 @@ func testMapRoutine(t *testing.T, parser parse.Parser) {
 			" subtype_diff = pg_catalog.tstzrange_subdiff)", checkRange},
 		{"CREATE FUNCTION app.f(a int DEFAULT 1) RETURNS TABLE(x int, y text) LANGUAGE sql" +
 			" IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER COST 5 ROWS 10 AS $$ SELECT a, 'x' $$", checkFunction},
+		{"CREATE FUNCTION app.f(VARIADIC a int[]) RETURNS int LANGUAGE sql AS 'SELECT 1'", checkVariadic},
 		{"CREATE PROCEDURE app.p(a int) LANGUAGE sql AS $$ SELECT a $$", checkProcedure},
 		{"CREATE TRIGGER audit BEFORE INSERT OR UPDATE OF id ON app.t FOR EACH ROW" +
 			" WHEN (new.id>0) EXECUTE FUNCTION app.audit('')", checkTrigger},
@@ -75,8 +76,17 @@ func checkFunction(t *testing.T, current mapper.Mapper, node *pg.Node) {
 
 	function, procedure := current.MapCreateFunction(node.GetCreateFunctionStmt())
 	if procedure != nil || len(function.GetReturns().GetTable().GetColumns()) != 2 ||
-		function.GetEstimatedCost() != 5 || function.GetEstimatedRows() != 10 ||
+		function.GetEstimatedCost() != 5 || function.GetEstimatedRows() != 10 || function.GetDefaultArguments() != 1 ||
 		len(function.GetName().GetParts()) != 3 || function.GetName().GetParts()[2] != "int4" {
+		t.Fatal(function)
+	}
+}
+
+func checkVariadic(t *testing.T, current mapper.Mapper, node *pg.Node) {
+	t.Helper()
+
+	function, _ := current.MapCreateFunction(node.GetCreateFunctionStmt())
+	if function.GetVariadicElement().GetPgName() != "int4" {
 		t.Fatal(function)
 	}
 }

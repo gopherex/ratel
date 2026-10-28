@@ -107,9 +107,10 @@ The mapper preserves exact decimal literals as text. Arrays carry an
 underscore-prefixed PostgreSQL name and their element type. Explicitly
 schema-qualified user types retain that qualification; other type categories
 are provisional until catalog resolution. Function identities append the
-input argument signature, excluding OUT and TABLE arguments. RETURNS TABLE
-keeps its column list, and standard SQL RETURN expressions become SELECT
-bodies.
+input argument signature, excluding OUT and TABLE arguments. Functions also carry
+the declared default-argument count and variadic element type, so user routines
+and builtin snapshots expose the same calling metadata. RETURNS TABLE keeps its
+column list, and standard SQL RETURN expressions become SELECT bodies.
 
 Syntax and IR do not have identical representational capacity:
 
@@ -290,6 +291,75 @@ and statement-boundary errors use the same `RTL-A01` diagnostic contract.
 Run scanner tests and benchmarks with
 `cd cmd/ratel && go test -race ./internal/annotate` and
 `cd cmd/ratel && go test -run '^$' -bench . -benchmem ./internal/annotate`.
+
+## Named-query inference
+
+`cmd/ratel/internal/query.Infer(parser, catalog, builtins, sources)` accepts the
+shared `parse.Parser`, a built catalog, the matching `builtins.For(major)`
+signatures and `annotate.QuerySource` records. It returns caller-owned
+`[]*ir.Query`, in source order, without changing the catalog or source metadata.
+The output includes rewritten positional SQL, mapped statement IR, ordered
+parameter signatures and output columns. Physical relation references in the
+output SQL carry their resolved schema. AST metadata retains the original query
+source range; statement ordinals distinguish queries in the same file.
+
+Inference uses lexical scopes for CTEs, derived tables, LATERAL and correlated
+subqueries. Object-name lookups use `catalog.ObjectID`, so quoted identifiers
+cannot collide with identifier-part separators. Recursive CTEs take their types from the non-recursive term and
+propagate nullability until it stops changing, so NULL introduced in one
+iteration can reach another output column in a later iteration. Set operations
+choose a common type using the snapshot's implicit casts. Parameter contexts
+include write targets, operators, function arguments, scalar-array comparisons,
+pagination and window-frame offsets. Each parameter occurrence retains its own
+coercion state, while all occurrences share one positional type; a constraint on
+one occurrence cannot hide an unresolved occurrence elsewhere. Targets constrain
+parameters before WHERE, and window frames and INSERT assignment contexts run
+later. RANGE frame offsets use the snapshot's `in_range` signatures, including
+inherited windows, rather than assuming an integer offset.
+
+Overload candidates come from both catalog routines and generated builtins.
+Exact argument types, implicit coercions, preferred types and unknown string
+arguments participate in selection; array and element polymorphism, default
+arguments and variadic calls retain their declared signatures. Domain coercions
+use the declared base type without discarding an exact domain overload. Common
+types retain a domain only when every input has that domain type. Table functions
+expand declared OUT/TABLE fields or the known composite/table-row layout;
+otherwise a record needs an SQL column-definition list. Unresolved or
+ambiguous calls fail instead of selecting the first candidate. Query inference
+resolves `abs(1)` and `abs(integer_column)` without adding an explicit cast;
+the separate schema-expression resolver still has the limitation stated above.
+
+Direct projections retain `QueryColumn.source_column` and `table_alias`, even
+when an output label changes. Computed values do not acquire provenance from a
+matching label. Outer joins change nullability, not the source identity; qualified
+stars retain the individual sides of a USING join. Parameters inferred from write
+columns retain their source column and nullability. A parameter used in several
+column contexts defaults to nullable only when every such context is nullable;
+an explicit query annotation overrides that default.
+
+Core row annotations and plugin annotations pass through `Query.meta` unchanged.
+The output plugin chooses or validates the Go row type from this metadata and
+the inferred column provenance; inference does not import or inspect Go types.
+
+Incomplete types, ambiguous references, unknown functions/operators and invalid
+parameter numbering return `*query.Error`, with an ERROR `Diagnostic` of code
+`RTL-Q01` naming the query and failed expression. Syntax errors retain the parser's
+error. There is no successful partial signature or fallback `any` type.
+
+Unit tests share one parser per parent test and run inference cases concurrently:
+`cd cmd/ratel && go test -race ./internal/query`. Benchmarks use
+`go test -run '^$' -bench . -benchmem ./internal/query` in that module.
+`cmd/ratel/tests/query_test.go` prepares each fixture with pgx on PostgreSQL 16,
+17 and 18 and compares described parameter/result OIDs and output names with the
+inferred signature. RowDescription exposes a domain's base OID, so this comparison
+normalizes domain outputs through `pg_type`; separate `pg_typeof` assertions
+check that inference preserves the nominal domain when PostgreSQL does. Fixtures
+without parameters also execute against real rows, including RETURNING; an actual
+NULL must never occupy an inferred non-null column. Refusal cases compare the
+inference diagnostic with PostgreSQL's unknown/ambiguous-function and inconsistent
+parameter SQLSTATEs.
+`make test-integration` includes this suite. Inference itself has no connection or
+server dependency.
 
 ## Relations
 

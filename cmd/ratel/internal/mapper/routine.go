@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	pg "github.com/pganalyze/pg_query_go/v6"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/gopherex/ratel/ir"
 )
@@ -112,8 +113,20 @@ func (m Mapper) MapCreateFunction(value *pg.CreateFunctionStmt) (*ir.Function, *
 	name := qualified(value.GetFuncname())
 	signature := make([]string, 0, len(arguments))
 
+	var defaults uint32
+
+	var variadic *ir.TypeRef
+
 	for _, argument := range arguments {
 		if argument.GetMode() != ir.ArgMode_ARG_MODE_OUT {
+			if argument.GetDefaultValue() != nil {
+				defaults++
+			}
+
+			if argument.GetMode() == ir.ArgMode_ARG_MODE_VARIADIC {
+				variadic = proto.CloneOf(argument.GetType().GetElement())
+			}
+
 			signature = append(signature, typeIdentity(argument.GetType()))
 		}
 	}
@@ -122,7 +135,8 @@ func (m Mapper) MapCreateFunction(value *pg.CreateFunctionStmt) (*ir.Function, *
 	function := &ir.Function{
 		Name: name, Arguments: arguments, Returns: returnType(value),
 		Volatility: ir.Volatility_VOLATILITY_VOLATILE, NullInput: ir.NullInputBehavior_NULL_INPUT_BEHAVIOR_CALLED,
-		Parallel: ir.ParallelSafety_PARALLEL_SAFETY_UNSAFE,
+		Parallel:         ir.ParallelSafety_PARALLEL_SAFETY_UNSAFE,
+		DefaultArguments: defaults, VariadicElement: variadic,
 	}
 	m.functionOptions(function, value.GetOptions())
 
