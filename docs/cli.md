@@ -33,9 +33,33 @@ directories they leave empty, and never touches files the manifest does not
 list. A path through a symbolic link, inside the output directory or as the
 directory itself, is refused before anything is written.
 
+### Migrate
+
+Every `migrate` subcommand reads `ratel.yaml` (`--config <path>`) and the
+migrations directory, created when missing.
+
+- `plan <name>` first checks `ratel.sum`, then on the dev server applies the
+  existing migration files to one database and the schema files to another
+  (in any order: foreign keys go last, other statements retry until their
+  dependencies exist), renders both over the desired schemas and those the
+  migrations created, diffs, probes and plans. It prints every finding as
+  `<where> fixed|allowed|error <code>: <detail>`; with an `error` finding it
+  writes nothing and exits `1`. Without changes it prints `no changes`.
+  Otherwise it writes `<UTC timestamp>_<name>.sql` and the new `ratel.sum`.
+- `lint [<file>...]` applies the files one by one to a dev database and
+  lints each named file (all when none is named) against the state before
+  it, then the desired schema.
+- `verify` checks the files against `ratel.sum`; a directory without files
+  needs no `ratel.sum`.
+- `status`, `apply`, `contract` and `drift` take `--url`. `apply` and
+  `contract` check `ratel.sum` first. `status` prints
+  `pending|applied|interrupted|changed <phase> <file> <step>` per step.
+  `drift` prints each difference as `<change kind> <key>` and exits `1` when
+  there is one.
+
 ### Dump
 
-`version`, `check`, `generate` and `dump` are implemented commands. `dump` reads `ratel.yaml` from the
+`version`, `check`, `generate`, `dump` and `migrate` are implemented commands. `dump` reads `ratel.yaml` from the
 working directory, or the file selected by `--config <path>`. Source patterns
 and plugin paths are relative to that configuration file, not the working
 directory. Schema patterns support `**`, expand in sorted order and deduplicate
