@@ -1,0 +1,277 @@
+# Migrations
+
+ratel migrations are declarative: the schema files state the target, and the
+engine plans how to get there. The key requirement, equal to correctness:
+**a migration never locks a production database.** A step that needs a lock
+blocking reads or writes waits for it at most `lock_timeout` (so it never sits
+in the lock queue behind a long transaction) and holds it at most
+`statement_timeout`. Work that scans or rewrites data never runs under such a
+lock.
+
+## Flow
+
+```
+schema files ─► build ─► desired Catalog ─┐
+                                          ├─► diff ─► []Change ─► Assess ─► planner ─► steps ─► lint
+migrations dir ─► apply to dev DB ─► introspect ─► current Catalog ┘
+                                                                   steps ─► ratel migrate apply ─► target DB
+```
+
+1. **Diff** compares two Catalogs, both normalized by PostgreSQL (each side is
+   applied to its own database on the dev server and introspected). Changes
+   are semantic (`AddIndex`, `SetNotNull`, `ChangeType`, `Rename`, ...), not
+   SQL strings. Renames and type changes come from `@ratel.renamed` and
+   `@ratel.retype`; without them the diff reports drop plus create.
+2. **Assess** is a pure function `Assess(change, env) Safety`.
+3. **Planner** rewrites each change into safe steps and assigns phases.
+4. **Lint** checks the steps and hand-written migration files.
+5. **Apply** runs steps with guards and records each in the journal.
+
+## Safety record
+
+```go
+type Safety struct {
+	Locks    []RelLock // relation and lock mode, strictest first
+	Effect   Effect    // Metadata | Scan | Rewrite | IndexBuild
+	Tx       TxMode    // InTx | OwnStatement (cannot run in a transaction)
+	Destroys Destroys  // None | Objects | Data
+	Compat   Compat    // Safe | Conditional | Breaking, with a reason code
+	Waits    bool      // waits for older transactions (CONCURRENTLY builds, DETACH CONCURRENTLY)
+}
+```
+
+- The lock and effect table is data keyed by change kind. *Check:* an
+  integration test replays every entry against PostgreSQL 16, 17 and 18 and
+  compares the observed `pg_locks` modes and `relfilenode` changes with the
+  table.
+- `Env` carries the target major version (`postgres.version`) and, per
+  existing relation, whether it is partitioned, has a default partition, and
+  its partition key columns. Recipes are chosen by these facts.
+- Rewrite detection for type changes: a probe on the dev server (running the
+  `postgres.version` image) creates an empty temporary table with the old
+  column type, runs the same `ALTER COLUMN ... TYPE ... USING ...` with
+  `TimeZone = 'UTC'`, and compares `relfilenode`. Other rewrites come from the
+  table. Every applied step also runs with `SET LOCAL TimeZone = 'UTC'`, so the
+  probe and production see the same conversion.
+- Tables created in the same plan are exempt from lock rules.
+
+## Safe recipes
+
+The planner emits the safe form whatever the table size seen at plan time:
+dev data says nothing about production size. "Short DDL" and "long DDL" are
+the step classes of [Apply guards](#apply-guards). A change kind without a
+recipe that the planner cannot make safe fails the plan with its lint code
+unless the schema object carries `@ratel.allow` for that code; then it is
+emitted as short DDL under the lock guards.
+
+**Indexes and constraints**
+
+| Change | Planned steps |
+|---|---|
+| create index, plain table | `CREATE INDEX CONCURRENTLY` (own statement); on resume an invalid leftover is dropped concurrently and rebuilt |
+| create index, partitioned table | `CREATE INDEX ... ON ONLY <parent>` (short DDL, index invalid), then per partition `CREATE INDEX CONCURRENTLY` and `ALTER INDEX <parent_idx> ATTACH PARTITION <part_idx>`; the parent index becomes valid when every partition is attached |
+| drop index, plain table | `DROP INDEX CONCURRENTLY` |
+| drop index, partitioned table | `DROP INDEX` as short DDL (metadata only; concurrent drop is not supported) |
+| change index definition | new index under a temporary name by the create recipe, drop of the old one by the drop recipe, `ALTER INDEX ... RENAME` (short DDL) |
+| add check | `ADD CONSTRAINT ... NOT VALID` (short DDL), then `VALIDATE CONSTRAINT` (long DDL) |
+| add FK, plain table; partitioned table on 18+ | `ADD CONSTRAINT ... NOT VALID`, then `VALIDATE CONSTRAINT` |
+| add FK, partitioned table on 16 and 17 | no safe recipe (PostgreSQL rejects `NOT VALID` there): `RTL-L04` |
+| add unique or primary key | `CREATE UNIQUE INDEX CONCURRENTLY` (btree, default ordering, plain columns, not partial), then `ADD CONSTRAINT ... USING INDEX` (short DDL); a primary key first gets `NOT NULL` on its columns by the not-null recipe, because `USING INDEX` would otherwise scan under an exclusive lock |
+| unique index, partitioned table | must include the partition key columns (else the schema is invalid); built by the partitioned index recipe |
+| unique or primary key constraint, partitioned table | `USING INDEX` is not supported on partitioned tables, so the constraint builds its index under a lock: `RTL-L05`; a unique index serves the same uniqueness safely |
+| set not null | 18+: `NOT NULL ... NOT VALID`, then validate; 16 and 17: `CHECK (col IS NOT NULL) NOT VALID`, validate, `SET NOT NULL` (skips the scan because of the validated check), drop the check |
+| exclusion constraint on an existing table | no safe recipe: `RTL-L09` |
+| drop constraint | short DDL in the contract phase |
+
+**Columns**
+
+| Change | Planned steps |
+|---|---|
+| add nullable column, column with a non-volatile default | short DDL |
+| add column with a volatile default, or `NOT NULL` without default | nullable column, backfill (`@ratel.backfill` required, else error), then the not-null recipe |
+| change type, no rewrite (probe) | short DDL |
+| change type with rewrite | expand: new column, sync trigger; backfill; contract: switch names, drop the old column and trigger (`@ratel.retype` required) |
+| rename | expand: new column, sync trigger, backfill; contract: drop the old column (`@ratel.renamed` required) |
+| drop column | short DDL in the contract phase (metadata only) |
+| set or drop default | short DDL |
+| identity: add, set options, drop | short DDL |
+| change generated expression, `VIRTUAL` (18+) | short DDL |
+| change generated expression, `STORED` | rewrites: handled as a type change with rewrite (new column) |
+
+**Tables, partitions, types, code objects**
+
+| Change | Planned steps |
+|---|---|
+| create table, sequence, type, function, view | short DDL in expand |
+| drop table, sequence, type | short DDL in the contract phase |
+| alter sequence | short DDL |
+| attach partition | the partition key gets `NOT NULL` and a validated `CHECK` matching the bound first (otherwise `ATTACH` scans under an exclusive lock), then `ATTACH` as short DDL; with a default partition the default is scanned under an exclusive lock: `RTL-L07` |
+| detach partition, no default partition | `DETACH PARTITION ... CONCURRENTLY` (long DDL) |
+| detach partition, default partition exists | concurrent detach is not supported: `DETACH PARTITION` as short DDL |
+| enum: add value | `ALTER TYPE ... ADD VALUE [BEFORE\|AFTER]` in its own step, committed before any step that uses the value (on 17+ not needed when the type is created in the same transaction) |
+| enum: rename value | `ALTER TYPE ... RENAME VALUE` (short DDL, `@ratel.renamed` on the value) |
+| enum: remove value | PostgreSQL has no way to drop a value: `RTL-D05`; written as a hand-written migration |
+| view, compatible change (columns only appended) | `CREATE OR REPLACE VIEW` (short DDL) |
+| view, incompatible change, or a function whose signature or return type changes | drop and recreate the object and every dependent view, function and policy (from `pg_depend`) in one transaction as short DDL |
+| function body change, same signature | `CREATE OR REPLACE FUNCTION` (short DDL) |
+| enable RLS | policies first, then `ENABLE ROW LEVEL SECURITY` |
+| create, alter, drop policy; disable RLS | short DDL |
+| grant, revoke | short DDL |
+
+There is no shadow-table rewrite (`pg_repack` style). Rewrites go through
+expand/contract or explicit permission.
+
+## Phases
+
+A plan has up to three phases, recorded per step:
+
+- **expand** adds: new tables, columns, indexes, constraints not yet
+  validated, sync triggers. Old and new application versions both work.
+- **backfill** fills data in batches (`@ratel.backfill`): `UPDATE ... WHERE pk
+  BETWEEN` in batches of `migrate.backfill.batch`, one transaction per batch,
+  pausing while replica lag exceeds `max_replica_lag`.
+- **contract** removes and tightens: drops of old columns, tables, triggers,
+  `SET NOT NULL`, validations that old code could violate.
+
+`ratel migrate apply` runs expand and backfill. `ratel migrate contract` runs
+contract; it is a separate command because only the operator knows when old
+application versions are gone. Changes are placed by `Compat`: `Safe` goes to
+expand; `Breaking` and every change with `Destroys != None` go to contract;
+`Conditional` (constraint tightening that existing rows or old code may
+violate) goes to contract, with its `NOT VALID` part in expand when the recipe
+has one.
+
+## Planned files
+
+`ratel migrate plan <name>` writes one file
+`<UTC timestamp YYYYMMDDHHMMSS>_<name>.sql` in the migrations directory; files
+apply in name order. Each step is a block with a header:
+
+```sql
+-- ratel:step id=9c1e4a2b phase=expand tx=own class=long locks=app.orders:ShareUpdateExclusive pg=18
+CREATE INDEX CONCURRENTLY orders_user_id_idx ON app.orders (user_id);
+```
+
+- Plans are static: reviewed in code review, checksummed in `ratel.sum`, and
+  applied exactly as written. Apply never chooses a strategy by live table
+  size.
+- `ratel.sum` holds a hash per file and a hash of the whole directory;
+  `ratel migrate verify` fails on any edit, reorder or missing file.
+- A step id is the hash of the file name and the step's normalized SQL.
+- A step header carries every `@ratel.allow` that the planner copied from the
+  schema object that caused the step. In hand-written files, `@ratel.allow`
+  is written in the comment directly before the statement.
+- There are no down migrations. Going back is a forward plan to an earlier
+  schema, through the same assessment and lint.
+
+## Apply guards
+
+Every step runs on a connection with `application_name = 'ratel-migrate'`. The
+run holds a session advisory lock on a dedicated connection, so two runs never
+overlap; the key is the 64-bit FNV-1a hash of the string `ratel.migrate` and
+the target database name. Each SQL statement is sent as its own protocol
+message; the runner itself issues `BEGIN`, `SET LOCAL` and `COMMIT`, so no
+statement ever runs inside an implicit multi-statement transaction.
+
+| Step class | Guards |
+|---|---|
+| short DDL (takes a blocking lock briefly) | pre-flight: no session holds a conflicting lock on the relation and no transaction is older than `long_tx_threshold`; otherwise wait without requesting the lock, polling on the retry schedule, bounded by `max_total_wait`; then `BEGIN; SET LOCAL lock_timeout; SET LOCAL statement_timeout; SET LOCAL TimeZone = 'UTC'; <ddl>; COMMIT`; on SQLSTATE `55P03` retry with the schedule and jitter, also bounded by `max_total_wait` |
+| long DDL (`CONCURRENTLY`, `VALIDATE`, `DETACH CONCURRENTLY`) | takes at most `ShareUpdateExclusive`; same pre-flight on old transactions; `lock_timeout = 0` with the run's deadline; on cancel the invalid leftover is dropped concurrently |
+| backfill | no DDL lock; batches as above |
+
+- When retries are exhausted the step **fails** and prints the blocking
+  sessions (pid, application, state, transaction age, query). There is no
+  final attempt without a timeout.
+- `transaction_timeout` (PostgreSQL 17+) bounds in-transaction steps.
+- Statements that cannot run in a transaction always run as their own step.
+
+## Journal and resume
+
+The first run creates schema `ratel` and the journal table:
+
+```sql
+CREATE TABLE ratel.migrations_journal (
+	step_id     text PRIMARY KEY,
+	file        text NOT NULL,
+	checksum    text NOT NULL,
+	phase       text NOT NULL CHECK (phase IN ('expand', 'backfill', 'contract')),
+	started_at  timestamptz NOT NULL,
+	finished_at timestamptz,
+	outcome     text CHECK (outcome IN ('done', 'failed')),
+	resume_key  text  -- backfill: last committed batch key
+);
+```
+
+A rerun skips completed steps and checks catalog guards before repeating an
+interrupted one:
+
+| Interrupted step | Guard and action |
+|---|---|
+| concurrent index build | `pg_index.indisvalid = false`: drop the leftover concurrently, rebuild |
+| validation | `pg_constraint.convalidated`: skip when already validated |
+| concurrent detach | `pg_inherits.inhdetachpending = true`: `ALTER TABLE ... DETACH PARTITION ... FINALIZE` |
+| create | object exists with the planned definition: skip; with another definition: fail |
+| backfill | resumes after `resume_key`, which every committed batch updates in the same transaction |
+
+## Data changes
+
+Hand-written migrations may change data only as backfill steps
+(`-- ratel:step phase=backfill`): batched by primary key, one transaction per
+batch, under the backfill guards. A set-based `UPDATE` or `DELETE` over a
+whole table in any other step fails lint with `RTL-T06`.
+
+## Lint
+
+Rules have stable codes `RTL-<area><nn>`: `L` locks, `R` rewrites, `D`
+destruction, `C` compatibility, `T` transaction structure, `P` practice.
+
+- A finding the planner fixed is reported in the plan and does not fail CI.
+- A finding it could not fix fails `ratel migrate lint` unless the step carries
+  `@ratel.allow <code> reason=<text>`.
+- Breaking changes in the expand phase fail lint the same way.
+- Hand-written migration files are analysed with the same rules through the
+  same `Safety` records.
+
+| Code | Finding |
+|---|---|
+| RTL-L01 | blocking lock on an existing table without lock-retry guard |
+| RTL-L02 | non-concurrent index build on an existing table |
+| RTL-L03 | non-concurrent index drop |
+| RTL-L04 | validation scan under a blocking lock (check, FK) |
+| RTL-L05 | unique or primary key built under an exclusive lock |
+| RTL-L06 | `SET NOT NULL` scan |
+| RTL-L07 | `ATTACH PARTITION` scan under an exclusive lock |
+| RTL-L08 | blocking `DETACH PARTITION` |
+| RTL-L09 | exclusion constraint on an existing table |
+| RTL-L10 | non-concurrent `REINDEX` |
+| RTL-R01 | rewrite from a volatile default, serial, identity or stored generated column |
+| RTL-R02 | type change rewrites the table |
+| RTL-R03 | rewrite by `SET LOGGED`, access method, tablespace, `CLUSTER`, `VACUUM FULL` |
+| RTL-R04 | type or collation change rebuilds indexes |
+| RTL-D01 | drops a table, column or schema |
+| RTL-D02 | `TRUNCATE` |
+| RTL-D03 | narrowing type change may lose data |
+| RTL-D04 | drops an index, constraint or default; hidden `CASCADE` dependents |
+| RTL-D05 | removes an enum value |
+| RTL-C01 | rename visible to running code |
+| RTL-C02 | drop of an object running code may still use |
+| RTL-C03 | new `NOT NULL` without default |
+| RTL-C04 | type change visible to prepared statements and scanners |
+| RTL-C05 | new enum value reaches old clients |
+| RTL-C06 | constraint tightening |
+| RTL-C07 | dropped default or dropped `NOT NULL` |
+| RTL-C08 | `ENABLE ROW LEVEL SECURITY` before policies |
+| RTL-T01 | statement that cannot run in a transaction inside one |
+| RTL-T02 | new enum value used in the same transaction (not reported on 17+ when the type is created in that transaction) |
+| RTL-T03 | slow work after an exclusive lock in the same transaction |
+| RTL-T04 | hand-written step without `lock_timeout` |
+| RTL-T05 | exclusive locks on several tables in one transaction |
+| RTL-T06 | data change outside a backfill step |
+| RTL-P01 | FK columns without a supporting index (also reported for ORM relations) |
+| RTL-P02 | `int4` primary key, `serial`, `timestamp` without time zone, `char(n)` |
+
+## Drift
+
+`ratel migrate drift` introspects the target and diffs it against the Catalog
+the applied migrations produce on the dev server. Any difference fails with the
+list of changes.
