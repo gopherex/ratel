@@ -128,15 +128,15 @@ func roundTripValue[T any](t *testing.T, pool *pgxpool.Pool, name string, value 
 	}
 }
 
-func valuePool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
+func valuePool(tb testing.TB) *pgxpool.Pool {
+	tb.Helper()
 
 	image := os.Getenv("RATEL_PG_IMAGE")
 	if image == "" {
 		image = defaultImage
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), containerWait)
+	ctx, cancel := context.WithTimeout(tb.Context(), containerWait)
 	defer cancel()
 
 	container, err := postgres.Run(ctx, image, testcontainers.WithWaitStrategy(
@@ -144,31 +144,31 @@ func valuePool(t *testing.T) *pgxpool.Pool {
 			WithOccurrence(2).WithStartupTimeout(containerWait),
 	))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), containerWait)
 		defer cleanupCancel()
 
 		if err := container.Terminate(cleanupCtx); err != nil {
-			t.Errorf("terminate PostgreSQL: %v", err)
+			tb.Errorf("terminate PostgreSQL: %v", err)
 		}
 	})
 
 	config, err := pgxpool.ParseConfig(container.MustConnectionString(ctx))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
 	config.AfterConnect = registerValues
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
-	t.Cleanup(pool.Close)
+	tb.Cleanup(pool.Close)
 
 	return pool
 }

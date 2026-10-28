@@ -139,6 +139,39 @@ Rules:
   package uses, then calls `ratel.RegisterValue[T](conn.TypeMap(), name)` for
   each Go/PostgreSQL mapping used by nullable or optional fields.
 
+### Descriptor construction
+
+Generated descriptors embed `ratel.Table[M]`, initialized with
+`ratel.NewTable(schema, table, columns, scan, options...)`. `columns` lists the
+PostgreSQL output names in scanner order. The generated
+`ratel.Scanner[M]` has signature `func(pgx.Row) (M, error)` and calls `Scan`
+with explicit model-field addresses. `ratel.NewCol[M, V](name)` and
+`ratel.NewNullCol[M, V](name)` construct its typed column fields. Columns
+refer to the current source's output names; the renderer binds and quotes its
+alias independently from the descriptor's physical schema.
+
+`ratel.PrimaryKey(columns, func(M) []any)` supplies the ordered primary-key
+columns and their generated field projection. These keys are non-null and
+unique. Views omit this option unless their result has a proven unique,
+non-null key. Static `NewQuery` sources carry no primary-key metadata and
+cannot use `Chunks`; a nested builder SELECT preserves its source's key.
+Constructor inputs are copied;
+descriptors and SELECT builders are immutable and can be shared concurrently.
+The caller must not mutate argument values (for example, bound slices) while
+an operation uses them, following pgx's argument ownership rules.
+
+A generated descriptor provides its own `InSchema(schema)` method: copy the
+whole descriptor, replace its embedded `Table` with `Table.InSchema(schema)`,
+and return that copy. This preserves the typed columns and relation fields.
+
+Generated static query `.Args(...)` methods return
+`ratel.NewQuery(columns, scan, sql, args...)`. SQL is trusted generated SQL
+with contiguous `$1..$n` parameters, no trailing statement delimiter, and
+schema-qualified physical table references. It is embedded unchanged; outer
+builder predicates continue parameter numbering. A builder SELECT itself
+also implements `ratel.Source[M]`, so `db.From(selectBuilder)` nests it while
+preserving its result model and scanner.
+
 ### Nullable and optional pgx values
 
 `ratel.RegisterValue[T](typeMap, name)` enables `Null[T]`, `Opt[T]` and
@@ -285,8 +318,31 @@ n, err := db.From(app.Users).Where(...).Count(ctx)
   (`app.Users.ManagerID.EqCol(app.Users.ID)` style column comparisons).
 - `Col[M, V]` has comparison, `In`, range and pattern operators typed by `V`;
   `NullCol[M, V]` adds `IsNull` and `IsNotNull`.
-- Terminals: `One` (`ErrNotFound`), `List` (slice), `All` (`iter.Seq2`),
+- Terminals: `One` (exactly one row; `ErrNotFound` for zero,
+  `ErrMultipleRows` for more than one), `First` (at most one row;
+  `ErrNotFound` for zero), `List` (slice), `All` (`iter.Seq2`),
   `Count`, `Exists`, and `Pluck(col)` with `List` and `All`.
+  `One` requests at most two rows; `First` requests at most one. Neither
+  increases an existing lower limit. Without `OrderBy`, `First` uses
+  PostgreSQL's unspecified row order. `List` returns a non-nil empty slice
+  for an empty result and no partial slice on failure. `All` is lazy, closes
+  its cursor on exhaustion, failure or early break, and yields an error once
+  with a zero model. Every terminal accepts per-call options after its
+  context argument.
+- `selectBuilder.SQL()` returns `(ratel.Statement, error)` without executing;
+  `Statement.SQL` is the SQL text and `Statement.Args` its ordered arguments.
+  Invalid metadata or negative pagination returns `ErrInvalidQuery` before
+  contacting the executor. Identifiers are always quoted; limit and offset
+  are numbered parameters, and zero limit means no rows.
+- Conditions support `Eq`, `Ne`, `Lt`, `Lte`, `Gt`, `Gte`, `In`, `NotIn`,
+  `Between`, `Like`, `NotLike` and `ILike`, with `And`, `Or` and `Not`
+  preserving grouping. Empty `In` is false; empty `NotIn` is true. The zero
+  `Cond` and `Cond2` are true. Nullable column comparisons take the underlying
+  value, not `Null[V]`, and follow SQL's three-valued logic. Repeated `Where`
+  clauses are conjoined; repeated `OrderBy` calls append ordering terms.
+  Column comparisons (`EqCol`, `NeCol`, `LtCol`, `LteCol`, `GtCol`, `GteCol`)
+  produce `Cond2[M, N]`; its `SQL(leftAlias, rightAlias)` binds independent
+  aliases. Even `Cond2[M, M]` is a join predicate, not a `Where` condition.
 - Projections into other shapes go through queries with `@ratel.row` or
   `@go.row` used as builder sources, or through `Pluck`.
 - Pagination: `Limit`, `Offset`, and keyset `After(cols, values)`.
@@ -346,6 +402,17 @@ active, err := db.From(app.Users).Where(app.Users.Orders.Has(app.Orders.Status.E
   the parent keys first, and loading per row would hold the cursor open. For
   streaming with relations it has `Chunks(ctx, n) iter.Seq2[[]M, error]`, which
   reads parents in keyset pages of `n` and loads relations per page.
+- A plain SELECT also exposes `Chunks(ctx, n)`. Pages use ascending composite
+  primary-key order and a row-value `>` cursor, never growing offsets. Each
+  page's cursor closes before the page is yielded, so a caller can safely run
+  another query on the same connection while consuming a page. The original
+  offset applies only to the first page; an original limit caps the total
+  number of models. An empty final page is not yielded. Nonpositive page sizes,
+  missing primary-key metadata and explicit ordering other than exactly the
+  ascending primary key return `ErrInvalidQuery` before execution. Custom or
+  nullable ordering is not silently replaced. Page reads observe separate
+  statement snapshots unless the supplied executor provides a transaction
+  with the desired isolation; concurrent writes can change later pages.
 - Writes per relation: `Create`, `Attach`, `Detach`, `Sync` on the relation
   descriptor, one statement each. `Sync` (make the set of linked children equal
   a given set) is one statement with data-modifying CTEs (`DELETE` of extra
@@ -358,7 +425,9 @@ active, err := db.From(app.Users).Where(app.Users.Orders.Has(app.Orders.Status.E
 
 | Error | Class | Meaning |
 |---|---|---|
-| `ratel.ErrNotFound` | expected refusal | `One` found no row |
+| `ratel.ErrNotFound` | expected refusal | `One` or `First` found no row |
+| `ratel.ErrMultipleRows` | expected refusal | `One` found more than one row |
+| `ratel.ErrInvalidQuery` | programming error | invalid descriptor, pagination or chunk ordering |
 | `ratel.ErrStaleVersion` | expected refusal | optimistic-locking predicate matched no row |
 | generated `Err<Constraint>` values, `*ratel.ConstraintError` | expected refusal | unique, FK, check, not-null or exclusion violation; carries kind, constraint, table, columns; matched with `errors.Is` and `errors.As` |
 | `ratel.ErrNotLoaded` | programming error | accessor of a relation that was not loaded |
@@ -384,7 +453,12 @@ refusal.
 
 Each terminal operation is one span; each relation loading step is a child
 span. Attributes follow the OpenTelemetry database conventions (system,
-operation, collection name). SQL arguments never go into spans.
+operation, collection name when the physical collection is known). SQL text,
+arguments and driver error messages never go into spans: driver errors can
+contain bound values. Technical read failures set the span status to error;
+expected empty or multiple-row outcomes do not. `Chunks` creates a parent
+operation span with a child span for each page read. Iterator spans end on
+exhaustion, failure or early break.
 
 ## Performance gates
 
@@ -393,3 +467,10 @@ operation, collection name). SQL arguments never go into spans.
   benchmark report.
 - Every builder and loader function with logic has a benchmark next to its
   test.
+- Run the real-driver comparisons from the repository root with
+  `go -C tests test -tags integration -run '^$' -bench 'Benchmark(ReadScan|Scanner)' -benchmem`.
+  `BenchmarkScanner` decodes the same real pgx row repeatedly, isolating
+  per-row scanning from network and query setup. `BenchmarkReadScan` compares
+  complete five-row slice reads, including SQL rendering and tracing on the
+  builder path. Both compare generated field-address scanning with direct
+  handwritten `Scan` calls and report allocations.
