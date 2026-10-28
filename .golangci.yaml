@@ -58,7 +58,8 @@ linters:
     - ineffassign
     - interfacebloat
     - intrange
-    - ireturn
+    # ireturn is off in this repo (ADAPT): a library implements foreign
+    # interfaces (pgtype.Codec) and returns interfaces by design.
     - lll
     - loggercheck
     - maintidx

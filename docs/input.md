@@ -42,7 +42,10 @@ annotations (below).
    (FKs, types, domains, sequences, functions used in defaults and checks) are
    resolved after all declarations are collected. FK cycles are allowed.
    *Check:* a property test builds the Catalog from random permutations of the
-   fixture files and compares the deterministic protobuf serialization.
+   fixture files and compares the deterministic protobuf serialization
+   byte for byte; for random permutations of the statements inside a file it
+   compares the serialization after clearing every `SourceSpan`, since spans
+   record the original positions.
 2. **Uniqueness.** Two declarations of the same object are an error that names
    both positions (`file:line:column`).
 3. **Resolution.** A reference to an object that is declared nowhere in the set

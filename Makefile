@@ -52,16 +52,16 @@ lint: ## Lint every module of go.work
 test: ## Run unit tests (-race) in every module
 	for m in $(MODULES); do
 		echo ">> test $$m"
-		( cd $$m && GOWORK=off $(GO) test -race ./... )
+		( cd $$m && $(GO) test -race ./... )
 	done
 
 test-integration: ## Run the integration suite in tests/ (needs Docker; RATEL_PG_IMAGE overrides the image, default postgres:18-alpine)
-	( cd tests && GOWORK=off $(GO) test -tags integration ./... )
+	( cd tests && $(GO) test -tags integration ./... )
 
 bench: ## Run every benchmark in every module
 	for m in $(MODULES); do
 		echo ">> bench $$m"
-		( cd $$m && GOWORK=off $(GO) test -run '^$$' -bench . -benchmem ./... )
+		( cd $$m && $(GO) test -run '^$$' -bench . -benchmem ./... )
 	done
 
 proto: ## Generate Go from proto/ (needs protoc-gen-go on PATH; no-op until .proto files exist)
