@@ -112,10 +112,30 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 			s.use(file, value.typ, value.goType, value.nullable || value.insert == insertOptional)
 		}
 
-		writeModel(file, names, columns)
+		edges := s.edges(table)
+		if err := checkEdges(names, columns, edges); err != nil {
+			return err
+		}
+
+		relations := make([]relationDecl, 0, len(edges))
+		for _, value := range edges {
+			relations = append(relations, relationDecl{
+				name: value.name, target: s.targetModel(file, value.target),
+				value: s.relationField(file, names, columns, value),
+			})
+		}
+
+		writeModel(file, names, columns, len(edges) > 0)
+
+		if len(edges) > 0 {
+			if err := s.writeRelations(file, names, edges); err != nil {
+				return err
+			}
+		}
+
 		writeScanner(file, names, columns)
 		writeInsert(file, names, columns)
-		writeDescriptor(file, schema.GetName(), object, names, columns, table)
+		writeDescriptor(file, schema.GetName(), object, names, columns, table, relations)
 
 		if err := writeConstraints(file, schema.GetName(), object, names, table); err != nil {
 			return err
@@ -127,15 +147,20 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 
 // identifiers are a table's generated Go names.
 type identifiers struct {
-	table, model, insert, descriptor, descriptorType, scanner, constructor string
+	table, model, insert, descriptor, descriptorType, base, scanner, constructor string
 }
+
+// relationDecl is a descriptor relation field: its name, target model and
+// NewRel expression.
+type relationDecl struct{ name, target, value string }
 
 func tableNames(table string) identifiers {
 	model := singular(table)
 
 	return identifiers{
 		table: table, model: model, insert: model + "Insert", descriptor: plural(table),
-		descriptorType: camel(plural(table)) + "Table", scanner: "scan" + model, constructor: "New" + model + "Insert",
+		descriptorType: camel(plural(table)) + "Table", base: camel(plural(table)) + "Base",
+		scanner: "scan" + model, constructor: "New" + model + "Insert",
 	}
 }
 
@@ -144,15 +169,19 @@ func (n identifiers) all() map[string]string {
 
 	return map[string]string{
 		n.model: source, n.insert: source, n.descriptor: source, n.descriptorType: source,
-		n.scanner: source, n.constructor: source,
+		n.base: source, n.scanner: source, n.constructor: source,
 	}
 }
 
-func writeModel(file *unit, names identifiers, columns []column) {
+func writeModel(file *unit, names identifiers, columns []column, related bool) {
 	file.printf("// %s is a row of %s.\ntype %s struct {\n", names.model, names.table, names.model)
 
 	for _, value := range columns {
 		file.printf("\t%s %s\n", value.field, value.modelType(file))
+	}
+
+	if related {
+		file.printf("\tR %s\n", relationsType(names.model))
 	}
 
 	file.printf("}\n\n")

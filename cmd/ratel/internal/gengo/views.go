@@ -29,7 +29,7 @@ func (s *state) view(file *unit, schema string, name *ir.QualifiedName, output [
 	names := tableNames(object)
 
 	for identifier := range names.all() {
-		if identifier == names.insert || identifier == names.constructor {
+		if identifier == names.insert || identifier == names.constructor || identifier == names.base {
 			continue
 		}
 
@@ -55,7 +55,7 @@ func (s *state) view(file *unit, schema string, name *ir.QualifiedName, output [
 	}
 
 	file.imports = append(file.imports, ratelImport, "github.com/jackc/pgx/v5")
-	writeModel(file, names, columns)
+	writeModel(file, names, columns, false)
 	writeScanner(file, names, columns)
 
 	outputs := make([]string, 0, len(columns))

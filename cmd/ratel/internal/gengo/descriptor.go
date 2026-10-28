@@ -27,17 +27,21 @@ func quotedList(values []string) string {
 	return "[]string{" + strings.Join(quoted, ", ") + "}"
 }
 
-func writeDescriptor(file *unit, schema, table string, names identifiers, columns []column, source *ir.Table) {
+// writeDescriptor writes the table's base WriteTable and its descriptor.
+// Relations reference the base of their target, so mutually related tables
+// form no initialization cycle.
+func writeDescriptor(file *unit, schema, table string, names identifiers, columns []column, source *ir.Table,
+	relations []relationDecl,
+) {
 	outputs := make([]string, 0, len(columns))
 	for _, value := range columns {
 		outputs = append(outputs, value.name)
 	}
 
-	file.printf("// %s describes %s.%s.\nvar %s = %s{\n\tWriteTable: ratel.NewWriteTable(\n", names.descriptor,
-		schema, table, names.descriptor, names.descriptorType)
-	file.printf("\t\tratel.NewTable(%s, %s, %s, %s%s),\n", strconv.Quote(schema), strconv.Quote(table),
+	file.printf("var %s = ratel.NewWriteTable(\n", names.base)
+	file.printf("\tratel.NewTable(%s, %s, %s, %s%s),\n", strconv.Quote(schema), strconv.Quote(table),
 		quotedList(outputs), names.scanner, tableOptions(names, columns, source))
-	file.printf("\t\tfunc(insert %s) bool { return insert.valid },\n", names.insert)
+	file.printf("\tfunc(insert %s) bool { return insert.valid },\n", names.insert)
 
 	for _, value := range columns {
 		if value.insert != insertOmitted {
@@ -45,17 +49,26 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 		}
 	}
 
-	file.printf("\t),\n")
+	file.printf(")\n\n// %s describes %s.%s.\nvar %s = %s{\n\tWriteTable: %s,\n", names.descriptor,
+		schema, table, names.descriptor, names.descriptorType, names.base)
 
 	for _, value := range columns {
 		file.printf("\t%s: ratel.%s[%s, %s](%s),\n", value.field, columnKind(value), names.model,
 			file.use(value.goType), strconv.Quote(value.name))
 	}
 
+	for _, value := range relations {
+		file.printf("\t%s: %s,\n", value.name, value.value)
+	}
+
 	file.printf("}\n\ntype %s struct {\n\tratel.WriteTable[%s, %s]\n", names.descriptorType, names.model, names.insert)
 
 	for _, value := range columns {
 		file.printf("\t%s ratel.%s[%s, %s]\n", value.field, columnKind(value)[3:], names.model, file.use(value.goType))
+	}
+
+	for _, value := range relations {
+		file.printf("\t%s ratel.Rel[%s, %s]\n", value.name, names.model, value.target)
 	}
 
 	file.printf("}\n\n// InSchema is the descriptor for a copy of %s in another schema.\n", table)

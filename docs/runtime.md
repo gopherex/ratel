@@ -496,6 +496,17 @@ A loaded to-many value is a non-nil slice, including when empty. A loaded
 missing to-one value is nil without an error. A loaded count can be zero;
 requesting a count does not mark the corresponding models as loaded.
 
+Every catalog `Relation` with a name becomes a field of the descriptor on its
+`from` table and, with its inverse name, on its `to` table; a to-many edge also
+gets a `<Singular>Count` field. A relation whose target has no primary key is
+not generated. A relation between tables of different schemas exists only on
+the foreign-key side, and a many-to-many relation only when both tables and the
+join table share a schema: the inverse would make the packages import each
+other. A relation name that collides with a model field, `R` or another
+relation is a generation error. Each table has an unexported base
+`WriteTable` (`<descriptor>Base`) without relations; relations target bases, so
+mutually related descriptors form no initialization cycle.
+
 Generated descriptors construct each edge with
 `NewRel(target, cardinality, keys, attach, options...)`:
 

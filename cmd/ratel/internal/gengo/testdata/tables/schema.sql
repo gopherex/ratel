@@ -16,4 +16,15 @@ CREATE TABLE app.users (
   profile jsonb,
   doubled bigint GENERATED ALWAYS AS (id * 2) STORED
 );
+CREATE TABLE app.orders (
+  id bigint PRIMARY KEY,
+  user_id bigint NOT NULL REFERENCES app.users (id),
+  total numeric(12, 2) NOT NULL
+);
+CREATE TABLE app.tags (id int PRIMARY KEY, label text NOT NULL);
+CREATE TABLE app.order_tags (
+  order_id bigint REFERENCES app.orders (id),
+  tag_id int REFERENCES app.tags (id),
+  PRIMARY KEY (order_id, tag_id)
+);
 CREATE VIEW app.active_users AS SELECT id, email, home FROM app.users WHERE status = 'active';

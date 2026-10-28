@@ -32,6 +32,488 @@ type Address struct {
 	Zip    ratel.Null[string] `db:"zip"`
 }
 
+// OrderTag is a row of order_tags.
+type OrderTag struct {
+	OrderID int64
+	TagID   int32
+	R       OrderTagRelations
+}
+
+// OrderTagRelations holds the loaded relations of a OrderTag.
+type OrderTagRelations struct {
+	Order ratel.Loaded[*Order]
+	Tag   ratel.Loaded[*Tag]
+}
+
+// Order is the loaded Order relation; ratel.ErrNotLoaded unless requested.
+func (m *OrderTag) Order() (*Order, error) { return m.R.Order.Get() }
+
+// Tag is the loaded Tag relation; ratel.ErrNotLoaded unless requested.
+func (m *OrderTag) Tag() (*Tag, error) { return m.R.Tag.Get() }
+
+func scanOrderTag(row pgx.Row) (OrderTag, error) {
+	var model OrderTag
+
+	err := row.Scan(&model.OrderID, &model.TagID)
+
+	return model, err
+}
+
+// OrderTagInsert is the input of an insert into order_tags. Construct it with NewOrderTagInsert.
+type OrderTagInsert struct {
+	orderID int64
+	tagID   int32
+	valid   bool
+}
+
+// NewOrderTagInsert sets the columns without a default.
+func NewOrderTagInsert(orderID int64, tagID int32) OrderTagInsert {
+	return OrderTagInsert{orderID: orderID, tagID: tagID, valid: true}
+}
+
+var orderTagsBase = ratel.NewWriteTable(
+	ratel.NewTable("app", "order_tags", []string{"order_id", "tag_id"}, scanOrderTag,
+		ratel.PrimaryKey([]string{"order_id", "tag_id"}, func(model OrderTag) []any { return []any{model.OrderID, model.TagID} }),
+		ratel.Constraints[OrderTag](
+			ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "order_tags", Constraint: "order_tags_order_id_fkey", Columns: []string{"order_id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "order_tags", Constraint: "order_tags_order_id_not_null", Columns: []string{"order_id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "order_tags", Constraint: "order_tags_pkey", Columns: []string{"order_id", "tag_id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "order_tags", Constraint: "order_tags_tag_id_fkey", Columns: []string{"tag_id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "order_tags", Constraint: "order_tags_tag_id_not_null", Columns: []string{"tag_id"}},
+		)),
+	func(insert OrderTagInsert) bool { return insert.valid },
+	ratel.InsertField[OrderTagInsert]{
+		Name: "order_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Value: func(insert OrderTagInsert) (any, bool) { return insert.orderID, true },
+		Values: func(rows []OrderTagInsert) any {
+			out := make([]int64, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.orderID
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[OrderTagInsert]{
+		Name: "tag_id", Type: pgx.Identifier{"pg_catalog", "int4"},
+		Value: func(insert OrderTagInsert) (any, bool) { return insert.tagID, true },
+		Values: func(rows []OrderTagInsert) any {
+			out := make([]int32, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.tagID
+			}
+
+			return out
+		},
+	},
+)
+
+// OrderTags describes app.order_tags.
+var OrderTags = orderTagsTable{
+	WriteTable: orderTagsBase,
+	OrderID:    ratel.NewCol[OrderTag, int64]("order_id"),
+	TagID:      ratel.NewCol[OrderTag, int32]("tag_id"),
+	Order: ratel.NewRel[OrderTag, Order](ordersBase, ratel.RelOne,
+		[]ratel.RelKey[OrderTag]{{
+			Column: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Values: func(models []OrderTag) any {
+				out := make([]int64, len(models))
+				for index, model := range models {
+					out[index] = model.OrderID
+				}
+
+				return out
+			},
+		}},
+		func(model *OrderTag, children []Order) {
+			var value *Order
+			if len(children) > 0 {
+				value = &children[0]
+			}
+
+			model.R.Order = ratel.LoadedFrom(value)
+		}),
+	Tag: ratel.NewRel[OrderTag, Tag](tagsBase, ratel.RelOne,
+		[]ratel.RelKey[OrderTag]{{
+			Column: "id", Type: pgx.Identifier{"pg_catalog", "int4"},
+			Values: func(models []OrderTag) any {
+				out := make([]int32, len(models))
+				for index, model := range models {
+					out[index] = model.TagID
+				}
+
+				return out
+			},
+		}},
+		func(model *OrderTag, children []Tag) {
+			var value *Tag
+			if len(children) > 0 {
+				value = &children[0]
+			}
+
+			model.R.Tag = ratel.LoadedFrom(value)
+		}),
+}
+
+type orderTagsTable struct {
+	ratel.WriteTable[OrderTag, OrderTagInsert]
+	OrderID ratel.Col[OrderTag, int64]
+	TagID   ratel.Col[OrderTag, int32]
+	Order   ratel.Rel[OrderTag, Order]
+	Tag     ratel.Rel[OrderTag, Tag]
+}
+
+// InSchema is the descriptor for a copy of order_tags in another schema.
+func (t orderTagsTable) InSchema(schema string) orderTagsTable {
+	t.WriteTable = t.WriteTable.InSchema(schema)
+
+	return t
+}
+
+// ErrOrderTagsOrderIDFkey matches a violation of order_tags_order_id_fkey on app.order_tags.
+var ErrOrderTagsOrderIDFkey = &ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "order_tags", Constraint: "order_tags_order_id_fkey", Columns: []string{"order_id"}}
+
+// ErrOrderTagsOrderIDNotNull matches a violation of order_tags_order_id_not_null on app.order_tags.
+var ErrOrderTagsOrderIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "order_tags", Constraint: "order_tags_order_id_not_null", Columns: []string{"order_id"}}
+
+// ErrOrderTagsPkey matches a violation of order_tags_pkey on app.order_tags.
+var ErrOrderTagsPkey = &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "order_tags", Constraint: "order_tags_pkey", Columns: []string{"order_id", "tag_id"}}
+
+// ErrOrderTagsTagIDFkey matches a violation of order_tags_tag_id_fkey on app.order_tags.
+var ErrOrderTagsTagIDFkey = &ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "order_tags", Constraint: "order_tags_tag_id_fkey", Columns: []string{"tag_id"}}
+
+// ErrOrderTagsTagIDNotNull matches a violation of order_tags_tag_id_not_null on app.order_tags.
+var ErrOrderTagsTagIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "order_tags", Constraint: "order_tags_tag_id_not_null", Columns: []string{"tag_id"}}
+
+// Order is a row of orders.
+type Order struct {
+	ID     int64
+	UserID int64
+	Total  decimal.Decimal
+	R      OrderRelations
+}
+
+// OrderRelations holds the loaded relations of a Order.
+type OrderRelations struct {
+	OrderTags     ratel.Loaded[[]OrderTag]
+	OrderTagCount ratel.Loaded[int64]
+	Tags          ratel.Loaded[[]Tag]
+	TagCount      ratel.Loaded[int64]
+	User          ratel.Loaded[*User]
+}
+
+// OrderTags is the loaded OrderTags relation; ratel.ErrNotLoaded unless requested.
+func (m *Order) OrderTags() ([]OrderTag, error) { return m.R.OrderTags.Get() }
+
+// Tags is the loaded Tags relation; ratel.ErrNotLoaded unless requested.
+func (m *Order) Tags() ([]Tag, error) { return m.R.Tags.Get() }
+
+// User is the loaded User relation; ratel.ErrNotLoaded unless requested.
+func (m *Order) User() (*User, error) { return m.R.User.Get() }
+
+func scanOrder(row pgx.Row) (Order, error) {
+	var model Order
+
+	err := row.Scan(&model.ID, &model.UserID, &model.Total)
+
+	return model, err
+}
+
+// OrderInsert is the input of an insert into orders. Construct it with NewOrderInsert.
+type OrderInsert struct {
+	id     int64
+	userID int64
+	total  decimal.Decimal
+	valid  bool
+}
+
+// NewOrderInsert sets the columns without a default.
+func NewOrderInsert(id int64, userID int64, total decimal.Decimal) OrderInsert {
+	return OrderInsert{id: id, userID: userID, total: total, valid: true}
+}
+
+var ordersBase = ratel.NewWriteTable(
+	ratel.NewTable("app", "orders", []string{"id", "user_id", "total"}, scanOrder,
+		ratel.PrimaryKey([]string{"id"}, func(model Order) []any { return []any{model.ID} }),
+		ratel.Constraints[Order](
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_id_not_null", Columns: []string{"id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "orders", Constraint: "orders_pkey", Columns: []string{"id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_total_not_null", Columns: []string{"total"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "orders", Constraint: "orders_user_id_fkey", Columns: []string{"user_id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_user_id_not_null", Columns: []string{"user_id"}},
+		)),
+	func(insert OrderInsert) bool { return insert.valid },
+	ratel.InsertField[OrderInsert]{
+		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Value: func(insert OrderInsert) (any, bool) { return insert.id, true },
+		Values: func(rows []OrderInsert) any {
+			out := make([]int64, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.id
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[OrderInsert]{
+		Name: "user_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Value: func(insert OrderInsert) (any, bool) { return insert.userID, true },
+		Values: func(rows []OrderInsert) any {
+			out := make([]int64, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.userID
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[OrderInsert]{
+		Name: "total", Type: pgx.Identifier{"pg_catalog", "numeric"},
+		Value: func(insert OrderInsert) (any, bool) { return insert.total, true },
+		Values: func(rows []OrderInsert) any {
+			out := make([]decimal.Decimal, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.total
+			}
+
+			return out
+		},
+	},
+)
+
+// Orders describes app.orders.
+var Orders = ordersTable{
+	WriteTable: ordersBase,
+	ID:         ratel.NewCol[Order, int64]("id"),
+	UserID:     ratel.NewCol[Order, int64]("user_id"),
+	Total:      ratel.NewCol[Order, decimal.Decimal]("total"),
+	OrderTags: ratel.NewRel[Order, OrderTag](orderTagsBase, ratel.RelMany,
+		[]ratel.RelKey[Order]{{
+			Column: "order_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Values: func(models []Order) any {
+				out := make([]int64, len(models))
+				for index, model := range models {
+					out[index] = model.ID
+				}
+
+				return out
+			},
+		}},
+		func(model *Order, children []OrderTag) {
+			model.R.OrderTags = ratel.LoadedFrom(children)
+		},
+		ratel.RelCount[Order, OrderTag](func(model *Order, count int64) { model.R.OrderTagCount = ratel.LoadedFrom(count) })),
+	Tags: ratel.NewRel[Order, Tag](tagsBase, ratel.RelMany,
+		[]ratel.RelKey[Order]{{
+			Column: "order_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Values: func(models []Order) any {
+				out := make([]int64, len(models))
+				for index, model := range models {
+					out[index] = model.ID
+				}
+
+				return out
+			},
+		}},
+		func(model *Order, children []Tag) {
+			model.R.Tags = ratel.LoadedFrom(children)
+		},
+		ratel.RelCount[Order, Tag](func(model *Order, count int64) { model.R.TagCount = ratel.LoadedFrom(count) }),
+		ratel.Through[Order, Tag]("app", "order_tags", "tag_id")),
+	User: ratel.NewRel[Order, User](usersBase, ratel.RelOne,
+		[]ratel.RelKey[Order]{{
+			Column: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Values: func(models []Order) any {
+				out := make([]int64, len(models))
+				for index, model := range models {
+					out[index] = model.UserID
+				}
+
+				return out
+			},
+		}},
+		func(model *Order, children []User) {
+			var value *User
+			if len(children) > 0 {
+				value = &children[0]
+			}
+
+			model.R.User = ratel.LoadedFrom(value)
+		}),
+}
+
+type ordersTable struct {
+	ratel.WriteTable[Order, OrderInsert]
+	ID        ratel.Col[Order, int64]
+	UserID    ratel.Col[Order, int64]
+	Total     ratel.Col[Order, decimal.Decimal]
+	OrderTags ratel.Rel[Order, OrderTag]
+	Tags      ratel.Rel[Order, Tag]
+	User      ratel.Rel[Order, User]
+}
+
+// InSchema is the descriptor for a copy of orders in another schema.
+func (t ordersTable) InSchema(schema string) ordersTable {
+	t.WriteTable = t.WriteTable.InSchema(schema)
+
+	return t
+}
+
+// ErrOrdersIDNotNull matches a violation of orders_id_not_null on app.orders.
+var ErrOrdersIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_id_not_null", Columns: []string{"id"}}
+
+// ErrOrdersPkey matches a violation of orders_pkey on app.orders.
+var ErrOrdersPkey = &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "orders", Constraint: "orders_pkey", Columns: []string{"id"}}
+
+// ErrOrdersTotalNotNull matches a violation of orders_total_not_null on app.orders.
+var ErrOrdersTotalNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_total_not_null", Columns: []string{"total"}}
+
+// ErrOrdersUserIDFkey matches a violation of orders_user_id_fkey on app.orders.
+var ErrOrdersUserIDFkey = &ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "orders", Constraint: "orders_user_id_fkey", Columns: []string{"user_id"}}
+
+// ErrOrdersUserIDNotNull matches a violation of orders_user_id_not_null on app.orders.
+var ErrOrdersUserIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_user_id_not_null", Columns: []string{"user_id"}}
+
+// Tag is a row of tags.
+type Tag struct {
+	ID    int32
+	Label string
+	R     TagRelations
+}
+
+// TagRelations holds the loaded relations of a Tag.
+type TagRelations struct {
+	Orders        ratel.Loaded[[]Order]
+	OrderCount    ratel.Loaded[int64]
+	OrderTags     ratel.Loaded[[]OrderTag]
+	OrderTagCount ratel.Loaded[int64]
+}
+
+// Orders is the loaded Orders relation; ratel.ErrNotLoaded unless requested.
+func (m *Tag) Orders() ([]Order, error) { return m.R.Orders.Get() }
+
+// OrderTags is the loaded OrderTags relation; ratel.ErrNotLoaded unless requested.
+func (m *Tag) OrderTags() ([]OrderTag, error) { return m.R.OrderTags.Get() }
+
+func scanTag(row pgx.Row) (Tag, error) {
+	var model Tag
+
+	err := row.Scan(&model.ID, &model.Label)
+
+	return model, err
+}
+
+// TagInsert is the input of an insert into tags. Construct it with NewTagInsert.
+type TagInsert struct {
+	id    int32
+	label string
+	valid bool
+}
+
+// NewTagInsert sets the columns without a default.
+func NewTagInsert(id int32, label string) TagInsert {
+	return TagInsert{id: id, label: label, valid: true}
+}
+
+var tagsBase = ratel.NewWriteTable(
+	ratel.NewTable("app", "tags", []string{"id", "label"}, scanTag,
+		ratel.PrimaryKey([]string{"id"}, func(model Tag) []any { return []any{model.ID} }),
+		ratel.Constraints[Tag](
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_id_not_null", Columns: []string{"id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_label_not_null", Columns: []string{"label"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "tags", Constraint: "tags_pkey", Columns: []string{"id"}},
+		)),
+	func(insert TagInsert) bool { return insert.valid },
+	ratel.InsertField[TagInsert]{
+		Name: "id", Type: pgx.Identifier{"pg_catalog", "int4"},
+		Value: func(insert TagInsert) (any, bool) { return insert.id, true },
+		Values: func(rows []TagInsert) any {
+			out := make([]int32, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.id
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[TagInsert]{
+		Name: "label", Type: pgx.Identifier{"pg_catalog", "text"},
+		Value: func(insert TagInsert) (any, bool) { return insert.label, true },
+		Values: func(rows []TagInsert) any {
+			out := make([]string, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.label
+			}
+
+			return out
+		},
+	},
+)
+
+// Tags describes app.tags.
+var Tags = tagsTable{
+	WriteTable: tagsBase,
+	ID:         ratel.NewCol[Tag, int32]("id"),
+	Label:      ratel.NewCol[Tag, string]("label"),
+	Orders: ratel.NewRel[Tag, Order](ordersBase, ratel.RelMany,
+		[]ratel.RelKey[Tag]{{
+			Column: "tag_id", Type: pgx.Identifier{"pg_catalog", "int4"},
+			Values: func(models []Tag) any {
+				out := make([]int32, len(models))
+				for index, model := range models {
+					out[index] = model.ID
+				}
+
+				return out
+			},
+		}},
+		func(model *Tag, children []Order) {
+			model.R.Orders = ratel.LoadedFrom(children)
+		},
+		ratel.RelCount[Tag, Order](func(model *Tag, count int64) { model.R.OrderCount = ratel.LoadedFrom(count) }),
+		ratel.Through[Tag, Order]("app", "order_tags", "order_id")),
+	OrderTags: ratel.NewRel[Tag, OrderTag](orderTagsBase, ratel.RelMany,
+		[]ratel.RelKey[Tag]{{
+			Column: "tag_id", Type: pgx.Identifier{"pg_catalog", "int4"},
+			Values: func(models []Tag) any {
+				out := make([]int32, len(models))
+				for index, model := range models {
+					out[index] = model.ID
+				}
+
+				return out
+			},
+		}},
+		func(model *Tag, children []OrderTag) {
+			model.R.OrderTags = ratel.LoadedFrom(children)
+		},
+		ratel.RelCount[Tag, OrderTag](func(model *Tag, count int64) { model.R.OrderTagCount = ratel.LoadedFrom(count) })),
+}
+
+type tagsTable struct {
+	ratel.WriteTable[Tag, TagInsert]
+	ID        ratel.Col[Tag, int32]
+	Label     ratel.Col[Tag, string]
+	Orders    ratel.Rel[Tag, Order]
+	OrderTags ratel.Rel[Tag, OrderTag]
+}
+
+// InSchema is the descriptor for a copy of tags in another schema.
+func (t tagsTable) InSchema(schema string) tagsTable {
+	t.WriteTable = t.WriteTable.InSchema(schema)
+
+	return t
+}
+
+// ErrTagsIDNotNull matches a violation of tags_id_not_null on app.tags.
+var ErrTagsIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_id_not_null", Columns: []string{"id"}}
+
+// ErrTagsLabelNotNull matches a violation of tags_label_not_null on app.tags.
+var ErrTagsLabelNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_label_not_null", Columns: []string{"label"}}
+
+// ErrTagsPkey matches a violation of tags_pkey on app.tags.
+var ErrTagsPkey = &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "tags", Constraint: "tags_pkey", Columns: []string{"id"}}
+
 // User is a row of users.
 type User struct {
 	ID        int64
@@ -45,7 +527,26 @@ type User struct {
 	CreatedAt time.Time
 	Profile   ratel.Null[doc.Profile]
 	Doubled   ratel.Null[int64]
+	R         UserRelations
 }
+
+// UserRelations holds the loaded relations of a User.
+type UserRelations struct {
+	Orders     ratel.Loaded[[]Order]
+	OrderCount ratel.Loaded[int64]
+	Manager    ratel.Loaded[*User]
+	Users      ratel.Loaded[[]User]
+	UserCount  ratel.Loaded[int64]
+}
+
+// Orders is the loaded Orders relation; ratel.ErrNotLoaded unless requested.
+func (m *User) Orders() ([]Order, error) { return m.R.Orders.Get() }
+
+// Manager is the loaded Manager relation; ratel.ErrNotLoaded unless requested.
+func (m *User) Manager() (*User, error) { return m.R.Manager.Get() }
+
+// Users is the loaded Users relation; ratel.ErrNotLoaded unless requested.
+func (m *User) Users() ([]User, error) { return m.R.Users.Get() }
 
 func scanUser(row pgx.Row) (User, error) {
 	var model User
@@ -75,148 +576,202 @@ func NewUserInsert(email Email, status UserStatus) UserInsert {
 	return UserInsert{email: email, status: status, valid: true}
 }
 
+var usersBase = ratel.NewWriteTable(
+	ratel.NewTable("app", "users", []string{"id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanUser,
+		ratel.PrimaryKey([]string{"id"}, func(model User) []any { return []any{model.ID} }),
+		ratel.Constraints[User](
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_balance_not_null", Columns: []string{"balance"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_created_at_not_null", Columns: []string{"created_at"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "users", Constraint: "users_email_key", Columns: []string{"email"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_email_not_null", Columns: []string{"email"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_id_not_null", Columns: []string{"id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "users", Constraint: "users_manager_id_fkey", Columns: []string{"manager_id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "users", Constraint: "users_pkey", Columns: []string{"id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_status_not_null", Columns: []string{"status"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_tags_not_null", Columns: []string{"tags"}},
+		)),
+	func(insert UserInsert) bool { return insert.valid },
+	ratel.InsertField[UserInsert]{
+		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Value: func(insert UserInsert) (any, bool) { return insert.ID.V, insert.ID.Set },
+		Values: func(rows []UserInsert) any {
+			out := make([]int64, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.ID.V
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "email", Type: pgx.Identifier{"app", "email"},
+		Value: func(insert UserInsert) (any, bool) { return insert.email, true },
+		Values: func(rows []UserInsert) any {
+			out := make([]Email, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.email
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "status", Type: pgx.Identifier{"app", "user_status"},
+		Value: func(insert UserInsert) (any, bool) { return insert.status, true },
+		Values: func(rows []UserInsert) any {
+			out := make([]UserStatus, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.status
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Value: func(insert UserInsert) (any, bool) { return insert.ManagerID, true },
+		Values: func(rows []UserInsert) any {
+			out := make([]*int64, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.ManagerID.Ptr()
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "balance", Type: pgx.Identifier{"pg_catalog", "numeric"},
+		Value: func(insert UserInsert) (any, bool) { return insert.Balance.V, insert.Balance.Set },
+		Values: func(rows []UserInsert) any {
+			out := make([]decimal.Decimal, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.Balance.V
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "tags", Type: pgx.Identifier{"pg_catalog", "text"},
+		Value: func(insert UserInsert) (any, bool) { return insert.Tags.V, insert.Tags.Set },
+		Array: true,
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "home", Type: pgx.Identifier{"app", "address"},
+		Value: func(insert UserInsert) (any, bool) { return insert.Home, true },
+		Values: func(rows []UserInsert) any {
+			out := make([]*Address, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.Home.Ptr()
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "type", Type: pgx.Identifier{"pg_catalog", "text"},
+		Value: func(insert UserInsert) (any, bool) { return insert.Type, true },
+		Values: func(rows []UserInsert) any {
+			out := make([]*string, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.Type.Ptr()
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "created_at", Type: pgx.Identifier{"pg_catalog", "timestamptz"},
+		Value: func(insert UserInsert) (any, bool) { return insert.CreatedAt.V, insert.CreatedAt.Set },
+		Values: func(rows []UserInsert) any {
+			out := make([]time.Time, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.CreatedAt.V
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[UserInsert]{
+		Name: "profile", Type: pgx.Identifier{"pg_catalog", "jsonb"},
+		Value: func(insert UserInsert) (any, bool) { return insert.Profile, true },
+		Values: func(rows []UserInsert) any {
+			out := make([]*doc.Profile, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.Profile.Ptr()
+			}
+
+			return out
+		},
+	},
+)
+
 // Users describes app.users.
 var Users = usersTable{
-	WriteTable: ratel.NewWriteTable(
-		ratel.NewTable("app", "users", []string{"id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanUser,
-			ratel.PrimaryKey([]string{"id"}, func(model User) []any { return []any{model.ID} }),
-			ratel.Constraints[User](
-				ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_balance_not_null", Columns: []string{"balance"}},
-				ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_created_at_not_null", Columns: []string{"created_at"}},
-				ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "users", Constraint: "users_email_key", Columns: []string{"email"}},
-				ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_email_not_null", Columns: []string{"email"}},
-				ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_id_not_null", Columns: []string{"id"}},
-				ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "users", Constraint: "users_manager_id_fkey", Columns: []string{"manager_id"}},
-				ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "users", Constraint: "users_pkey", Columns: []string{"id"}},
-				ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_status_not_null", Columns: []string{"status"}},
-				ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_tags_not_null", Columns: []string{"tags"}},
-			)),
-		func(insert UserInsert) bool { return insert.valid },
-		ratel.InsertField[UserInsert]{
-			Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
-			Value: func(insert UserInsert) (any, bool) { return insert.ID.V, insert.ID.Set },
-			Values: func(rows []UserInsert) any {
-				out := make([]int64, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.ID.V
+	WriteTable: usersBase,
+	ID:         ratel.NewCol[User, int64]("id"),
+	Email:      ratel.NewCol[User, Email]("email"),
+	Status:     ratel.NewCol[User, UserStatus]("status"),
+	ManagerID:  ratel.NewNullCol[User, int64]("manager_id"),
+	Balance:    ratel.NewCol[User, decimal.Decimal]("balance"),
+	Tags:       ratel.NewCol[User, []string]("tags"),
+	Home:       ratel.NewNullCol[User, Address]("home"),
+	Type:       ratel.NewNullCol[User, string]("type"),
+	CreatedAt:  ratel.NewCol[User, time.Time]("created_at"),
+	Profile:    ratel.NewNullCol[User, doc.Profile]("profile"),
+	Doubled:    ratel.NewNullCol[User, int64]("doubled"),
+	Orders: ratel.NewRel[User, Order](ordersBase, ratel.RelMany,
+		[]ratel.RelKey[User]{{
+			Column: "user_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Values: func(models []User) any {
+				out := make([]int64, len(models))
+				for index, model := range models {
+					out[index] = model.ID
 				}
 
 				return out
 			},
+		}},
+		func(model *User, children []Order) {
+			model.R.Orders = ratel.LoadedFrom(children)
 		},
-		ratel.InsertField[UserInsert]{
-			Name: "email", Type: pgx.Identifier{"app", "email"},
-			Value: func(insert UserInsert) (any, bool) { return insert.email, true },
-			Values: func(rows []UserInsert) any {
-				out := make([]Email, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.email
+		ratel.RelCount[User, Order](func(model *User, count int64) { model.R.OrderCount = ratel.LoadedFrom(count) })),
+	Manager: ratel.NewRel[User, User](usersBase, ratel.RelOne,
+		[]ratel.RelKey[User]{{
+			Column: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Values: func(models []User) any {
+				out := make([]*int64, len(models))
+				for index, model := range models {
+					out[index] = model.ManagerID.Ptr()
 				}
 
 				return out
 			},
-		},
-		ratel.InsertField[UserInsert]{
-			Name: "status", Type: pgx.Identifier{"app", "user_status"},
-			Value: func(insert UserInsert) (any, bool) { return insert.status, true },
-			Values: func(rows []UserInsert) any {
-				out := make([]UserStatus, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.status
+		}},
+		func(model *User, children []User) {
+			var value *User
+			if len(children) > 0 {
+				value = &children[0]
+			}
+
+			model.R.Manager = ratel.LoadedFrom(value)
+		}),
+	Users: ratel.NewRel[User, User](usersBase, ratel.RelMany,
+		[]ratel.RelKey[User]{{
+			Column: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Values: func(models []User) any {
+				out := make([]int64, len(models))
+				for index, model := range models {
+					out[index] = model.ID
 				}
 
 				return out
 			},
+		}},
+		func(model *User, children []User) {
+			model.R.Users = ratel.LoadedFrom(children)
 		},
-		ratel.InsertField[UserInsert]{
-			Name: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"},
-			Value: func(insert UserInsert) (any, bool) { return insert.ManagerID, true },
-			Values: func(rows []UserInsert) any {
-				out := make([]*int64, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.ManagerID.Ptr()
-				}
-
-				return out
-			},
-		},
-		ratel.InsertField[UserInsert]{
-			Name: "balance", Type: pgx.Identifier{"pg_catalog", "numeric"},
-			Value: func(insert UserInsert) (any, bool) { return insert.Balance.V, insert.Balance.Set },
-			Values: func(rows []UserInsert) any {
-				out := make([]decimal.Decimal, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.Balance.V
-				}
-
-				return out
-			},
-		},
-		ratel.InsertField[UserInsert]{
-			Name: "tags", Type: pgx.Identifier{"pg_catalog", "text"},
-			Value: func(insert UserInsert) (any, bool) { return insert.Tags.V, insert.Tags.Set },
-			Array: true,
-		},
-		ratel.InsertField[UserInsert]{
-			Name: "home", Type: pgx.Identifier{"app", "address"},
-			Value: func(insert UserInsert) (any, bool) { return insert.Home, true },
-			Values: func(rows []UserInsert) any {
-				out := make([]*Address, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.Home.Ptr()
-				}
-
-				return out
-			},
-		},
-		ratel.InsertField[UserInsert]{
-			Name: "type", Type: pgx.Identifier{"pg_catalog", "text"},
-			Value: func(insert UserInsert) (any, bool) { return insert.Type, true },
-			Values: func(rows []UserInsert) any {
-				out := make([]*string, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.Type.Ptr()
-				}
-
-				return out
-			},
-		},
-		ratel.InsertField[UserInsert]{
-			Name: "created_at", Type: pgx.Identifier{"pg_catalog", "timestamptz"},
-			Value: func(insert UserInsert) (any, bool) { return insert.CreatedAt.V, insert.CreatedAt.Set },
-			Values: func(rows []UserInsert) any {
-				out := make([]time.Time, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.CreatedAt.V
-				}
-
-				return out
-			},
-		},
-		ratel.InsertField[UserInsert]{
-			Name: "profile", Type: pgx.Identifier{"pg_catalog", "jsonb"},
-			Value: func(insert UserInsert) (any, bool) { return insert.Profile, true },
-			Values: func(rows []UserInsert) any {
-				out := make([]*doc.Profile, len(rows))
-				for index, insert := range rows {
-					out[index] = insert.Profile.Ptr()
-				}
-
-				return out
-			},
-		},
-	),
-	ID:        ratel.NewCol[User, int64]("id"),
-	Email:     ratel.NewCol[User, Email]("email"),
-	Status:    ratel.NewCol[User, UserStatus]("status"),
-	ManagerID: ratel.NewNullCol[User, int64]("manager_id"),
-	Balance:   ratel.NewCol[User, decimal.Decimal]("balance"),
-	Tags:      ratel.NewCol[User, []string]("tags"),
-	Home:      ratel.NewNullCol[User, Address]("home"),
-	Type:      ratel.NewNullCol[User, string]("type"),
-	CreatedAt: ratel.NewCol[User, time.Time]("created_at"),
-	Profile:   ratel.NewNullCol[User, doc.Profile]("profile"),
-	Doubled:   ratel.NewNullCol[User, int64]("doubled"),
+		ratel.RelCount[User, User](func(model *User, count int64) { model.R.UserCount = ratel.LoadedFrom(count) })),
 }
 
 type usersTable struct {
@@ -232,6 +787,9 @@ type usersTable struct {
 	CreatedAt ratel.Col[User, time.Time]
 	Profile   ratel.NullCol[User, doc.Profile]
 	Doubled   ratel.NullCol[User, int64]
+	Orders    ratel.Rel[User, Order]
+	Manager   ratel.Rel[User, User]
+	Users     ratel.Rel[User, User]
 }
 
 // InSchema is the descriptor for a copy of users in another schema.
