@@ -121,4 +121,37 @@ func TestGenerated(t *testing.T) {
 	if err != nil || deleted != 1 {
 		t.Fatalf("DeleteTag = %d, %v", deleted, err)
 	}
+
+	ann.Balance = decimal.NewFromInt(99)
+	if _, err := db.Save(app.Users, ann).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	saved, err := db.From(app.Users).Where(app.Users.ID.Eq(ann.ID)).One(ctx)
+	if err != nil || !saved.Balance.Equal(decimal.NewFromInt(99)) {
+		t.Fatalf("Save = %+v, %v", saved, err)
+	}
+
+	stale := db.Save(app.Users, ann).ExpectVersion(app.Users.Email, "someone@example.com")
+	if _, err := stale.Exec(ctx); !errors.Is(err, ratel.ErrStaleVersion) {
+		t.Fatalf("stale Save error = %v", err)
+	}
+
+	count, err := db.From(app.Users).Count(ctx)
+	if err != nil || count != 2 {
+		t.Fatalf("Count = %d, %v", count, err)
+	}
+
+	ids, err := db.From(app.Users).OrderBy(app.Users.ID.Asc()).After(ann.ID).Pluck(app.Users.ID).List(ctx)
+	if err != nil || !slices.Equal(ids, []int64{bob.ID}) {
+		t.Fatalf("keyset Pluck = %v, %v", ids, err)
+	}
+
+	if _, err := db.DeleteRow(app.Orders, app.Order{ID: 3}).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.DeleteRow(app.Orders, app.Order{ID: 3}).Exec(ctx); !errors.Is(err, ratel.ErrNotFound) {
+		t.Fatalf("second DeleteRow error = %v", err)
+	}
 }

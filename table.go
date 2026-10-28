@@ -33,6 +33,7 @@ type Table[M any] struct {
 	scan        Scanner[M]
 	keys        []string
 	keyValues   func(M) []any
+	values      func(M) []any // every column's model value, in column order
 	constraints []ConstraintError
 	projection  string
 	selectSQL   string
@@ -49,6 +50,16 @@ func PrimaryKey[M any](columns []string, values func(M) []any) TableOption[M] {
 	return func(table Table[M]) Table[M] {
 		table.keys = keys
 		table.keyValues = values
+
+		return table
+	}
+}
+
+// ModelValues supplies every column's value of a model, in the table's column
+// order, so Save writes a model without reflection.
+func ModelValues[M any](values func(M) []any) TableOption[M] {
+	return func(table Table[M]) Table[M] {
+		table.values = values
 
 		return table
 	}

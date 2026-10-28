@@ -71,7 +71,7 @@ func NewOrderTagInsert(orderID int64, tagID int32) OrderTagInsert {
 	return OrderTagInsert{orderID: orderID, tagID: tagID, valid: true}
 }
 
-var orderTagsBase = ratel.NewWriteTable(
+var orderTagsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.NewTable("app", "order_tags", []string{"order_id", "tag_id"}, scanOrderTag,
 		ratel.PrimaryKey([]string{"order_id", "tag_id"}, func(model OrderTag) []any { return []any{model.OrderID, model.TagID} }),
 		ratel.Constraints[OrderTag](
@@ -80,7 +80,8 @@ var orderTagsBase = ratel.NewWriteTable(
 			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "order_tags", Constraint: "order_tags_pkey", Columns: []string{"order_id", "tag_id"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "order_tags", Constraint: "order_tags_tag_id_fkey", Columns: []string{"tag_id"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "order_tags", Constraint: "order_tags_tag_id_not_null", Columns: []string{"tag_id"}},
-		)),
+		),
+		ratel.ModelValues(func(model OrderTag) []any { return []any{model.OrderID, model.TagID} })),
 	func(insert OrderTagInsert) bool { return insert.valid },
 	ratel.InsertField[OrderTagInsert]{
 		Name: "order_id", Type: pgx.Identifier{"pg_catalog", "int8"},
@@ -106,11 +107,11 @@ var orderTagsBase = ratel.NewWriteTable(
 			return out
 		},
 	},
-)
+))
 
 // OrderTags describes app.order_tags.
 var OrderTags = orderTagsTable{
-	WriteTable: orderTagsBase,
+	KeyedTable: orderTagsBase,
 	OrderID:    ratel.NewCol[OrderTag, int64]("order_id"),
 	TagID:      ratel.NewCol[OrderTag, int32]("tag_id"),
 	Order: ratel.NewRel[OrderTag, Order](ordersBase, ratel.RelOne,
@@ -156,7 +157,7 @@ var OrderTags = orderTagsTable{
 }
 
 type orderTagsTable struct {
-	ratel.WriteTable[OrderTag, OrderTagInsert]
+	ratel.KeyedTable[OrderTag, OrderTagInsert]
 	OrderID ratel.Col[OrderTag, int64]
 	TagID   ratel.Col[OrderTag, int32]
 	Order   ratel.Rel[OrderTag, Order]
@@ -165,7 +166,7 @@ type orderTagsTable struct {
 
 // InSchema is the descriptor for a copy of order_tags in another schema.
 func (t orderTagsTable) InSchema(schema string) orderTagsTable {
-	t.WriteTable = t.WriteTable.InSchema(schema)
+	t.KeyedTable = t.KeyedTable.InSchema(schema)
 
 	return t
 }
@@ -232,7 +233,7 @@ func NewOrderInsert(id int64, userID int64, total decimal.Decimal) OrderInsert {
 	return OrderInsert{id: id, userID: userID, total: total, valid: true}
 }
 
-var ordersBase = ratel.NewWriteTable(
+var ordersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.NewTable("app", "orders", []string{"id", "user_id", "total"}, scanOrder,
 		ratel.PrimaryKey([]string{"id"}, func(model Order) []any { return []any{model.ID} }),
 		ratel.Constraints[Order](
@@ -241,7 +242,8 @@ var ordersBase = ratel.NewWriteTable(
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_total_not_null", Columns: []string{"total"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintForeignKey, Schema: "app", Table: "orders", Constraint: "orders_user_id_fkey", Columns: []string{"user_id"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "orders", Constraint: "orders_user_id_not_null", Columns: []string{"user_id"}},
-		)),
+		),
+		ratel.ModelValues(func(model Order) []any { return []any{model.ID, model.UserID, model.Total} })),
 	func(insert OrderInsert) bool { return insert.valid },
 	ratel.InsertField[OrderInsert]{
 		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
@@ -279,11 +281,11 @@ var ordersBase = ratel.NewWriteTable(
 			return out
 		},
 	},
-)
+))
 
 // Orders describes app.orders.
 var Orders = ordersTable{
-	WriteTable: ordersBase,
+	KeyedTable: ordersBase,
 	ID:         ratel.NewCol[Order, int64]("id"),
 	UserID:     ratel.NewCol[Order, int64]("user_id"),
 	Total:      ratel.NewCol[Order, decimal.Decimal]("total"),
@@ -343,7 +345,7 @@ var Orders = ordersTable{
 }
 
 type ordersTable struct {
-	ratel.WriteTable[Order, OrderInsert]
+	ratel.KeyedTable[Order, OrderInsert]
 	ID        ratel.Col[Order, int64]
 	UserID    ratel.Col[Order, int64]
 	Total     ratel.Col[Order, decimal.Decimal]
@@ -354,7 +356,7 @@ type ordersTable struct {
 
 // InSchema is the descriptor for a copy of orders in another schema.
 func (t ordersTable) InSchema(schema string) ordersTable {
-	t.WriteTable = t.WriteTable.InSchema(schema)
+	t.KeyedTable = t.KeyedTable.InSchema(schema)
 
 	return t
 }
@@ -415,14 +417,15 @@ func NewTagInsert(id int32, label string) TagInsert {
 	return TagInsert{id: id, label: label, valid: true}
 }
 
-var tagsBase = ratel.NewWriteTable(
+var tagsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.NewTable("app", "tags", []string{"id", "label"}, scanTag,
 		ratel.PrimaryKey([]string{"id"}, func(model Tag) []any { return []any{model.ID} }),
 		ratel.Constraints[Tag](
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_id_not_null", Columns: []string{"id"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "tags", Constraint: "tags_label_not_null", Columns: []string{"label"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "tags", Constraint: "tags_pkey", Columns: []string{"id"}},
-		)),
+		),
+		ratel.ModelValues(func(model Tag) []any { return []any{model.ID, model.Label} })),
 	func(insert TagInsert) bool { return insert.valid },
 	ratel.InsertField[TagInsert]{
 		Name: "id", Type: pgx.Identifier{"pg_catalog", "int4"},
@@ -448,11 +451,11 @@ var tagsBase = ratel.NewWriteTable(
 			return out
 		},
 	},
-)
+))
 
 // Tags describes app.tags.
 var Tags = tagsTable{
-	WriteTable: tagsBase,
+	KeyedTable: tagsBase,
 	ID:         ratel.NewCol[Tag, int32]("id"),
 	Label:      ratel.NewCol[Tag, string]("label"),
 	Orders: ratel.NewRel[Tag, Order](ordersBase, ratel.RelMany,
@@ -491,7 +494,7 @@ var Tags = tagsTable{
 }
 
 type tagsTable struct {
-	ratel.WriteTable[Tag, TagInsert]
+	ratel.KeyedTable[Tag, TagInsert]
 	ID        ratel.Col[Tag, int32]
 	Label     ratel.Col[Tag, string]
 	Orders    ratel.Rel[Tag, Order]
@@ -500,7 +503,7 @@ type tagsTable struct {
 
 // InSchema is the descriptor for a copy of tags in another schema.
 func (t tagsTable) InSchema(schema string) tagsTable {
-	t.WriteTable = t.WriteTable.InSchema(schema)
+	t.KeyedTable = t.KeyedTable.InSchema(schema)
 
 	return t
 }
@@ -576,7 +579,7 @@ func NewUserInsert(email Email, status UserStatus) UserInsert {
 	return UserInsert{email: email, status: status, valid: true}
 }
 
-var usersBase = ratel.NewWriteTable(
+var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.NewTable("app", "users", []string{"id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanUser,
 		ratel.PrimaryKey([]string{"id"}, func(model User) []any { return []any{model.ID} }),
 		ratel.Constraints[User](
@@ -589,7 +592,10 @@ var usersBase = ratel.NewWriteTable(
 			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "users", Constraint: "users_pkey", Columns: []string{"id"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_status_not_null", Columns: []string{"status"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_tags_not_null", Columns: []string{"tags"}},
-		)),
+		),
+		ratel.ModelValues(func(model User) []any {
+			return []any{model.ID, model.Email, model.Status, model.ManagerID, model.Balance, model.Tags, model.Home, model.Type, model.CreatedAt, model.Profile, model.Doubled}
+		})),
 	func(insert UserInsert) bool { return insert.valid },
 	ratel.InsertField[UserInsert]{
 		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
@@ -704,11 +710,11 @@ var usersBase = ratel.NewWriteTable(
 			return out
 		},
 	},
-)
+))
 
 // Users describes app.users.
 var Users = usersTable{
-	WriteTable: usersBase,
+	KeyedTable: usersBase,
 	ID:         ratel.NewCol[User, int64]("id"),
 	Email:      ratel.NewCol[User, Email]("email"),
 	Status:     ratel.NewCol[User, UserStatus]("status"),
@@ -775,7 +781,7 @@ var Users = usersTable{
 }
 
 type usersTable struct {
-	ratel.WriteTable[User, UserInsert]
+	ratel.KeyedTable[User, UserInsert]
 	ID        ratel.Col[User, int64]
 	Email     ratel.Col[User, Email]
 	Status    ratel.Col[User, UserStatus]
@@ -794,7 +800,7 @@ type usersTable struct {
 
 // InSchema is the descriptor for a copy of users in another schema.
 func (t usersTable) InSchema(schema string) usersTable {
-	t.WriteTable = t.WriteTable.InSchema(schema)
+	t.KeyedTable = t.KeyedTable.InSchema(schema)
 
 	return t
 }

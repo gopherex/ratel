@@ -148,8 +148,10 @@ Rules:
 - Composite primary and foreign keys are supported everywhere; batched loading
   binds them as parallel arrays through `unnest($1::t1[], $2::t2[])`.
 - A table without a primary key has `Update().Where()` and `Delete().Where()`
-  but no methods that address one row by identity (`Save`, `Delete(model)`,
-  `Rel` targets); they are absent from its descriptor type.
+  but nothing that addresses one row by identity: its descriptor embeds
+  `ratel.WriteTable[M, I]`, while a table with one embeds
+  `ratel.KeyedTable[M, I]`, the only type `db.Save` and `db.DeleteRow` take, so
+  misuse does not compile; nor is it a relation target.
 - Generated identifiers come from one naming function (singular model, plural
   descriptor, Go initialisms). A collision is a generation error naming both
   sources, never a silent suffix.
@@ -162,7 +164,11 @@ Rules:
 Generated read-only descriptors embed `ratel.Table[M]`, initialized with
 `ratel.NewTable(schema, table, columns, scan, options...)`. Physical-table
 descriptors embed `ratel.WriteTable[M, I]`, constructed with
-`ratel.NewWriteTable(table, validInsert, fields...)`. `validInsert` reads the
+`ratel.NewWriteTable(table, validInsert, fields...)`, or, with a primary key,
+`ratel.KeyedTable[M, I]` from `ratel.NewKeyedTable(writeTable)`. The table
+options `ratel.PrimaryKey(columns, values)` and `ratel.ModelValues(func(M)
+[]any)` (every column's model value in column order, used by `Save`) are
+generated projections, never reflection. `validInsert` reads the
 insert type's private constructor flag. Each generated `ratel.InsertField[I]`
 supplies `Name`, a schema-qualified PostgreSQL `Type` (`pgx.Identifier`), and
 `Value func(I) (any, bool)`: the boolean says whether to include the column.
@@ -476,7 +482,11 @@ n, err = db.Delete(app.Users).Where(app.Users.Email.Eq(email)).Exec(ctx)
 - `SQL()` renders one statement as `Statement`; insert `Statements()` renders
   all chunks. `SQL()` rejects an operation requiring multiple statements.
   Descriptors and builders copy metadata/input slices and are immutable.
-- `Save(model)` and `Delete(model)` address the row by primary key.
+- `db.Save(app.Users, user)` updates the row with the model's primary key:
+  every insertable non-key column takes the model's value (generated and
+  `ALWAYS` identity columns are not written). `db.DeleteRow(app.Users, user)`
+  deletes it. Both return `Write[M]` (`Exec`, `Returning`, `SQL`); a write that
+  matches no row returns `ratel.ErrNotFound`.
 - Optimistic locking: `.ExpectVersion(col, v)` on `Update` and `Save` adds the
   version predicate and returns `ratel.ErrStaleVersion` when no row matched.
 - `db.CopyFrom(ctx, app.Users, seq iter.Seq[UserInsert])` streams rows through

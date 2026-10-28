@@ -18,6 +18,8 @@ type Write[M any] struct {
 	where       Cond[M]
 	hasWhere    bool
 	all         bool
+	invalid     bool    // key or model metadata is missing
+	missing     refusal // returned when the write matches no row
 }
 
 // Update starts an UPDATE, including for a table without a primary key.
@@ -58,7 +60,8 @@ func (q Write[M]) All() Write[M] {
 
 // SQL renders one parameterized statement, rejecting unsafe writes.
 func (q Write[M]) SQL() (Statement, error) {
-	if !q.table.valid() || (!q.hasWhere && !q.all) || (q.operation == deleteOperation && len(q.assignments) > 0) {
+	if q.invalid || !q.table.valid() || (!q.hasWhere && !q.all) ||
+		(q.operation == deleteOperation && len(q.assignments) > 0) {
 		return Statement{}, ErrInvalidQuery
 	}
 
@@ -131,6 +134,9 @@ func (q Write[M]) Exec(ctx context.Context, options ...CallOption) (int64, error
 	}
 
 	result, err := executeWrite(ctx, q.db, q.table, q.operation, []Statement{statement}, false, options)
+	if err == nil && result.count == 0 && q.missing != "" {
+		return 0, q.missing
+	}
 
 	return result.count, err
 }
@@ -143,6 +149,9 @@ func (q Write[M]) Returning(ctx context.Context, options ...CallOption) ([]M, er
 	}
 
 	result, err := executeWrite(ctx, q.db, q.table, q.operation, []Statement{statement}, true, options)
+	if err == nil && len(result.models) == 0 && q.missing != "" {
+		return nil, q.missing
+	}
 
 	return result.models, err
 }

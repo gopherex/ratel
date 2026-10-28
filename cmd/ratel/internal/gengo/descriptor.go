@@ -38,7 +38,14 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 		outputs = append(outputs, value.name)
 	}
 
-	file.printf("var %s = ratel.NewWriteTable(\n", names.base)
+	// A table with a primary key embeds KeyedTable, which Save and DeleteRow
+	// take; a table without one cannot address a row by identity.
+	embedded, wrap, unwrap := "WriteTable", "", ""
+	if len(primaryKey(source)) > 0 {
+		embedded, wrap, unwrap = "KeyedTable", "ratel.NewKeyedTable(", ")"
+	}
+
+	file.printf("var %s = %sratel.NewWriteTable(\n", names.base, wrap)
 	file.printf("\tratel.NewTable(%s, %s, %s, %s%s),\n", strconv.Quote(schema), strconv.Quote(table),
 		quotedList(outputs), names.scanner, tableOptions(names, columns, source))
 	file.printf("\tfunc(insert %s) bool { return insert.valid },\n", names.insert)
@@ -49,8 +56,8 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 		}
 	}
 
-	file.printf(")\n\n// %s describes %s.%s.\nvar %s = %s{\n\tWriteTable: %s,\n", names.descriptor,
-		schema, table, names.descriptor, names.descriptorType, names.base)
+	file.printf(")%s\n\n// %s describes %s.%s.\nvar %s = %s{\n\t%s: %s,\n", unwrap, names.descriptor,
+		schema, table, names.descriptor, names.descriptorType, embedded, names.base)
 
 	for _, value := range columns {
 		file.printf("\t%s: ratel.%s[%s, %s](%s),\n", value.field, columnKind(value), names.model,
@@ -61,7 +68,8 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 		file.printf("\t%s: %s,\n", value.name, value.value)
 	}
 
-	file.printf("}\n\ntype %s struct {\n\tratel.WriteTable[%s, %s]\n", names.descriptorType, names.model, names.insert)
+	file.printf("}\n\ntype %s struct {\n\tratel.%s[%s, %s]\n", names.descriptorType, embedded, names.model,
+		names.insert)
 
 	for _, value := range columns {
 		file.printf("\t%s ratel.%s[%s, %s]\n", value.field, columnKind(value)[3:], names.model, file.use(value.goType))
@@ -72,8 +80,8 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 	}
 
 	file.printf("}\n\n// InSchema is the descriptor for a copy of %s in another schema.\n", table)
-	file.printf("func (t %s) InSchema(schema string) %s {\n\tt.WriteTable = t.WriteTable.InSchema(schema)\n\n"+
-		"\treturn t\n}\n\n", names.descriptorType, names.descriptorType)
+	file.printf("func (t %s) InSchema(schema string) %s {\n\tt.%s = t.%s.InSchema(schema)\n\n"+
+		"\treturn t\n}\n\n", names.descriptorType, names.descriptorType, embedded, embedded)
 }
 
 // columnKind is the constructor of a descriptor column ("NewCol" or
@@ -112,6 +120,14 @@ func tableOptions(names identifiers, columns []column, table *ir.Table) string {
 	if len(table.GetConstraints()) > 0 {
 		options.WriteString(",\n\t\t\tratel.Constraints[" + names.model + "](" + constraintList(names, table) + ")")
 	}
+
+	values := make([]string, 0, len(columns))
+	for _, value := range columns {
+		values = append(values, "model."+value.field)
+	}
+
+	options.WriteString(",\n\t\t\tratel.ModelValues(func(model " + names.model + ") []any { return []any{" +
+		strings.Join(values, ", ") + "} })")
 
 	return options.String()
 }
