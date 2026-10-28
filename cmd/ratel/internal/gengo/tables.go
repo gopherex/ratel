@@ -33,7 +33,7 @@ func (s *state) tableColumns(table *ir.Table) ([]column, error) {
 	columns := make([]column, 0, len(table.GetColumns()))
 
 	for _, value := range table.GetColumns() {
-		mapped, err := s.columnType(table.GetName(), value)
+		mapped, err := s.columnType(table.GetName(), value, schemaOf(table.GetName()))
 		if err != nil {
 			return nil, err
 		}

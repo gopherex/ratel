@@ -317,10 +317,10 @@ fits:
 |---|---|
 | every column of one table, any order | the table model; the scanner follows the query's column order |
 | every column of one table plus computed columns | `<Query>Row { app.User; OrderCount int64 }` |
-| every column of several tables | `<Query>Row { User app.User; Manager app.User }`; a table on the nullable side of an outer join is a pointer, `nil` when its primary key is NULL |
+| every column of several tables | `<Query>Row { Order app.Order; User *app.User }`; a field is named after its model, or after the alias when one table appears twice; a table on the nullable side of an outer join is a pointer, `nil` when its first primary-key column is NULL |
 | anything else | `<Query>Row` with one field per column |
 | any shape, query annotated `@ratel.row <Name>` | shared type `<Name>`; every query with that name must have the same shape, else a generation error |
-| any shape, query annotated `@go.row <import path>.<Type>` | the user's own struct; fields are matched to columns by name and type through `go/types`, and a mismatch is a generation error |
+| any shape, query annotated `@go.row <import path>.<Type>` | the user's own struct; each column scans into the field named after it, so the Go compiler rejects a missing field or a type mismatch when the generated package builds. The plugin stays a pure function of its request and reads no user code |
 
 Inference supplies this decision through `QueryColumn.source_column` and
 `table_alias`, not through output labels. Selecting `u.id AS other_id` keeps the
@@ -329,11 +329,23 @@ self-join instances, while column nullability records outer-join effects.
 `@ratel.row` and `@go.row` remain query metadata for the output plugin; they do
 not change PostgreSQL type inference or manufacture column provenance.
 
-Two queries with identical shapes and no `@ratel.row` produce a warning that
-suggests one.
+Two queries with identical shapes and no `@ratel.row` produce warning
+`RTL-G10` that suggests one.
 
-- `:one` returns `ratel.ErrNotFound` for no row.
-- More than three parameters become a generated `<Query>Params` struct.
+- `:one` returns `ratel.ErrNotFound` for no row and `ratel.ErrMultipleRows`
+  for more than one; `:many` generates `<Query>` (slice) and `<Query>All`
+  (`iter.Seq2`). `INSERT`, `UPDATE` and `DELETE` with `RETURNING` run
+  verbatim through the same functions.
+- `:exec` returns `error`; `:execrows` returns the affected row count
+  (`db.Exec`).
+- `:copyfrom` takes `INSERT INTO t (columns) VALUES (parameters)` and generates
+  `<Query>(ctx, db, rows iter.Seq[<Query>Params]) (int64, error)` streaming the
+  rows through COPY (`db.Copy`).
+- More than three parameters become a generated `<Query>Params` struct;
+  nullable parameters are `ratel.Null[T]`. Unnamed `$N` parameters are
+  `argN`.
+- Every query package has its own `RegisterTypes` for the types and value
+  wrappers its parameters and rows use.
 - Arrays of scalars and of composite types map natively. `json` and `jsonb`
   values get a Go type only through `@go.type`; ratel does not guess the shape
   of JSON built in SQL.

@@ -14,6 +14,7 @@ import (
 	"github.com/gopherex/ratel/plugin"
 	"github.com/gopherex/ratel/plugin/pluginpb"
 
+	"github.com/gopherex/ratel/cmd/ratel/internal/annotate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/gengo"
@@ -99,6 +100,28 @@ func generate(tb testing.TB, parser parse.Parser, schemaPath string) []*pluginpb
 		ProtocolVersion: 1, Catalog: built, Options: []byte(options), Annotations: namespaced(built.ProtoReflect()),
 	}
 
+	// queries.sql next to schema.sql becomes the query group "queries".
+	if sql, err := os.ReadFile(filepath.Join(filepath.Dir(schemaPath), "queries.sql")); err == nil {
+		set, err := annotate.Queries(parser, []annotate.File{{Name: "queries.sql", SQL: string(sql)}}, []string{gengo.Name})
+		if err != nil {
+			tb.Fatal(err)
+		}
+
+		inferred, err := query.Infer(parser, built, signatures, set.Queries)
+		if err != nil {
+			tb.Fatal(err)
+		}
+
+		request.Queries = inferred
+
+		for _, value := range inferred {
+			request.Annotations = append(request.Annotations, &ir.AnnotationValue{
+				Namespace: gengo.Name, Name: "package", Args: []*ir.AnnotationArg{{Value: "queries"}},
+				Target: &ir.AnnotationValue_QueryName{QueryName: value.GetName()},
+			})
+		}
+	}
+
 	response := plugin.Dispatch(context.Background(), gengo.Generator{}, &pluginpb.PluginRequest{
 		ProtocolVersion: 1, Request: &pluginpb.PluginRequest_Generate{Generate: request},
 	})
@@ -106,7 +129,14 @@ func generate(tb testing.TB, parser parse.Parser, schemaPath string) []*pluginpb
 		tb.Fatalf("Generate() diagnostics: %v", response.GetDiagnostics())
 	}
 
-	return response.GetGenerate().GetFiles()
+	// Warnings are compared as a golden file too.
+	var warnings strings.Builder
+	for _, diagnostic := range response.GetDiagnostics() {
+		warnings.WriteString(diagnostic.GetCode() + ": " + diagnostic.GetMessage() + "\n")
+	}
+
+	return append(response.GetGenerate().GetFiles(),
+		&pluginpb.File{Path: "diagnostics", Contents: []byte(warnings.String())})
 }
 
 // namespaced collects the catalog's go annotations, as the host does.

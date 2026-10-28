@@ -28,6 +28,46 @@ func (generator) Generate(context.Context, *pluginpb.GenerateRequest) (*pluginpb
 	}}, nil
 }
 
+// diagnosing returns a response carrying one diagnostic of severity.
+type diagnosing struct {
+	generator
+	severity ir.DiagnosticSeverity
+}
+
+func (d diagnosing) Generate(context.Context, *pluginpb.GenerateRequest) (*pluginpb.GenerateResponse, error) {
+	return &pluginpb.GenerateResponse{Diagnostics: []*ir.Diagnostic{{Severity: d.severity, Code: "X-1"}}}, nil
+}
+
+func TestDispatchDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		severity ir.DiagnosticSeverity
+		failed   bool
+	}{
+		{name: "warning", severity: ir.DiagnosticSeverity_DIAGNOSTIC_SEVERITY_WARNING},
+		{name: "error", severity: ir.DiagnosticSeverity_DIAGNOSTIC_SEVERITY_ERROR, failed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := plugin.Dispatch(t.Context(), diagnosing{severity: tc.severity}, &pluginpb.PluginRequest{
+				ProtocolVersion: 1,
+				Request:         &pluginpb.PluginRequest_Generate{Generate: &pluginpb.GenerateRequest{ProtocolVersion: 1}},
+			})
+
+			if plugin.HasErrors(response) != tc.failed {
+				t.Fatalf("Dispatch() = %v", response)
+			}
+
+			if !tc.failed && (len(response.GetDiagnostics()) != 1 || len(response.GetGenerate().GetDiagnostics()) != 0) {
+				t.Fatalf("warning not moved to the plugin response: %v", response)
+			}
+		})
+	}
+}
+
 func infoRequest() *pluginpb.PluginRequest {
 	return &pluginpb.PluginRequest{Request: &pluginpb.PluginRequest_Info{Info: &pluginpb.InfoRequest{
 		MinProtocolVersion: 1, MaxProtocolVersion: 1,

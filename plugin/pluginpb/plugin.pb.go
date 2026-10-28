@@ -415,8 +415,11 @@ func (x *File) GetExecutable() bool {
 
 // GenerateResponse is the output of a Generate exchange.
 type GenerateResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Files         []*File                `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Files []*File                `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
+	// Warnings and infos of a successful generation. The SDK moves them to
+	// PluginResponse.diagnostics; an error fails Generate instead.
+	Diagnostics   []*ir.Diagnostic `protobuf:"bytes,2,rep,name=diagnostics,proto3" json:"diagnostics,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -454,6 +457,13 @@ func (*GenerateResponse) Descriptor() ([]byte, []int) {
 func (x *GenerateResponse) GetFiles() []*File {
 	if x != nil {
 		return x.Files
+	}
+	return nil
+}
+
+func (x *GenerateResponse) GetDiagnostics() []*ir.Diagnostic {
+	if x != nil {
+		return x.Diagnostics
 	}
 	return nil
 }
@@ -583,9 +593,10 @@ const file_ratel_v1_plugin_plugin_proto_rawDesc = "" +
 	"\bcontents\x18\x02 \x01(\fR\bcontents\x12\x1e\n" +
 	"\n" +
 	"executable\x18\x03 \x01(\bR\n" +
-	"executable\"?\n" +
+	"executable\"z\n" +
 	"\x10GenerateResponse\x12+\n" +
-	"\x05files\x18\x01 \x03(\v2\x15.ratel.v1.plugin.FileR\x05files\"\xcd\x01\n" +
+	"\x05files\x18\x01 \x03(\v2\x15.ratel.v1.plugin.FileR\x05files\x129\n" +
+	"\vdiagnostics\x18\x02 \x03(\v2\x17.ratel.v1.ir.DiagnosticR\vdiagnostics\"\xcd\x01\n" +
 	"\x0ePluginResponse\x123\n" +
 	"\x04info\x18\x01 \x01(\v2\x1d.ratel.v1.plugin.InfoResponseH\x00R\x04info\x12?\n" +
 	"\bgenerate\x18\x02 \x01(\v2!.ratel.v1.plugin.GenerateResponseH\x00R\bgenerate\x129\n" +
@@ -626,14 +637,15 @@ var file_ratel_v1_plugin_plugin_proto_depIdxs = []int32{
 	8,  // 3: ratel.v1.plugin.GenerateRequest.queries:type_name -> ratel.v1.ir.Query
 	9,  // 4: ratel.v1.plugin.GenerateRequest.annotations:type_name -> ratel.v1.ir.AnnotationValue
 	4,  // 5: ratel.v1.plugin.GenerateResponse.files:type_name -> ratel.v1.plugin.File
-	2,  // 6: ratel.v1.plugin.PluginResponse.info:type_name -> ratel.v1.plugin.InfoResponse
-	5,  // 7: ratel.v1.plugin.PluginResponse.generate:type_name -> ratel.v1.plugin.GenerateResponse
-	10, // 8: ratel.v1.plugin.PluginResponse.diagnostics:type_name -> ratel.v1.ir.Diagnostic
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	10, // 6: ratel.v1.plugin.GenerateResponse.diagnostics:type_name -> ratel.v1.ir.Diagnostic
+	2,  // 7: ratel.v1.plugin.PluginResponse.info:type_name -> ratel.v1.plugin.InfoResponse
+	5,  // 8: ratel.v1.plugin.PluginResponse.generate:type_name -> ratel.v1.plugin.GenerateResponse
+	10, // 9: ratel.v1.plugin.PluginResponse.diagnostics:type_name -> ratel.v1.ir.Diagnostic
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_ratel_v1_plugin_plugin_proto_init() }

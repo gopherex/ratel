@@ -66,6 +66,9 @@ message File {
 // GenerateResponse is the output of a Generate exchange.
 message GenerateResponse {
   repeated File files = 1;
+  // Warnings and infos of a successful generation. The SDK moves them to
+  // PluginResponse.diagnostics; an error fails Generate instead.
+  repeated ratel.v1.ir.Diagnostic diagnostics = 2;
 }
 
 // PluginResponse is the single response of an exchange.

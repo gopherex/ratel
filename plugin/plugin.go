@@ -198,7 +198,18 @@ func generate(
 		return Failure(&Error{Code: InvalidMessage, Message: "nil Generate response"})
 	}
 
-	return &pluginpb.PluginResponse{Response: &pluginpb.PluginResponse_Generate{Generate: output}}
+	diagnostics := output.GetDiagnostics()
+	for _, diagnostic := range diagnostics {
+		if diagnostic.GetSeverity() == ir.DiagnosticSeverity_DIAGNOSTIC_SEVERITY_ERROR {
+			return Failure(&Error{Code: InvalidMessage, Message: "Generate returned an error diagnostic; return an error"})
+		}
+	}
+
+	output.Diagnostics = nil
+
+	return &pluginpb.PluginResponse{
+		Response: &pluginpb.PluginResponse_Generate{Generate: output}, Diagnostics: diagnostics,
+	}
 }
 
 // ValidateInfo checks identity, namespace and the advertised version range.

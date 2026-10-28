@@ -76,7 +76,12 @@ func (Generator) Generate(ctx context.Context, request *pluginpb.GenerateRequest
 		files = append(files, rendered...)
 	}
 
-	return &pluginpb.GenerateResponse{Files: files}, nil
+	queries, err := state.queryFiles(request.GetQueries())
+	if err != nil {
+		return nil, err
+	}
+
+	return &pluginpb.GenerateResponse{Files: append(files, queries...), Diagnostics: state.warnings}, nil
 }
 
 func decodeOptions(data []byte) (Options, error) {

@@ -19,17 +19,24 @@ type userType struct {
 	fields []*ir.TypeRef // composite field types
 }
 
+// codeAnnotation is the diagnostic code of an invalid go annotation.
+const codeAnnotation = "RTL-G03"
+
 type state struct {
-	options Options
-	catalog *ir.Catalog
-	types   map[string]userType // by "schema.name"
-	columns map[string]string   // @go.type by "schema.table.column"
+	options  Options
+	catalog  *ir.Catalog
+	types    map[string]userType // by "schema.name"
+	columns  map[string]string   // @go.type by "schema.table.column"
+	packages map[string]string   // query name -> Go package of its group
+	shapes   map[string]string   // row type body -> first query declaring it
+	warnings []*ir.Diagnostic
 }
 
 func newState(options Options, request *pluginpb.GenerateRequest) (*state, error) {
 	result := &state{
 		options: options, catalog: request.GetCatalog(),
-		types: make(map[string]userType), columns: make(map[string]string),
+		types: make(map[string]userType), columns: make(map[string]string), packages: make(map[string]string),
+		shapes: make(map[string]string),
 	}
 
 	for _, schema := range result.catalog.GetSchemas() {
@@ -86,18 +93,36 @@ func (s *state) annotate(annotation *ir.AnnotationValue) error {
 		if target.GetKind() != ir.ObjectKind_OBJECT_KIND_COLUMN || len(annotation.GetArgs()) != 1 ||
 			annotation.GetArgs()[0].GetKey() != "" {
 			return &plugin.Error{
-				Code: "RTL-G03", Message: "@go.type takes one Go type and targets a column", Source: annotation.GetSource(),
+				Code: codeAnnotation, Message: "@go.type takes one Go type and targets a column", Source: annotation.GetSource(),
 			}
 		}
 
 		s.columns[strings.Join(target.GetName().GetParts(), ".")] = annotation.GetArgs()[0].GetValue()
 
 		return nil
-	case "row", "package":
+	case "package":
+		if annotation.GetQueryName() == "" || len(annotation.GetArgs()) != 1 {
+			return &plugin.Error{
+				Code: codeAnnotation, Message: "@go.package takes one package and targets a query",
+				Source: annotation.GetSource(),
+			}
+		}
+
+		s.packages[annotation.GetQueryName()] = annotation.GetArgs()[0].GetValue()
+
+		return nil
+	case "row":
+		if annotation.GetQueryName() == "" || len(annotation.GetArgs()) != 1 {
+			return &plugin.Error{
+				Code: codeAnnotation, Message: "@go.row takes one Go type and targets a query",
+				Source: annotation.GetSource(),
+			}
+		}
+
 		return nil
 	default:
 		return &plugin.Error{
-			Code: "RTL-G03", Message: "unknown annotation @go." + annotation.GetName(),
+			Code: codeAnnotation, Message: "unknown annotation @go." + annotation.GetName(),
 			Source: annotation.GetSource(),
 		}
 	}
@@ -166,12 +191,13 @@ func (s *state) userGoType(key, schema string) (goType, error) {
 	return goType{expr: packageName(found.schema) + "." + found.name, imports: []string{s.importPath(found.schema)}}, nil
 }
 
-// columnType is a column's Go type, honoring @go.type.
-func (s *state) columnType(table *ir.QualifiedName, column *ir.Column) (goType, error) {
+// columnType is a column's Go type as named from package schema, honoring
+// @go.type.
+func (s *state) columnType(table *ir.QualifiedName, column *ir.Column, schema string) (goType, error) {
 	key := strings.Join(append(slices.Clone(table.GetParts()), column.GetName()), ".")
 	if configured, ok := s.columns[key]; ok {
 		return override(configured), nil
 	}
 
-	return s.goType(column.GetType(), schemaOf(table))
+	return s.goType(column.GetType(), schema)
 }

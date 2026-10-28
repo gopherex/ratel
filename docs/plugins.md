@@ -57,7 +57,10 @@ message PluginResponse {
   directory, host version, and the annotations of the plugin's namespace in
   the generic parsed form of [input.md](input.md#syntax) with their source
   spans.
-- `GenerateResponse`: files with paths relative to the output directory.
+- `GenerateResponse`: files with paths relative to the output directory, and
+  the warnings and infos of a successful generation. The Go SDK moves those
+  diagnostics to `PluginResponse.diagnostics`; an `ERROR` there fails the
+  exchange, since errors are returned as errors.
 
 ## Rules
 

@@ -1,0 +1,1 @@
+RTL-G10: queries EmailsLike and EmailsOfManagers return the same row shape; share one type with @ratel.row
