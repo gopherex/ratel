@@ -64,6 +64,33 @@ type Rendering struct {
 	SQL      string
 	Major    int    // server major version
 	Database string // database name
+	// Objects are the statements of SQL in order, each keyed by its object:
+	// "table app.users", "index app.users_email_idx", "constraint
+	// app.users.users_pkey", "routine app.f(integer)", "type app.status"...
+	Objects []Object
+	// Columns are column definitions by "schema.table.column".
+	Columns map[string]Column
+}
+
+// Object is one rendered statement and the key of the object it creates.
+type Object struct{ Key, SQL string }
+
+// Column is a column as ADD COLUMN takes it, with its type and default.
+type Column struct {
+	Definition string
+	Type       string
+	Default    string // empty without one
+}
+
+// Statement returns the rendered statement of an object key.
+func (r Rendering) Statement(key string) (string, bool) {
+	for _, object := range r.Objects {
+		if object.Key == key {
+			return object.SQL, true
+		}
+	}
+
+	return "", false
 }
 
 // Render returns the namespaces as DDL.
@@ -92,17 +119,65 @@ func Render(ctx context.Context, source Source, namespaces []string) (Rendering,
 	var out strings.Builder
 
 	for _, section := range sections() {
-		if err := render(ctx, snapshot, section, namespaces, &out); err != nil {
+		objects, err := render(ctx, snapshot, section, namespaces)
+		if err != nil {
 			return Rendering{}, err
 		}
+
+		for _, object := range objects {
+			out.WriteString(object.SQL)
+			out.WriteString("\n")
+		}
+
+		result.Objects = append(result.Objects, objects...)
 	}
 
 	result.SQL = out.String()
 
+	result.Columns, err = renderColumns(ctx, snapshot, namespaces)
+	if err != nil {
+		return Rendering{}, err
+	}
+
 	return result, nil
 }
 
-func render(ctx context.Context, snapshot pgx.Tx, section section, namespaces []string, out *strings.Builder) error {
+func renderColumns(ctx context.Context, snapshot pgx.Tx, namespaces []string) (map[string]Column, error) {
+	rows, err := snapshot.Query(ctx, columns, namespaces)
+	if err != nil {
+		return nil, fmt.Errorf("introspect: columns: %w", err)
+	}
+
+	defer rows.Close()
+
+	result := make(map[string]Column)
+
+	for rows.Next() {
+		var (
+			key        string
+			column     Column
+			expression *string
+		)
+
+		if err := rows.Scan(&key, &column.Definition, &column.Type, &expression); err != nil {
+			return nil, fmt.Errorf("introspect: columns: %w", err)
+		}
+
+		if expression != nil {
+			column.Default = *expression
+		}
+
+		result[key] = column
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("introspect: columns: %w", err)
+	}
+
+	return result, nil
+}
+
+func render(ctx context.Context, snapshot pgx.Tx, section section, namespaces []string) ([]Object, error) {
 	var arguments []any
 	if !section.database {
 		arguments = append(arguments, namespaces)
@@ -110,20 +185,19 @@ func render(ctx context.Context, snapshot pgx.Tx, section section, namespaces []
 
 	rows, err := snapshot.Query(ctx, section.query, arguments...)
 	if err != nil {
-		return fmt.Errorf("introspect: %s: %w", section.name, err)
+		return nil, fmt.Errorf("introspect: %s: %w", section.name, err)
 	}
 
-	statements, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	objects, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Object, error) {
+		var object Object
+
+		return object, row.Scan(&object.Key, &object.SQL)
+	})
 	if err != nil {
-		return fmt.Errorf("introspect: %s: %w", section.name, err)
+		return nil, fmt.Errorf("introspect: %s: %w", section.name, err)
 	}
 
-	for _, statement := range statements {
-		out.WriteString(statement)
-		out.WriteString("\n")
-	}
-
-	return nil
+	return objects, nil
 }
 
 // clearSources drops source positions: they point into the rendered text,

@@ -38,13 +38,14 @@ func sections() []section {
 }
 
 const schemas = `
-SELECT format('CREATE SCHEMA %I;', n.nspname)
+SELECT format('schema %I', n.nspname), format('CREATE SCHEMA %I;', n.nspname)
 FROM pg_catalog.pg_namespace n
 WHERE n.nspname = ANY($1) AND n.nspname <> 'public'
 ORDER BY n.nspname`
 
 const extensions = `
-SELECT format('CREATE EXTENSION %I WITH SCHEMA %I VERSION %L;', e.extname, n.nspname, e.extversion)
+SELECT format('extension %I', e.extname),
+       format('CREATE EXTENSION %I WITH SCHEMA %I VERSION %L;', e.extname, n.nspname, e.extversion)
 FROM pg_catalog.pg_extension e
 JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace
 WHERE e.extname <> 'plpgsql'
@@ -67,14 +68,15 @@ WITH RECURSIVE edges AS (
   UNION ALL
   SELECT e.dependent, depth.level + 1 FROM edges e JOIN depth ON depth.oid = e.dependency
   WHERE depth.level < 64
-), rendered(oid, statement) AS (
+), rendered(oid, key, statement) AS (
   (` + enums + `) UNION ALL (` + composites + `)
   UNION ALL (` + domains + `) UNION ALL (` + ranges + `))
-SELECT r.statement FROM rendered r
+SELECT r.key, r.statement FROM rendered r
 ORDER BY (SELECT max(depth.level) FROM depth WHERE depth.oid = r.oid), r.statement`
 
 const enums = `
-SELECT t.oid, format('CREATE TYPE %I.%I AS ENUM (%s);', n.nspname, t.typname,
+SELECT t.oid, format('type %I.%I', n.nspname, t.typname),
+       format('CREATE TYPE %I.%I AS ENUM (%s);', n.nspname, t.typname,
          string_agg(quote_literal(e.enumlabel), ', ' ORDER BY e.enumsortorder))
 FROM pg_catalog.pg_type t
 JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
@@ -86,7 +88,7 @@ GROUP BY t.oid, n.nspname, t.typname
 ORDER BY n.nspname, t.typname`
 
 const composites = `
-SELECT t.oid, format('CREATE TYPE %I.%I AS (%s);', n.nspname, t.typname,
+SELECT t.oid, format('type %I.%I', n.nspname, t.typname), format('CREATE TYPE %I.%I AS (%s);', n.nspname, t.typname,
          string_agg(format('%I %s%s', a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod),
            CASE WHEN a.attcollation <> at.typcollation
              THEN ' COLLATE ' || a.attcollation::regcollation::text ELSE '' END),
@@ -103,7 +105,8 @@ GROUP BY t.oid, n.nspname, t.typname
 ORDER BY n.nspname, t.typname`
 
 const domains = `
-SELECT t.oid, format('CREATE DOMAIN %I.%I AS %s%s%s%s%s;', n.nspname, t.typname,
+SELECT t.oid, format('type %I.%I', n.nspname, t.typname),
+       format('CREATE DOMAIN %I.%I AS %s%s%s%s%s;', n.nspname, t.typname,
          pg_catalog.format_type(t.typbasetype, t.typtypmod),
          CASE WHEN t.typcollation <> bt.typcollation
            THEN ' COLLATE ' || t.typcollation::regcollation::text ELSE '' END,
@@ -125,7 +128,8 @@ ORDER BY n.nspname, t.typname`
 // PostgreSQL derives: the first "range" replaced by "multirange", otherwise
 // the name with a "_multirange" suffix.
 const ranges = `
-SELECT t.oid, format('CREATE TYPE %I.%I AS RANGE (subtype = %s%s%s%s%s%s);', n.nspname, t.typname,
+SELECT t.oid, format('type %I.%I', n.nspname, t.typname),
+       format('CREATE TYPE %I.%I AS RANGE (subtype = %s%s%s%s%s%s);', n.nspname, t.typname,
          pg_catalog.format_type(r.rngsubtype, NULL),
          CASE WHEN NOT oc.opcdefault
            THEN format(', subtype_opclass = %I.%I', ocn.nspname, oc.opcname) ELSE '' END,
@@ -175,7 +179,8 @@ const serials = `serials AS (
 
 const sequences = `
 WITH ` + serials + `
-SELECT format('CREATE SEQUENCE %I.%I AS %s INCREMENT BY %s MINVALUE %s MAXVALUE %s START WITH %s CACHE %s%s%s;',
+SELECT format('sequence %I.%I', n.nspname, c.relname),
+       format('CREATE SEQUENCE %I.%I AS %s INCREMENT BY %s MINVALUE %s MAXVALUE %s START WITH %s CACHE %s%s%s;',
          n.nspname, c.relname, pg_catalog.format_type(s.seqtypid, NULL),
          s.seqincrement, s.seqmin, s.seqmax, s.seqstart, s.seqcache,
          CASE WHEN s.seqcycle THEN ' CYCLE' ELSE '' END,
@@ -198,45 +203,15 @@ ORDER BY n.nspname, c.relname`
 // attnotnull, and the builder synthesizes the name.
 const tables = `
 WITH ` + serials + `
-SELECT CASE WHEN c.relispartition
+SELECT format('table %I.%I', n.nspname, c.relname), CASE WHEN c.relispartition
   THEN format('CREATE TABLE %I.%I PARTITION OF %s %s%s;', n.nspname, c.relname,
          (SELECT i.inhparent::regclass::text FROM pg_catalog.pg_inherits i WHERE i.inhrelid = c.oid),
          pg_catalog.pg_get_expr(c.relpartbound, c.oid),
          CASE WHEN c.relkind = 'p' THEN ' PARTITION BY ' || pg_catalog.pg_get_partkeydef(c.oid) ELSE '' END)
   ELSE format('CREATE %sTABLE %I.%I (%s)%s;',
          CASE c.relpersistence WHEN 'u' THEN 'UNLOGGED ' ELSE '' END, n.nspname, c.relname,
-         COALESCE((SELECT string_agg(format('%I %s%s%s%s%s', a.attname,
-             COALESCE(sr.type, pg_catalog.format_type(a.atttypid, a.atttypmod)),
-             CASE WHEN a.attcollation <> at.typcollation
-               THEN ' COLLATE ' || a.attcollation::regcollation::text ELSE '' END,
-             CASE WHEN a.attidentity IN ('a', 'd')
-               THEN (SELECT format(' GENERATED %s AS IDENTITY '
-                                   '(START WITH %s INCREMENT BY %s MINVALUE %s MAXVALUE %s CACHE %s%s)',
-                              CASE a.attidentity WHEN 'a' THEN 'ALWAYS' ELSE 'BY DEFAULT' END,
-                              s.seqstart, s.seqincrement, s.seqmin, s.seqmax, s.seqcache,
-                              CASE WHEN s.seqcycle THEN ' CYCLE' ELSE '' END)
-                     FROM pg_catalog.pg_sequence s
-                     WHERE s.seqrelid = pg_catalog.pg_get_serial_sequence(
-                       format('%I.%I', n.nspname, c.relname), a.attname)::regclass)
-               ELSE '' END,
-             CASE
-               WHEN a.attgenerated = 's'
-                 THEN ' GENERATED ALWAYS AS (' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) || ') STORED'
-               WHEN a.attgenerated = 'v'
-                 THEN ' GENERATED ALWAYS AS (' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) || ') VIRTUAL'
-               WHEN ad.adbin IS NOT NULL AND sr.type IS NULL
-                 THEN ' DEFAULT ' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid)
-               ELSE '' END,
-             CASE WHEN NOT a.attnotnull THEN ''
-               ELSE COALESCE((SELECT format(' CONSTRAINT %I NOT NULL', nn.conname)
-                              FROM pg_catalog.pg_constraint nn
-                              WHERE nn.conrelid = c.oid AND nn.contype = 'n' AND nn.conkey = ARRAY[a.attnum]),
-                             ' NOT NULL') END),
-             ', ' ORDER BY a.attnum)
-           FROM pg_catalog.pg_attribute a
-           JOIN pg_catalog.pg_type at ON at.oid = a.atttypid
-           LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
-           LEFT JOIN serials sr ON sr.relation = a.attrelid AND sr.attnum = a.attnum
+         COALESCE((SELECT string_agg(` + columnDefinition + `, ', ' ORDER BY a.attnum)
+           FROM ` + columnSources + `
            WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), ''),
          CASE WHEN c.relkind = 'p' THEN ' PARTITION BY ' || pg_catalog.pg_get_partkeydef(c.oid) ELSE '' END)
   END
@@ -247,10 +222,66 @@ WHERE c.relkind IN ('r', 'p') AND n.nspname = ANY($1)
     WHERE d.classid = 'pg_catalog.pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
 ORDER BY n.nspname, c.relname`
 
+// columnDefinition renders a column as CREATE TABLE and ADD COLUMN take it,
+// over columnSources of table c in namespace n.
+const columnDefinition = `format('%I %s%s%s%s%s', a.attname,
+  ` + columnType + `,
+  CASE WHEN a.attcollation <> at.typcollation
+    THEN ' COLLATE ' || a.attcollation::regcollation::text ELSE '' END,
+  CASE WHEN a.attidentity IN ('a', 'd')
+    THEN (SELECT format(' GENERATED %s AS IDENTITY '
+                        '(START WITH %s INCREMENT BY %s MINVALUE %s MAXVALUE %s CACHE %s%s)',
+                   CASE a.attidentity WHEN 'a' THEN 'ALWAYS' ELSE 'BY DEFAULT' END,
+                   s.seqstart, s.seqincrement, s.seqmin, s.seqmax, s.seqcache,
+                   CASE WHEN s.seqcycle THEN ' CYCLE' ELSE '' END)
+          FROM pg_catalog.pg_sequence s
+          WHERE s.seqrelid = pg_catalog.pg_get_serial_sequence(
+            format('%I.%I', n.nspname, c.relname), a.attname)::regclass)
+    ELSE '' END,
+  CASE
+    WHEN a.attgenerated = 's'
+      THEN ' GENERATED ALWAYS AS (' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) || ') STORED'
+    WHEN a.attgenerated = 'v'
+      THEN ' GENERATED ALWAYS AS (' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) || ') VIRTUAL'
+    WHEN ` + columnDefault + ` IS NOT NULL
+      THEN ' DEFAULT ' || ` + columnDefault + `
+    ELSE '' END,
+  CASE WHEN NOT a.attnotnull THEN ''
+    ELSE COALESCE((SELECT format(' CONSTRAINT %I NOT NULL', nn.conname)
+                   FROM pg_catalog.pg_constraint nn
+                   WHERE nn.conrelid = c.oid AND nn.contype = 'n' AND nn.conkey = ARRAY[a.attnum]),
+                  ' NOT NULL') END)`
+
+// columnType is a column's type, a serial pseudo-type for a serial column.
+const columnType = `COALESCE(sr.type, pg_catalog.format_type(a.atttypid, a.atttypmod))`
+
+// columnDefault is a plain column default; generated and serial columns
+// have none of their own.
+const columnDefault = `CASE WHEN a.attgenerated = '' AND sr.type IS NULL
+  THEN pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) END`
+
+const columnSources = `pg_catalog.pg_attribute a
+  JOIN pg_catalog.pg_type at ON at.oid = a.atttypid
+  LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+  LEFT JOIN serials sr ON sr.relation = a.attrelid AND sr.attnum = a.attnum`
+
+// columns are each column's definition, type and default, for the
+// migration diff's column changes.
+const columns = `
+WITH ` + serials + `
+SELECT format('%I.%I.%I', n.nspname, c.relname, a.attname), ` + columnDefinition + `,
+       ` + columnType + `, ` + columnDefault + `
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+JOIN (` + columnSources + `) ON a.attrelid = c.oid
+WHERE c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped AND n.nspname = ANY($1)
+ORDER BY n.nspname, c.relname, a.attnum`
+
 // Constraints cloned onto partitions from their parent are the parent's.
 // Foreign keys follow indexes: they may reference a unique index.
 const constraints = `
-SELECT format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s;', n.nspname, c.relname, k.conname,
+SELECT format('constraint %I.%I.%I', n.nspname, c.relname, k.conname),
+       format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s;', n.nspname, c.relname, k.conname,
          pg_catalog.pg_get_constraintdef(k.oid))
 FROM pg_catalog.pg_constraint k
 JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
@@ -260,7 +291,8 @@ WHERE k.contype IN ('p', 'u', 'c', 'x') AND k.conparentid = 0 AND k.conislocal
 ORDER BY n.nspname, c.relname, k.conname`
 
 const foreignKeys = `
-SELECT format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s;', n.nspname, c.relname, k.conname,
+SELECT format('constraint %I.%I.%I', n.nspname, c.relname, k.conname),
+       format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s;', n.nspname, c.relname, k.conname,
          pg_catalog.pg_get_constraintdef(k.oid))
 FROM pg_catalog.pg_constraint k
 JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
@@ -270,7 +302,7 @@ WHERE k.contype = 'f' AND k.conparentid = 0 AND k.conislocal
 ORDER BY n.nspname, c.relname, k.conname`
 
 const rowSecurity = `
-SELECT format('ALTER TABLE %I.%I %s;', n.nspname, c.relname,
+SELECT format('rls %I.%I', n.nspname, c.relname), format('ALTER TABLE %I.%I %s;', n.nspname, c.relname,
          concat_ws(', ',
            CASE WHEN c.relrowsecurity THEN 'ENABLE ROW LEVEL SECURITY' END,
            CASE WHEN c.relforcerowsecurity THEN 'FORCE ROW LEVEL SECURITY' END))
@@ -282,7 +314,7 @@ ORDER BY n.nspname, c.relname`
 // Indexes backing a constraint are the constraint; partition indexes attached
 // to a parent index are the parent's.
 const indexes = `
-SELECT pg_catalog.pg_get_indexdef(i.indexrelid) || ';'
+SELECT format('index %I.%I', n.nspname, ic.relname), pg_catalog.pg_get_indexdef(i.indexrelid) || ';'
 FROM pg_catalog.pg_index i
 JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid
 JOIN pg_catalog.pg_class tc ON tc.oid = i.indrelid
@@ -305,7 +337,7 @@ WITH RECURSIVE edges AS (
   UNION ALL
   SELECT e.view, depth.level + 1 FROM edges e JOIN depth ON depth.oid = e.dependency
 )
-SELECT CASE c.relkind
+SELECT format('view %I.%I', n.nspname, c.relname), CASE c.relkind
   WHEN 'v' THEN format('CREATE VIEW %I.%I%s AS %s;', n.nspname, c.relname,
     CASE WHEN c.reloptions IS NOT NULL THEN ' WITH (' || array_to_string(c.reloptions, ', ') || ')' ELSE '' END,
     rtrim(pg_catalog.pg_get_viewdef(c.oid, true), ';'))
@@ -321,7 +353,7 @@ WHERE c.relkind IN ('v', 'm') AND n.nspname = ANY($1)
 ORDER BY (SELECT max(depth.level) FROM depth WHERE depth.oid = c.oid), n.nspname, c.relname`
 
 const routines = `
-SELECT pg_catalog.pg_get_functiondef(p.oid) || ';'
+SELECT 'routine ' || p.oid::regprocedure::text, pg_catalog.pg_get_functiondef(p.oid) || ';'
 FROM pg_catalog.pg_proc p
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 WHERE p.prokind IN ('f', 'p') AND n.nspname = ANY($1)
@@ -331,7 +363,7 @@ ORDER BY n.nspname, p.proname, p.oid::regprocedure::text`
 
 // Triggers cloned onto partitions belong to the parent's trigger.
 const triggers = `
-SELECT pg_catalog.pg_get_triggerdef(t.oid) || ';'
+SELECT format('trigger %I.%I.%I', n.nspname, c.relname, t.tgname), pg_catalog.pg_get_triggerdef(t.oid) || ';'
 FROM pg_catalog.pg_trigger t
 JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -339,7 +371,8 @@ WHERE NOT t.tgisinternal AND t.tgparentid = 0 AND n.nspname = ANY($1)
 ORDER BY n.nspname, c.relname, t.tgname`
 
 const policies = `
-SELECT format('CREATE POLICY %I ON %I.%I%s%s%s%s%s;', p.polname, n.nspname, c.relname,
+SELECT format('policy %I.%I.%I', n.nspname, c.relname, p.polname),
+       format('CREATE POLICY %I ON %I.%I%s%s%s%s%s;', p.polname, n.nspname, c.relname,
          CASE WHEN p.polpermissive THEN '' ELSE ' AS RESTRICTIVE' END,
          CASE p.polcmd WHEN 'r' THEN ' FOR SELECT' WHEN 'a' THEN ' FOR INSERT'
            WHEN 'w' THEN ' FOR UPDATE' WHEN 'd' THEN ' FOR DELETE' ELSE '' END,
@@ -359,7 +392,7 @@ ORDER BY n.nspname, c.relname, p.polname`
 // pg_identify_object renders the identity in the syntax COMMENT ON accepts,
 // including "name on table" for constraints, triggers and policies.
 const comments = `
-SELECT format('COMMENT ON %s %s IS %L;',
+SELECT 'comment ' || o.type || ' ' || o.identity, format('COMMENT ON %s %s IS %L;',
          CASE o.type WHEN 'table column' THEN 'COLUMN' WHEN 'table constraint' THEN 'CONSTRAINT'
            ELSE upper(o.type) END,
          o.identity, d.description)
@@ -416,7 +449,9 @@ WITH acl AS (
       WHERE d.grantee = x.grantee AND d.privilege_type = x.privilege_type AND d.is_grantable = x.is_grantable)
   GROUP BY acl.kind, acl.identity, x.grantee, x.is_grantable
 )
-SELECT format('GRANT %s ON %s %s TO %s%s;', e.privileges, e.kind, e.identity,
+SELECT format('grant %s %s %s %s', e.kind, e.identity,
+         CASE WHEN e.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(r.rolname) END, e.is_grantable),
+       format('GRANT %s ON %s %s TO %s%s;', e.privileges, e.kind, e.identity,
          CASE WHEN e.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(r.rolname) END,
          CASE WHEN e.is_grantable THEN ' WITH GRANT OPTION' ELSE '' END)
 FROM entries e LEFT JOIN pg_catalog.pg_roles r ON r.oid = e.grantee
