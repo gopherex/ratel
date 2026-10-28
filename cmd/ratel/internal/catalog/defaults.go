@@ -7,6 +7,8 @@ import (
 	pg "github.com/pganalyze/pg_query_go/v6"
 
 	"github.com/gopherex/ratel/ir"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/pgname"
 )
 
 const (
@@ -207,7 +209,7 @@ func serialType(name string) string {
 // uniqueRelationName chooses a relation name free in the schema, as
 // PostgreSQL's ChooseRelationName does for indexes and owned sequences.
 func (b *builder) uniqueRelationName(schema, name1, name2, label string) string {
-	return chooseName(name1, name2, label, func(name string) bool {
+	return pgname.Choose(name1, name2, label, func(name string) bool {
 		reference := &ir.ObjectRef{Name: &ir.QualifiedName{Parts: []string{schema, name}}}
 		_, exists := b.namespaces["relation/"+ObjectID(reference)]
 

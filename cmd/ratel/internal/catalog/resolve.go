@@ -14,6 +14,7 @@ import (
 	"github.com/gopherex/ratel/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
+	"github.com/gopherex/ratel/cmd/ratel/internal/pgname"
 )
 
 func (b *builder) finish() error {
@@ -330,23 +331,23 @@ func constraintName(table *ir.Table, constraint *ir.Constraint, used func(string
 
 	switch constraint.GetType() {
 	case ir.ConstraintType_CONSTRAINT_TYPE_PRIMARY_KEY:
-		return chooseName(relation, "", "pkey", used)
+		return pgname.Choose(relation, "", "pkey", used)
 	case ir.ConstraintType_CONSTRAINT_TYPE_FOREIGN_KEY:
-		return chooseName(relation, nameAddition(constraintColumns(constraint)), "fkey", used)
+		return pgname.Choose(relation, pgname.Addition(constraintColumns(constraint)), "fkey", used)
 	case ir.ConstraintType_CONSTRAINT_TYPE_UNIQUE:
-		return chooseName(relation, nameAddition(constraintColumns(constraint)), "key", used)
+		return pgname.Choose(relation, pgname.Addition(constraintColumns(constraint)), "key", used)
 	case ir.ConstraintType_CONSTRAINT_TYPE_NOT_NULL:
-		return chooseName(relation, constraint.GetNotNullColumn(), "not_null", used)
+		return pgname.Choose(relation, constraint.GetNotNullColumn(), "not_null", used)
 	case ir.ConstraintType_CONSTRAINT_TYPE_EXCLUSION:
-		return chooseName(relation, nameAddition(exclusionColumns(constraint.GetExclusion())), "excl", used)
+		return pgname.Choose(relation, pgname.Addition(exclusionColumns(constraint.GetExclusion())), "excl", used)
 	default:
 		// A check names its column only when it references exactly one.
 		columns := referencedColumns(constraint.GetCheck().GetExpression())
 		if len(columns) == 1 {
-			return chooseName(relation, columns[0], "check", used)
+			return pgname.Choose(relation, columns[0], "check", used)
 		}
 
-		return chooseName(relation, "", "check", used)
+		return pgname.Choose(relation, "", "check", used)
 	}
 }
 

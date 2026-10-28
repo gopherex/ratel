@@ -10,6 +10,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/gopherex/ratel/ir"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/pgname"
 )
 
 func normalize(message protoreflect.Message, path string) {
@@ -75,7 +77,7 @@ func indexColumns(index *ir.Index) string {
 		columns = append(columns, cmp.Or(element.GetColumn(), expressionColumnName(element.GetExpr())))
 	}
 
-	return nameAddition(columns)
+	return pgname.Addition(columns)
 }
 
 func nameConstraints(table *ir.Table) {
@@ -112,7 +114,7 @@ func nameDomainConstraints(domain *ir.DomainType) {
 
 	for _, constraint := range domain.GetConstraints() {
 		if constraint.GetName() == "" {
-			constraint.Name = chooseName(parts[len(parts)-1], "", "check", func(name string) bool { return used[name] })
+			constraint.Name = pgname.Choose(parts[len(parts)-1], "", "check", func(name string) bool { return used[name] })
 			used[constraint.GetName()] = true
 		}
 	}
