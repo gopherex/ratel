@@ -10,9 +10,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestStatementProvenance(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testStatementProvenance(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct{ name, sql string }{
 		{"select", "-- привет\nSELECT 1, (SELECT 2);\nSELECT 3"},
@@ -22,7 +21,7 @@ func TestStatementProvenance(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(tc.sql)
+			tree, err := parser.Parse(tc.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -30,7 +29,7 @@ func TestStatementProvenance(t *testing.T) {
 			seen := make(map[string]bool)
 
 			for index, raw := range tree.GetStmts() {
-				current := mapper.New("query.sql", tc.sql, raw, index)
+				current := mapper.New(parser, "query.sql", tc.sql, raw, index)
 				first := current.MapStatement(raw.GetStmt())
 				second := current.MapStatement(raw.GetStmt())
 
@@ -81,9 +80,8 @@ func inspectIDs(t *testing.T, message protoreflect.Message, seen map[string]bool
 	})
 }
 
-func TestSourceCoordinates(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testSourceCoordinates(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		sql                string
@@ -97,13 +95,13 @@ func TestSourceCoordinates(t *testing.T) {
 		t.Run(tc.sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(tc.sql)
+			tree, err := parser.Parse(tc.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("source.sql", tc.sql, raw, 0)
+			current := mapper.New(parser, "source.sql", tc.sql, raw, 0)
 			got := current.MapStatement(raw.GetStmt())
 
 			span := got.GetMeta().GetSource()
@@ -120,10 +118,10 @@ func TestSourceCoordinates(t *testing.T) {
 	}
 }
 
-func TestNilDeclarations(t *testing.T) {
-	t.Parallel()
+func testNilDeclarations(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
-	current := mapper.New("nil.sql", "", nil, 0)
+	current := mapper.New(parser, "nil.sql", "", nil, 0)
 
 	for _, tc := range []struct {
 		name  string
@@ -169,15 +167,17 @@ func TestNilDeclarations(t *testing.T) {
 }
 
 func BenchmarkMapStatement(b *testing.B) {
+	parser := newParser(b)
+
 	sql := "SELECT id, sum(amount) OVER (PARTITION BY id ORDER BY amount) FROM app.orders WHERE id = $1"
 
-	tree, err := parse.Parse(sql)
+	tree, err := parser.Parse(sql)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	raw := tree.GetStmts()[0]
-	current := mapper.New("bench.sql", sql, raw, 0)
+	current := mapper.New(parser, "bench.sql", sql, raw, 0)
 
 	for b.Loop() {
 		current.MapStatement(raw.GetStmt())

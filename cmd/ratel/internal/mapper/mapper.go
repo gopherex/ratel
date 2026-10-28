@@ -11,21 +11,24 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/gopherex/ratel/ir"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
 // Mapper is the immutable source context of one top-level statement.
 // Construct one per RawStmt; nested mappings retain its source provenance.
 type Mapper struct {
-	file  string
-	sql   string
-	start int
-	end   int
-	path  string
+	parser parse.Parser
+	file   string
+	sql    string
+	start  int
+	end    int
+	path   string
 }
 
 // New binds a mapper to the original file text and a zero-based statement ordinal.
 // RawStmt positions are byte offsets; a zero length means through end of input.
-func New(file, sql string, raw *pg.RawStmt, ordinal int) Mapper {
+func New(parser parse.Parser, file, sql string, raw *pg.RawStmt, ordinal int) Mapper {
 	start := min(max(int(raw.GetStmtLocation()), 0), len(sql))
 	end := len(sql)
 
@@ -34,7 +37,7 @@ func New(file, sql string, raw *pg.RawStmt, ordinal int) Mapper {
 	}
 
 	return Mapper{
-		file: file, sql: sql, start: start, end: end,
+		parser: parser, file: file, sql: sql, start: start, end: end,
 		path: strconv.Quote(file) + "/statement/" + strconv.Itoa(ordinal),
 	}
 }

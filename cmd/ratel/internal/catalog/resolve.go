@@ -13,7 +13,6 @@ import (
 	"github.com/gopherex/ratel/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
-	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
 func (b *builder) finish() error {
@@ -349,7 +348,7 @@ func (b *builder) resolveRoutineReference(reference *ir.ObjectRef, scope string,
 	signature := parts[len(parts)-1]
 	sql := "CREATE FUNCTION ratel_reference(" + signature + ") RETURNS int LANGUAGE sql AS 'SELECT 1'"
 
-	parsed, err := parse.Parse(sql)
+	parsed, err := b.parser.Parse(sql)
 	if err != nil || len(parsed.GetStmts()) != 1 {
 		return refusal("RTL-C03", meta, "invalid routine signature "+signature)
 	}
@@ -619,7 +618,7 @@ func (b *builder) sequenceCall(call *ir.FunctionCall, scope string, meta *ir.Met
 		return refusal("RTL-C03", meta, "sequence reference must be a constant name")
 	}
 
-	parsed, err := parse.Parse("CREATE SEQUENCE " + name)
+	parsed, err := b.parser.Parse("CREATE SEQUENCE " + name)
 	if err != nil || len(parsed.GetStmts()) != 1 {
 		return refusal("RTL-C03", meta, "invalid sequence reference "+name)
 	}

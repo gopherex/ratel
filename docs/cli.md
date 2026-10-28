@@ -38,6 +38,9 @@ version: 1
 postgres:
   version: 18                 # production major version: inference and recipes target it
 
+parser:
+  concurrency: 1              # shared bound for WASM parse, scan and deparse operations
+
 schema:  [schema/**/*.sql]
 queries:                      # query files grouped into Go packages
   - files: [queries/users/*.sql]
@@ -72,6 +75,12 @@ Rules:
 
 - Unknown keys are errors. Every duration and size is a value in this file;
   the code holds no tuning constants besides these defaults.
+- `parser.concurrency` defaults to `1`; omitted or zero selects this default,
+  and negative values are errors. One `parse.Parser` is constructed from the
+  parser configuration before starting concurrent work and injected into every
+  catalog, mapper and annotation operation. All three WASM operations (parse,
+  scan and deparse) share its semaphore. Do not construct a parser per request:
+  the upstream pool retains every instance and its grown linear memory.
 - Plugin `options` is passed to the plugin as bytes of its own options
   message; the plugin validates it in `Info` and `Generate`.
 - `postgres.version` must be between 16 and the latest major this ratel

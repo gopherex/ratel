@@ -13,9 +13,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestBuild(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testBuild(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct{ name, sql, failure string }{
 		{"empty", "", ""},
@@ -58,7 +57,7 @@ func TestBuild(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result, err := catalog.Build([]catalog.File{{Name: "schema.sql", SQL: tc.sql}}, 17, nil)
+			result, err := catalog.Build(parser, []catalog.File{{Name: "schema.sql", SQL: tc.sql}}, 17, nil)
 			if tc.failure != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.failure) {
 					t.Fatalf("error = %v, want %q", err, tc.failure)
@@ -78,9 +77,8 @@ func TestBuild(t *testing.T) {
 	}
 }
 
-func TestPermutations(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testPermutations(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	statements := []string{
 		`CREATE SCHEMA app`,
@@ -102,33 +100,33 @@ func TestPermutations(t *testing.T) {
 		files[index] = catalog.File{Name: strings.Repeat("f", index+1) + ".sql", SQL: sql + ";"}
 	}
 
-	expected := buildBytes(t, files, false)
+	expected := buildBytes(t, parser, files, false)
 
 	random := rand.New(rand.NewPCG(1, 2))
 	for range 50 {
 		random.Shuffle(len(files), func(i, j int) { files[i], files[j] = files[j], files[i] })
 
-		if !bytes.Equal(expected, buildBytes(t, files, false)) {
+		if !bytes.Equal(expected, buildBytes(t, parser, files, false)) {
 			t.Fatal("file order changes catalog")
 		}
 	}
 
-	expected = buildBytes(t, []catalog.File{{Name: "one.sql", SQL: strings.Join(statements, "; ") + ";"}}, true)
+	expected = buildBytes(t, parser, []catalog.File{{Name: "one.sql", SQL: strings.Join(statements, "; ") + ";"}}, true)
 
 	for range 50 {
 		random.Shuffle(len(statements), func(i, j int) { statements[i], statements[j] = statements[j], statements[i] })
 
 		permuted := []catalog.File{{Name: "one.sql", SQL: strings.Join(statements, "; ") + ";"}}
-		if !bytes.Equal(expected, buildBytes(t, permuted, true)) {
+		if !bytes.Equal(expected, buildBytes(t, parser, permuted, true)) {
 			t.Fatal("statement order changes catalog")
 		}
 	}
 }
 
-func buildBytes(t *testing.T, files []catalog.File, clearSpans bool) []byte {
+func buildBytes(t *testing.T, parser parse.Parser, files []catalog.File, clearSpans bool) []byte {
 	t.Helper()
 
-	result, err := catalog.Build(files, 17, nil)
+	result, err := catalog.Build(parser, files, 17, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,14 +168,14 @@ func clearSources(message protoreflect.Message) {
 	})
 }
 
-func TestVersion(t *testing.T) {
-	t.Parallel()
+func testVersion(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, major := range []int{0, 15, 19} {
 		t.Run(string(rune('a'+major)), func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := catalog.Build(nil, major, nil); err == nil {
+			if _, err := catalog.Build(parser, nil, major, nil); err == nil {
 				t.Fatal("accepted unsupported version")
 			}
 		})
@@ -185,12 +183,12 @@ func TestVersion(t *testing.T) {
 }
 
 func BenchmarkBuild(b *testing.B) {
-	parse.Warm()
+	parser := newParser(b)
 
 	files := []catalog.File{{Name: "schema.sql", SQL: `CREATE TABLE a(id int PRIMARY KEY);
  CREATE TABLE b(id int REFERENCES a);`}}
 	for b.Loop() {
-		if _, err := catalog.Build(files, 17, nil); err != nil {
+		if _, err := catalog.Build(parser, files, 17, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

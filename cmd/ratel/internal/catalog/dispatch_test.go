@@ -7,9 +7,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestDeclarations(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testDeclarations(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct{ name, sql string }{
 		{"types", `CREATE TYPE status AS ENUM ('ok'); CREATE DOMAIN positive AS int CHECK(VALUE>0);
@@ -30,7 +29,7 @@ func TestDeclarations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result, err := catalog.Build([]catalog.File{{Name: "declarations.sql", SQL: tc.sql}}, 17, nil)
+			result, err := catalog.Build(parser, []catalog.File{{Name: "declarations.sql", SQL: tc.sql}}, 17, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -42,16 +41,15 @@ func TestDeclarations(t *testing.T) {
 	}
 }
 
-func TestAttachments(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testAttachments(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	sql := `COMMENT ON COLUMN a.id IS 'key'; CREATE POLICY p ON a USING(true);
  CREATE INDEX idx ON a(id); ALTER TABLE a ADD CONSTRAINT positive CHECK(id>0),
  ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY; CREATE TABLE a(id int);
  GRANT SELECT ON a TO PUBLIC;`
 
-	result, err := catalog.Build([]catalog.File{{Name: "attachments.sql", SQL: sql}}, 17, nil)
+	result, err := catalog.Build(parser, []catalog.File{{Name: "attachments.sql", SQL: sql}}, 17, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,12 +72,12 @@ func TestAttachments(t *testing.T) {
 }
 
 func BenchmarkDeclarations(b *testing.B) {
-	parse.Warm()
+	parser := newParser(b)
 
 	files := []catalog.File{{Name: "types.sql", SQL: `CREATE TYPE mood AS ENUM ('ok');
  CREATE DOMAIN positive AS int; CREATE TABLE a(v mood,n positive);`}}
 	for b.Loop() {
-		if _, err := catalog.Build(files, 17, nil); err != nil {
+		if _, err := catalog.Build(parser, files, 17, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

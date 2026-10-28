@@ -7,9 +7,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestMapExpr(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testMapExpr(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct{ sql, field, symbol string }{
 		{"12345678901234567890.123456789", "literal", ""},
@@ -62,13 +61,13 @@ func TestMapExpr(t *testing.T) {
 
 			sql := "SELECT " + tc.sql
 
-			tree, err := parse.Parse(sql)
+			tree, err := parser.Parse(sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("expr.sql", sql, raw, 0)
+			current := mapper.New(parser, "expr.sql", sql, raw, 0)
 			expr := current.MapExpr(raw.GetStmt().GetSelectStmt().GetTargetList()[0].GetResTarget().GetVal())
 			oneof := expr.ProtoReflect().Descriptor().Oneofs().Get(0)
 
@@ -101,15 +100,17 @@ func TestMapExpr(t *testing.T) {
 }
 
 func BenchmarkMapExpr(b *testing.B) {
+	parser := newParser(b)
+
 	sql := "SELECT coalesce(a, 1) + $1"
 
-	tree, err := parse.Parse(sql)
+	tree, err := parser.Parse(sql)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	raw := tree.GetStmts()[0]
-	current := mapper.New("expr.sql", sql, raw, 0)
+	current := mapper.New(parser, "expr.sql", sql, raw, 0)
 	node := raw.GetStmt().GetSelectStmt().GetTargetList()[0].GetResTarget().GetVal()
 
 	for b.Loop() {

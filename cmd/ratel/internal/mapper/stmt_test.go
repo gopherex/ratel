@@ -7,9 +7,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestMapStatements(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testMapStatements(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct{ sql, kind string }{
 		{"SELECT DISTINCT ON (a) a FROM app.t LEFT JOIN app.u USING (id) WHERE a > $1" +
@@ -33,13 +32,13 @@ func TestMapStatements(t *testing.T) {
 		t.Run(tc.sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(tc.sql)
+			tree, err := parser.Parse(tc.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("stmt.sql", tc.sql, raw, 0)
+			current := mapper.New(parser, "stmt.sql", tc.sql, raw, 0)
 			got := current.MapStatement(raw.GetStmt())
 			reflected := got.ProtoReflect()
 
@@ -68,18 +67,20 @@ func TestMapStatements(t *testing.T) {
 }
 
 func BenchmarkStatements(b *testing.B) {
+	parser := newParser(b)
+
 	for _, sql := range []string{
 		"INSERT INTO t VALUES ($1) RETURNING *", "UPDATE t SET a=$1 WHERE id=$2",
 		"DELETE FROM t WHERE id=$1", "MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DELETE",
 	} {
 		b.Run(sql, func(b *testing.B) {
-			tree, err := parse.Parse(sql)
+			tree, err := parser.Parse(sql)
 			if err != nil {
 				b.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("bench.sql", sql, raw, 0)
+			current := mapper.New(parser, "bench.sql", sql, raw, 0)
 
 			for b.Loop() {
 				current.MapStatement(raw.GetStmt())

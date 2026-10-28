@@ -9,9 +9,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestMapDDL(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testMapDDL(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		sql   string
@@ -35,13 +34,13 @@ func TestMapDDL(t *testing.T) {
 		t.Run(tc.sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(tc.sql)
+			tree, err := parser.Parse(tc.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("schema.sql", tc.sql, raw, 0)
+			current := mapper.New(parser, "schema.sql", tc.sql, raw, 0)
 			tc.check(t, current, raw.GetStmt())
 		})
 	}
@@ -113,9 +112,8 @@ func checkSequence(t *testing.T, current mapper.Mapper, node *pg.Node) {
 	}
 }
 
-func TestColumnConstraints(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testColumnConstraints(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		declaration string
@@ -135,13 +133,13 @@ func TestColumnConstraints(t *testing.T) {
 
 			sql := "CREATE TABLE app.t (" + tc.declaration + ")"
 
-			tree, err := parse.Parse(sql)
+			tree, err := parser.Parse(sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("column.sql", sql, raw, 0)
+			current := mapper.New(parser, "column.sql", sql, raw, 0)
 			column := raw.GetStmt().GetCreateStmt().GetTableElts()[0].GetColumnDef()
 
 			got := current.MapColumn(column, 1)
@@ -162,15 +160,17 @@ func TestColumnConstraints(t *testing.T) {
 }
 
 func BenchmarkDDL(b *testing.B) {
+	parser := newParser(b)
+
 	sql := "CREATE TABLE app.t (id bigint PRIMARY KEY, amount numeric(12,2) DEFAULT 0 CHECK (amount>=0))"
 
-	tree, err := parse.Parse(sql)
+	tree, err := parser.Parse(sql)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	raw := tree.GetStmts()[0]
-	current := mapper.New("bench.sql", sql, raw, 0)
+	current := mapper.New(parser, "bench.sql", sql, raw, 0)
 
 	for b.Loop() {
 		current.MapCreateTable(raw.GetStmt().GetCreateStmt())

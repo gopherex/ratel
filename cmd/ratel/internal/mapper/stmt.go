@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	pg "github.com/pganalyze/pg_query_go/v6"
-	pgquery "github.com/wasilibs/go-pgquery"
 
 	"github.com/gopherex/ratel/ir"
 )
@@ -48,7 +47,7 @@ func (m Mapper) statement(node *pg.Node) *ir.Statement {
 }
 
 func (m Mapper) statementSQL(node *pg.Node) string {
-	sql, err := pgquery.Deparse(&pg.ParseResult{Stmts: []*pg.RawStmt{{Stmt: node}}})
+	sql, err := m.parser.Deparse(&pg.ParseResult{Stmts: []*pg.RawStmt{{Stmt: node}}})
 	if err != nil {
 		return m.sql[m.start:m.end]
 	}

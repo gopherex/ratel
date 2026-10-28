@@ -518,6 +518,7 @@ type Catalog struct {
 	Schemas         []*Schema              `protobuf:"bytes,6,rep,name=schemas,proto3" json:"schemas,omitempty"`       // ordered by object id
 	Relations       []*Relation            `protobuf:"bytes,7,rep,name=relations,proto3" json:"relations,omitempty"`   // spanning all schemas, ordered by object id
 	Meta            *Metadata              `protobuf:"bytes,8,opt,name=meta,proto3" json:"meta,omitempty"`
+	Diagnostics     []*Diagnostic          `protobuf:"bytes,9,rep,name=diagnostics,proto3" json:"diagnostics,omitempty"` // source-ordered annotation warnings
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -608,6 +609,13 @@ func (x *Catalog) GetMeta() *Metadata {
 	return nil
 }
 
+func (x *Catalog) GetDiagnostics() []*Diagnostic {
+	if x != nil {
+		return x.Diagnostics
+	}
+	return nil
+}
+
 var File_ratel_v1_ir_catalog_proto protoreflect.FileDescriptor
 
 const file_ratel_v1_ir_catalog_proto_rawDesc = "" +
@@ -659,7 +667,7 @@ const file_ratel_v1_ir_catalog_proto_rawDesc = "" +
 	"\x06target\x18\x02 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x06target\x12\x18\n" +
 	"\acontext\x18\x03 \x01(\tR\acontext\x12\x16\n" +
 	"\x06method\x18\x04 \x01(\tR\x06method\x126\n" +
-	"\bfunction\x18\x05 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\bfunction\"\xd7\x02\n" +
+	"\bfunction\x18\x05 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\bfunction\"\x92\x03\n" +
 	"\aCatalog\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12)\n" +
 	"\x10database_version\x18\x02 \x01(\tR\x0fdatabaseVersion\x12%\n" +
@@ -671,7 +679,8 @@ const file_ratel_v1_ir_catalog_proto_rawDesc = "" +
 	"extensions\x12-\n" +
 	"\aschemas\x18\x06 \x03(\v2\x13.ratel.v1.ir.SchemaR\aschemas\x123\n" +
 	"\trelations\x18\a \x03(\v2\x15.ratel.v1.ir.RelationR\trelations\x12)\n" +
-	"\x04meta\x18\b \x01(\v2\x15.ratel.v1.ir.MetadataR\x04metaB!Z\x1fgithub.com/gopherex/ratel/ir;irb\x06proto3"
+	"\x04meta\x18\b \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\x129\n" +
+	"\vdiagnostics\x18\t \x03(\v2\x17.ratel.v1.ir.DiagnosticR\vdiagnosticsB!Z\x1fgithub.com/gopherex/ratel/ir;irb\x06proto3"
 
 var (
 	file_ratel_v1_ir_catalog_proto_rawDescOnce sync.Once
@@ -709,6 +718,7 @@ var file_ratel_v1_ir_catalog_proto_goTypes = []any{
 	(*TypeRef)(nil),          // 19: ratel.v1.ir.TypeRef
 	(*QualifiedName)(nil),    // 20: ratel.v1.ir.QualifiedName
 	(*Relation)(nil),         // 21: ratel.v1.ir.Relation
+	(*Diagnostic)(nil),       // 22: ratel.v1.ir.Diagnostic
 }
 var file_ratel_v1_ir_catalog_proto_depIdxs = []int32{
 	6,  // 0: ratel.v1.ir.Extension.meta:type_name -> ratel.v1.ir.Metadata
@@ -742,11 +752,12 @@ var file_ratel_v1_ir_catalog_proto_depIdxs = []int32{
 	1,  // 28: ratel.v1.ir.Catalog.schemas:type_name -> ratel.v1.ir.Schema
 	21, // 29: ratel.v1.ir.Catalog.relations:type_name -> ratel.v1.ir.Relation
 	6,  // 30: ratel.v1.ir.Catalog.meta:type_name -> ratel.v1.ir.Metadata
-	31, // [31:31] is the sub-list for method output_type
-	31, // [31:31] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	22, // 31: ratel.v1.ir.Catalog.diagnostics:type_name -> ratel.v1.ir.Diagnostic
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_ratel_v1_ir_catalog_proto_init() }

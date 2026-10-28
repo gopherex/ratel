@@ -10,9 +10,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestSchemaDeclarations(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testSchemaDeclarations(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, sql := range []string{
 		"CREATE SCHEMA app AUTHORIZATION owner",
@@ -24,13 +23,13 @@ func TestSchemaDeclarations(t *testing.T) {
 		t.Run(sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(sql)
+			tree, err := parser.Parse(sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("schema.sql", sql, raw, 0)
+			current := mapper.New(parser, "schema.sql", sql, raw, 0)
 			node := raw.GetStmt()
 
 			switch {
@@ -80,9 +79,8 @@ func checkGrant(t *testing.T, grant *ir.Grant) {
 	}
 }
 
-func TestAlterTableFragments(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testAlterTableFragments(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		sql             string
@@ -96,13 +94,13 @@ func TestAlterTableFragments(t *testing.T) {
 		t.Run(tc.sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(tc.sql)
+			tree, err := parser.Parse(tc.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("schema.sql", tc.sql, raw, 0)
+			current := mapper.New(parser, "schema.sql", tc.sql, raw, 0)
 
 			got := current.MapAlterTable(raw.GetStmt().GetAlterTableStmt())
 			if got.GetRlsEnabled() != tc.enabled || got.GetRlsForced() != tc.forced ||
@@ -113,9 +111,8 @@ func TestAlterTableFragments(t *testing.T) {
 	}
 }
 
-func TestUnrepresentableGrants(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testUnrepresentableGrants(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, sql := range []string{
 		"GRANT SELECT(id) ON app.t TO reader", "REVOKE SELECT ON app.t FROM reader",
@@ -124,13 +121,13 @@ func TestUnrepresentableGrants(t *testing.T) {
 		t.Run(sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(sql)
+			tree, err := parser.Parse(sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("schema.sql", sql, raw, 0)
+			current := mapper.New(parser, "schema.sql", sql, raw, 0)
 
 			if got := current.MapGrant(raw.GetStmt().GetGrantStmt()); got != nil {
 				t.Fatal("grant scope changed", got)
@@ -139,9 +136,8 @@ func TestUnrepresentableGrants(t *testing.T) {
 	}
 }
 
-func TestTypeObjectReferences(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testTypeObjectReferences(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, sql := range []string{
 		`COMMENT ON TYPE app.status IS 'state'`,
@@ -152,13 +148,13 @@ func TestTypeObjectReferences(t *testing.T) {
 		t.Run(sql, func(t *testing.T) {
 			t.Parallel()
 
-			parsed, err := parse.Parse(sql)
+			parsed, err := parser.Parse(sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := parsed.GetStmts()[0]
-			current := mapper.New("type.sql", sql, raw, 0)
+			current := mapper.New(parser, "type.sql", sql, raw, 0)
 			node := raw.GetStmt()
 
 			var reference *ir.ObjectRef
@@ -181,15 +177,17 @@ func TestTypeObjectReferences(t *testing.T) {
 }
 
 func BenchmarkTypeObjectReferences(b *testing.B) {
+	parser := newParser(b)
+
 	sql := `COMMENT ON TYPE app.status IS 'state'`
 
-	parsed, err := parse.Parse(sql)
+	parsed, err := parser.Parse(sql)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	raw := parsed.GetStmts()[0]
-	current := mapper.New("type.sql", sql, raw, 0)
+	current := mapper.New(parser, "type.sql", sql, raw, 0)
 
 	for b.Loop() {
 		current.MapComment(raw.GetStmt().GetCommentStmt())
@@ -197,15 +195,17 @@ func BenchmarkTypeObjectReferences(b *testing.B) {
 }
 
 func BenchmarkSchemaDeclarations(b *testing.B) {
+	parser := newParser(b)
+
 	sql := "CREATE POLICY own ON app.t FOR SELECT TO reader USING (id > 0)"
 
-	tree, err := parse.Parse(sql)
+	tree, err := parser.Parse(sql)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	raw := tree.GetStmts()[0]
-	current := mapper.New("bench.sql", sql, raw, 0)
+	current := mapper.New(parser, "bench.sql", sql, raw, 0)
 
 	for b.Loop() {
 		current.MapCreatePolicy(raw.GetStmt().GetCreatePolicyStmt())

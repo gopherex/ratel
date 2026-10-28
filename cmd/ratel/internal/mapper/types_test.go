@@ -9,9 +9,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestMapType(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testMapType(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		sql, name  string
@@ -28,7 +27,7 @@ func TestMapType(t *testing.T) {
 		t.Run(tc.sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse("CREATE TABLE t (v " + tc.sql + ")")
+			tree, err := parser.Parse("CREATE TABLE t (v " + tc.sql + ")")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +52,9 @@ func TestMapType(t *testing.T) {
 }
 
 func BenchmarkMapType(b *testing.B) {
-	tree, err := parse.Parse("CREATE TABLE t (v numeric(12,2)[])")
+	parser := newParser(b)
+
+	tree, err := parser.Parse("CREATE TABLE t (v numeric(12,2)[])")
 	if err != nil {
 		b.Fatal(err)
 	}

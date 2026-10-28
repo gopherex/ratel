@@ -498,6 +498,7 @@ type DomainConstraint struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Check         *Expr                  `protobuf:"bytes,2,opt,name=check,proto3" json:"check,omitempty"`
+	Meta          *Metadata              `protobuf:"bytes,3,opt,name=meta,proto3" json:"meta,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -542,6 +543,13 @@ func (x *DomainConstraint) GetName() string {
 func (x *DomainConstraint) GetCheck() *Expr {
 	if x != nil {
 		return x.Check
+	}
+	return nil
+}
+
+func (x *DomainConstraint) GetMeta() *Metadata {
+	if x != nil {
+		return x.Meta
 	}
 	return nil
 }
@@ -643,6 +651,7 @@ type CompositeField struct {
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Type          *TypeRef               `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Collation     string                 `protobuf:"bytes,3,opt,name=collation,proto3" json:"collation,omitempty"`
+	Meta          *Metadata              `protobuf:"bytes,4,opt,name=meta,proto3" json:"meta,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -696,6 +705,13 @@ func (x *CompositeField) GetCollation() string {
 		return x.Collation
 	}
 	return ""
+}
+
+func (x *CompositeField) GetMeta() *Metadata {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
 }
 
 type CompositeType struct {
@@ -1829,10 +1845,11 @@ const file_ratel_v1_ir_routine_proto_rawDesc = "" +
 	"\bEnumType\x12.\n" +
 	"\x04name\x18\x01 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\x04name\x12\x16\n" +
 	"\x06labels\x18\x02 \x03(\tR\x06labels\x12)\n" +
-	"\x04meta\x18\x03 \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"O\n" +
+	"\x04meta\x18\x03 \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"z\n" +
 	"\x10DomainConstraint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
-	"\x05check\x18\x02 \x01(\v2\x11.ratel.v1.ir.ExprR\x05check\"\xcb\x02\n" +
+	"\x05check\x18\x02 \x01(\v2\x11.ratel.v1.ir.ExprR\x05check\x12)\n" +
+	"\x04meta\x18\x03 \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\xcb\x02\n" +
 	"\n" +
 	"DomainType\x12.\n" +
 	"\x04name\x18\x01 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\x04name\x121\n" +
@@ -1841,11 +1858,12 @@ const file_ratel_v1_ir_routine_proto_rawDesc = "" +
 	"\fdefault_expr\x18\x04 \x01(\v2\x11.ratel.v1.ir.ExprR\vdefaultExpr\x12\x1c\n" +
 	"\tcollation\x18\x05 \x01(\tR\tcollation\x12?\n" +
 	"\vconstraints\x18\x06 \x03(\v2\x1d.ratel.v1.ir.DomainConstraintR\vconstraints\x12)\n" +
-	"\x04meta\x18\a \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"l\n" +
+	"\x04meta\x18\a \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\x97\x01\n" +
 	"\x0eCompositeField\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12(\n" +
 	"\x04type\x18\x02 \x01(\v2\x14.ratel.v1.ir.TypeRefR\x04type\x12\x1c\n" +
-	"\tcollation\x18\x03 \x01(\tR\tcollation\"\x9f\x01\n" +
+	"\tcollation\x18\x03 \x01(\tR\tcollation\x12)\n" +
+	"\x04meta\x18\x04 \x01(\v2\x15.ratel.v1.ir.MetadataR\x04meta\"\x9f\x01\n" +
 	"\rCompositeType\x12.\n" +
 	"\x04name\x18\x01 \x01(\v2\x1a.ratel.v1.ir.QualifiedNameR\x04name\x123\n" +
 	"\x06fields\x18\x02 \x03(\v2\x1b.ratel.v1.ir.CompositeFieldR\x06fields\x12)\n" +
@@ -2041,61 +2059,63 @@ var file_ratel_v1_ir_routine_proto_depIdxs = []int32{
 	25, // 0: ratel.v1.ir.EnumType.name:type_name -> ratel.v1.ir.QualifiedName
 	26, // 1: ratel.v1.ir.EnumType.meta:type_name -> ratel.v1.ir.Metadata
 	27, // 2: ratel.v1.ir.DomainConstraint.check:type_name -> ratel.v1.ir.Expr
-	25, // 3: ratel.v1.ir.DomainType.name:type_name -> ratel.v1.ir.QualifiedName
-	28, // 4: ratel.v1.ir.DomainType.base_type:type_name -> ratel.v1.ir.TypeRef
-	27, // 5: ratel.v1.ir.DomainType.default_expr:type_name -> ratel.v1.ir.Expr
-	9,  // 6: ratel.v1.ir.DomainType.constraints:type_name -> ratel.v1.ir.DomainConstraint
-	26, // 7: ratel.v1.ir.DomainType.meta:type_name -> ratel.v1.ir.Metadata
-	28, // 8: ratel.v1.ir.CompositeField.type:type_name -> ratel.v1.ir.TypeRef
-	25, // 9: ratel.v1.ir.CompositeType.name:type_name -> ratel.v1.ir.QualifiedName
-	11, // 10: ratel.v1.ir.CompositeType.fields:type_name -> ratel.v1.ir.CompositeField
-	26, // 11: ratel.v1.ir.CompositeType.meta:type_name -> ratel.v1.ir.Metadata
-	25, // 12: ratel.v1.ir.RangeType.name:type_name -> ratel.v1.ir.QualifiedName
-	28, // 13: ratel.v1.ir.RangeType.subtype:type_name -> ratel.v1.ir.TypeRef
-	26, // 14: ratel.v1.ir.RangeType.meta:type_name -> ratel.v1.ir.Metadata
-	25, // 15: ratel.v1.ir.View.name:type_name -> ratel.v1.ir.QualifiedName
-	29, // 16: ratel.v1.ir.View.query:type_name -> ratel.v1.ir.SelectStmt
-	0,  // 17: ratel.v1.ir.View.check_option:type_name -> ratel.v1.ir.CheckOption
-	26, // 18: ratel.v1.ir.View.meta:type_name -> ratel.v1.ir.Metadata
-	25, // 19: ratel.v1.ir.MaterializedView.name:type_name -> ratel.v1.ir.QualifiedName
-	29, // 20: ratel.v1.ir.MaterializedView.query:type_name -> ratel.v1.ir.SelectStmt
-	30, // 21: ratel.v1.ir.MaterializedView.indexes:type_name -> ratel.v1.ir.Index
-	26, // 22: ratel.v1.ir.MaterializedView.meta:type_name -> ratel.v1.ir.Metadata
-	28, // 23: ratel.v1.ir.Argument.type:type_name -> ratel.v1.ir.TypeRef
-	1,  // 24: ratel.v1.ir.Argument.mode:type_name -> ratel.v1.ir.ArgMode
-	27, // 25: ratel.v1.ir.Argument.default_value:type_name -> ratel.v1.ir.Expr
-	28, // 26: ratel.v1.ir.SetofType.type:type_name -> ratel.v1.ir.TypeRef
-	28, // 27: ratel.v1.ir.TableColumn.type:type_name -> ratel.v1.ir.TypeRef
-	18, // 28: ratel.v1.ir.TableReturn.columns:type_name -> ratel.v1.ir.TableColumn
-	28, // 29: ratel.v1.ir.ReturnType.scalar:type_name -> ratel.v1.ir.TypeRef
-	17, // 30: ratel.v1.ir.ReturnType.setof:type_name -> ratel.v1.ir.SetofType
-	19, // 31: ratel.v1.ir.ReturnType.table:type_name -> ratel.v1.ir.TableReturn
-	25, // 32: ratel.v1.ir.Function.name:type_name -> ratel.v1.ir.QualifiedName
-	16, // 33: ratel.v1.ir.Function.arguments:type_name -> ratel.v1.ir.Argument
-	20, // 34: ratel.v1.ir.Function.returns:type_name -> ratel.v1.ir.ReturnType
-	2,  // 35: ratel.v1.ir.Function.volatility:type_name -> ratel.v1.ir.Volatility
-	4,  // 36: ratel.v1.ir.Function.null_input:type_name -> ratel.v1.ir.NullInputBehavior
-	3,  // 37: ratel.v1.ir.Function.parallel:type_name -> ratel.v1.ir.ParallelSafety
-	29, // 38: ratel.v1.ir.Function.sql_body:type_name -> ratel.v1.ir.SelectStmt
-	26, // 39: ratel.v1.ir.Function.meta:type_name -> ratel.v1.ir.Metadata
-	28, // 40: ratel.v1.ir.Function.variadic_element:type_name -> ratel.v1.ir.TypeRef
-	22, // 41: ratel.v1.ir.Function.aggregate:type_name -> ratel.v1.ir.AggregateSignature
-	25, // 42: ratel.v1.ir.Procedure.name:type_name -> ratel.v1.ir.QualifiedName
-	16, // 43: ratel.v1.ir.Procedure.arguments:type_name -> ratel.v1.ir.Argument
-	29, // 44: ratel.v1.ir.Procedure.sql_body:type_name -> ratel.v1.ir.SelectStmt
-	26, // 45: ratel.v1.ir.Procedure.meta:type_name -> ratel.v1.ir.Metadata
-	31, // 46: ratel.v1.ir.Trigger.table:type_name -> ratel.v1.ir.ObjectRef
-	5,  // 47: ratel.v1.ir.Trigger.timing:type_name -> ratel.v1.ir.TriggerTiming
-	6,  // 48: ratel.v1.ir.Trigger.events:type_name -> ratel.v1.ir.TriggerEvent
-	7,  // 49: ratel.v1.ir.Trigger.level:type_name -> ratel.v1.ir.TriggerLevel
-	27, // 50: ratel.v1.ir.Trigger.when:type_name -> ratel.v1.ir.Expr
-	31, // 51: ratel.v1.ir.Trigger.function:type_name -> ratel.v1.ir.ObjectRef
-	26, // 52: ratel.v1.ir.Trigger.meta:type_name -> ratel.v1.ir.Metadata
-	53, // [53:53] is the sub-list for method output_type
-	53, // [53:53] is the sub-list for method input_type
-	53, // [53:53] is the sub-list for extension type_name
-	53, // [53:53] is the sub-list for extension extendee
-	0,  // [0:53] is the sub-list for field type_name
+	26, // 3: ratel.v1.ir.DomainConstraint.meta:type_name -> ratel.v1.ir.Metadata
+	25, // 4: ratel.v1.ir.DomainType.name:type_name -> ratel.v1.ir.QualifiedName
+	28, // 5: ratel.v1.ir.DomainType.base_type:type_name -> ratel.v1.ir.TypeRef
+	27, // 6: ratel.v1.ir.DomainType.default_expr:type_name -> ratel.v1.ir.Expr
+	9,  // 7: ratel.v1.ir.DomainType.constraints:type_name -> ratel.v1.ir.DomainConstraint
+	26, // 8: ratel.v1.ir.DomainType.meta:type_name -> ratel.v1.ir.Metadata
+	28, // 9: ratel.v1.ir.CompositeField.type:type_name -> ratel.v1.ir.TypeRef
+	26, // 10: ratel.v1.ir.CompositeField.meta:type_name -> ratel.v1.ir.Metadata
+	25, // 11: ratel.v1.ir.CompositeType.name:type_name -> ratel.v1.ir.QualifiedName
+	11, // 12: ratel.v1.ir.CompositeType.fields:type_name -> ratel.v1.ir.CompositeField
+	26, // 13: ratel.v1.ir.CompositeType.meta:type_name -> ratel.v1.ir.Metadata
+	25, // 14: ratel.v1.ir.RangeType.name:type_name -> ratel.v1.ir.QualifiedName
+	28, // 15: ratel.v1.ir.RangeType.subtype:type_name -> ratel.v1.ir.TypeRef
+	26, // 16: ratel.v1.ir.RangeType.meta:type_name -> ratel.v1.ir.Metadata
+	25, // 17: ratel.v1.ir.View.name:type_name -> ratel.v1.ir.QualifiedName
+	29, // 18: ratel.v1.ir.View.query:type_name -> ratel.v1.ir.SelectStmt
+	0,  // 19: ratel.v1.ir.View.check_option:type_name -> ratel.v1.ir.CheckOption
+	26, // 20: ratel.v1.ir.View.meta:type_name -> ratel.v1.ir.Metadata
+	25, // 21: ratel.v1.ir.MaterializedView.name:type_name -> ratel.v1.ir.QualifiedName
+	29, // 22: ratel.v1.ir.MaterializedView.query:type_name -> ratel.v1.ir.SelectStmt
+	30, // 23: ratel.v1.ir.MaterializedView.indexes:type_name -> ratel.v1.ir.Index
+	26, // 24: ratel.v1.ir.MaterializedView.meta:type_name -> ratel.v1.ir.Metadata
+	28, // 25: ratel.v1.ir.Argument.type:type_name -> ratel.v1.ir.TypeRef
+	1,  // 26: ratel.v1.ir.Argument.mode:type_name -> ratel.v1.ir.ArgMode
+	27, // 27: ratel.v1.ir.Argument.default_value:type_name -> ratel.v1.ir.Expr
+	28, // 28: ratel.v1.ir.SetofType.type:type_name -> ratel.v1.ir.TypeRef
+	28, // 29: ratel.v1.ir.TableColumn.type:type_name -> ratel.v1.ir.TypeRef
+	18, // 30: ratel.v1.ir.TableReturn.columns:type_name -> ratel.v1.ir.TableColumn
+	28, // 31: ratel.v1.ir.ReturnType.scalar:type_name -> ratel.v1.ir.TypeRef
+	17, // 32: ratel.v1.ir.ReturnType.setof:type_name -> ratel.v1.ir.SetofType
+	19, // 33: ratel.v1.ir.ReturnType.table:type_name -> ratel.v1.ir.TableReturn
+	25, // 34: ratel.v1.ir.Function.name:type_name -> ratel.v1.ir.QualifiedName
+	16, // 35: ratel.v1.ir.Function.arguments:type_name -> ratel.v1.ir.Argument
+	20, // 36: ratel.v1.ir.Function.returns:type_name -> ratel.v1.ir.ReturnType
+	2,  // 37: ratel.v1.ir.Function.volatility:type_name -> ratel.v1.ir.Volatility
+	4,  // 38: ratel.v1.ir.Function.null_input:type_name -> ratel.v1.ir.NullInputBehavior
+	3,  // 39: ratel.v1.ir.Function.parallel:type_name -> ratel.v1.ir.ParallelSafety
+	29, // 40: ratel.v1.ir.Function.sql_body:type_name -> ratel.v1.ir.SelectStmt
+	26, // 41: ratel.v1.ir.Function.meta:type_name -> ratel.v1.ir.Metadata
+	28, // 42: ratel.v1.ir.Function.variadic_element:type_name -> ratel.v1.ir.TypeRef
+	22, // 43: ratel.v1.ir.Function.aggregate:type_name -> ratel.v1.ir.AggregateSignature
+	25, // 44: ratel.v1.ir.Procedure.name:type_name -> ratel.v1.ir.QualifiedName
+	16, // 45: ratel.v1.ir.Procedure.arguments:type_name -> ratel.v1.ir.Argument
+	29, // 46: ratel.v1.ir.Procedure.sql_body:type_name -> ratel.v1.ir.SelectStmt
+	26, // 47: ratel.v1.ir.Procedure.meta:type_name -> ratel.v1.ir.Metadata
+	31, // 48: ratel.v1.ir.Trigger.table:type_name -> ratel.v1.ir.ObjectRef
+	5,  // 49: ratel.v1.ir.Trigger.timing:type_name -> ratel.v1.ir.TriggerTiming
+	6,  // 50: ratel.v1.ir.Trigger.events:type_name -> ratel.v1.ir.TriggerEvent
+	7,  // 51: ratel.v1.ir.Trigger.level:type_name -> ratel.v1.ir.TriggerLevel
+	27, // 52: ratel.v1.ir.Trigger.when:type_name -> ratel.v1.ir.Expr
+	31, // 53: ratel.v1.ir.Trigger.function:type_name -> ratel.v1.ir.ObjectRef
+	26, // 54: ratel.v1.ir.Trigger.meta:type_name -> ratel.v1.ir.Metadata
+	55, // [55:55] is the sub-list for method output_type
+	55, // [55:55] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_ratel_v1_ir_routine_proto_init() }

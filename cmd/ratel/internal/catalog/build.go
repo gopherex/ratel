@@ -4,6 +4,7 @@ package catalog
 import (
 	"cmp"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 
@@ -46,9 +47,11 @@ type (
 		scope     string
 	}
 	statement struct {
-		syntax *pg.Node
-		mapper mapper.Mapper
-		schema string
+		syntax  *pg.Node
+		mapper  mapper.Mapper
+		schema  string
+		file    *File
+		ordinal int
 	}
 	attachment struct {
 		table   *ir.QualifiedName
@@ -59,6 +62,7 @@ type (
 		meta      *ir.Metadata
 	}
 	builder struct {
+		parser      parse.Parser
 		catalog     *ir.Catalog
 		schemas     map[string]*ir.Schema
 		objects     map[string]declaration
@@ -73,26 +77,28 @@ type (
 
 // Build collects declarations before resolving any references. Builtins are a
 // pg_catalog snapshot for the target major, not part of the desired catalog.
-// Call parse.Warm before invoking Build concurrently for the first time.
-func Build(files []File, major int, builtins []*ir.Schema) (*ir.Catalog, error) {
+// Parser is shared with every mapper and annotation operation in this build.
+func Build(parser parse.Parser, files []File, major int, builtins []*ir.Schema) (*ir.Catalog, error) {
 	const minMajor, maxMajor = 16, 18
 	if major < minMajor || major > maxMajor {
 		return nil, &Error{Code: "RTL-C01", Message: "unsupported PostgreSQL major " + strconv.Itoa(major)}
 	}
 
-	state := newBuilder(major, builtins)
+	state := newBuilder(parser, major, builtins)
 	ordered := slices.Clone(files)
 	slices.SortFunc(ordered, func(left, right File) int { return cmp.Compare(left.Name, right.Name) })
 
 	for _, file := range ordered {
-		parsed, err := parse.Parse(file.SQL)
+		parsed, err := parser.Parse(file.SQL)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", file.Name, err)
 		}
 
 		for ordinal, raw := range parsed.GetStmts() {
-			mapped := mapper.New(file.Name, file.SQL, raw, ordinal)
-			if err := state.collect(statement{syntax: raw.GetStmt(), mapper: mapped, schema: defaultSchema}); err != nil {
+			mapped := mapper.New(parser, file.Name, file.SQL, raw, ordinal)
+			if err := state.collect(statement{
+				syntax: raw.GetStmt(), mapper: mapped, schema: defaultSchema, file: &file, ordinal: ordinal,
+			}); err != nil {
 				return nil, err
 			}
 		}
@@ -118,10 +124,14 @@ func Build(files []File, major int, builtins []*ir.Schema) (*ir.Catalog, error) 
 		return nil, err
 	}
 
+	if err := state.annotate(ordered); err != nil {
+		return nil, err
+	}
+
 	return state.catalog, nil
 }
 
-func newBuilder(major int, builtins []*ir.Schema) *builder {
+func newBuilder(parser parse.Parser, major int, builtins []*ir.Schema) *builder {
 	public := &ir.Schema{Name: defaultSchema, Meta: &ir.Metadata{}}
 	reference := &ir.ObjectRef{
 		Kind: ir.ObjectKind_OBJECT_KIND_SCHEMA, Name: &ir.QualifiedName{Parts: []string{defaultSchema}},
@@ -131,6 +141,7 @@ func newBuilder(major int, builtins []*ir.Schema) *builder {
 	}}
 
 	return &builder{
+		parser: parser,
 		catalog: &ir.Catalog{
 			DefaultSchema: defaultSchema, SearchPath: []string{defaultSchema}, DatabaseVersion: strconv.Itoa(major),
 		},
@@ -157,13 +168,81 @@ func (b *builder) collect(stmt statement) error {
 	}
 
 	b.schemas[mapped.GetName()] = mapped
-	for _, node := range schema.GetSchemaElts() {
-		if err := b.collect(statement{syntax: node, mapper: stmt.mapper, schema: mapped.GetName()}); err != nil {
+
+	return b.collectEmbedded(stmt, schema)
+}
+
+func (b *builder) collectEmbedded(stmt statement, schema *pg.CreateSchemaStmt) error {
+	if len(schema.GetSchemaElts()) == 0 {
+		return nil
+	}
+
+	tokens, err := b.parser.Scan(stmt.mapper.SourceSQL())
+	if err != nil {
+		return fmt.Errorf("scan schema elements: %w", err)
+	}
+
+	source := stmt.mapper.MapCreateSchema(schema).GetMeta().GetSource()
+	start, end := source.GetStartOffset(), source.GetEndOffset()
+
+	if start > math.MaxInt32 || end > math.MaxInt32 {
+		return refusal("RTL-C04", &ir.Metadata{Source: source}, "schema exceeds scanner offset limit")
+	}
+
+	base, last := int64(start), int32(end)
+
+	var starts []int32
+
+	significant := slices.DeleteFunc(tokens.GetTokens(), func(token *pg.ScanToken) bool {
+		return token.GetToken() == pg.Token_SQL_COMMENT || token.GetToken() == pg.Token_C_COMMENT
+	})
+	for index, token := range significant {
+		if !schemaStatementStart(significant, index) {
+			continue
+		}
+
+		offset := base + int64(token.GetStart())
+		if offset < 0 || offset > math.MaxInt32 {
+			continue
+		}
+
+		starts = append(starts, int32(offset))
+	}
+
+	if len(starts) != len(schema.GetSchemaElts())+1 {
+		return refusal("RTL-C04", &ir.Metadata{Source: source}, "cannot locate embedded schema declarations")
+	}
+
+	starts = append(starts, last)
+	for index, node := range schema.GetSchemaElts() {
+		raw := &pg.RawStmt{Stmt: node, StmtLocation: starts[index+1], StmtLen: starts[index+2] - starts[index+1]}
+
+		mapped := mapper.New(b.parser, stmt.file.Name, stmt.file.SQL, raw, stmt.ordinal)
+		if err := b.collect(statement{
+			syntax: node, mapper: mapped, schema: schema.GetSchemaname(), file: stmt.file, ordinal: stmt.ordinal,
+		}); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func schemaStatementStart(tokens []*pg.ScanToken, index int) bool {
+	switch tokens[index].GetToken() {
+	case pg.Token_CREATE:
+		if index+1 == len(tokens) {
+			return false
+		}
+
+		next := tokens[index+1].GetToken()
+
+		return next != pg.Token_ON && next != pg.Token_ASCII_44
+	case pg.Token_GRANT:
+		return index == 0 || tokens[index-1].GetToken() != pg.Token_WITH
+	default:
+		return false
+	}
 }
 
 func (b *builder) register(ref *ir.ObjectRef, message proto.Message, meta *ir.Metadata, namespace string) error {

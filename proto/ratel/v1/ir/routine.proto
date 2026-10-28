@@ -20,6 +20,7 @@ message EnumType {
 message DomainConstraint {
   string name = 1;
   Expr check = 2;
+  Metadata meta = 3;
 }
 
 message DomainType {
@@ -36,6 +37,7 @@ message CompositeField {
   string name = 1;
   TypeRef type = 2;
   string collation = 3;
+  Metadata meta = 4;
 }
 
 message CompositeType {

@@ -31,6 +31,7 @@ func (m Mapper) MapCreateDomain(value *pg.CreateDomainStmt) *ir.DomainType {
 		case pg.ConstrType_CONSTR_CHECK:
 			result.Constraints = append(result.Constraints, &ir.DomainConstraint{
 				Name: entry.GetConname(), Check: m.expr(entry.GetRawExpr()),
+				Meta: &ir.Metadata{Source: m.span(int(entry.GetLocation()), m.end)},
 			})
 		default:
 		}
@@ -57,6 +58,7 @@ func (m Mapper) MapCompositeType(value *pg.CompositeTypeStmt) *ir.CompositeType 
 		result.Fields = append(result.Fields, &ir.CompositeField{
 			Name: field.GetColname(),
 			Type: MapType(field.GetTypeName()), Collation: dotted(field.GetCollClause().GetCollname()),
+			Meta: &ir.Metadata{Source: m.span(int(field.GetLocation()), m.end)},
 		})
 	}
 

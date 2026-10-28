@@ -85,4 +85,5 @@ message Catalog {
   repeated Schema schemas = 6;         // ordered by object id
   repeated Relation relations = 7;     // spanning all schemas, ordered by object id
   Metadata meta = 8;
+  repeated Diagnostic diagnostics = 9; // source-ordered annotation warnings
 }

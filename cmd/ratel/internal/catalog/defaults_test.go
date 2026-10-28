@@ -7,9 +7,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestSequenceDefaults(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testSequenceDefaults(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		name, sql, typ                     string
@@ -23,7 +22,7 @@ func TestSequenceDefaults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result, err := catalog.Build([]catalog.File{{Name: "defaults.sql", SQL: tc.sql}}, 17, nil)
+			result, err := catalog.Build(parser, []catalog.File{{Name: "defaults.sql", SQL: tc.sql}}, 17, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -43,14 +42,13 @@ func TestSequenceDefaults(t *testing.T) {
 	}
 }
 
-func TestGeneratedMetadata(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testGeneratedMetadata(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	files := []catalog.File{{Name: "metadata.sql", SQL: `CREATE TABLE a(id serial PRIMARY KEY);
  COMMENT ON COLUMN a.id IS 'identity';`}}
 
-	result, err := catalog.Build(files, 17, nil)
+	result, err := catalog.Build(parser, files, 17, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,14 +65,13 @@ func TestGeneratedMetadata(t *testing.T) {
 	}
 }
 
-func TestAlterPrimaryNotNull(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testAlterPrimaryNotNull(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	files := []catalog.File{{Name: "primary.sql", SQL: `ALTER TABLE a ADD CONSTRAINT pk PRIMARY KEY(id);
  CREATE TABLE a(id int);`}}
 
-	result, err := catalog.Build(files, 17, nil)
+	result, err := catalog.Build(parser, files, 17, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,11 +83,11 @@ func TestAlterPrimaryNotNull(t *testing.T) {
 }
 
 func BenchmarkSequenceDefaults(b *testing.B) {
-	parse.Warm()
+	parser := newParser(b)
 
 	files := []catalog.File{{Name: "defaults.sql", SQL: `CREATE TABLE a(id serial PRIMARY KEY);`}}
 	for b.Loop() {
-		if _, err := catalog.Build(files, 17, nil); err != nil {
+		if _, err := catalog.Build(parser, files, 17, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

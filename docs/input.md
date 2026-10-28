@@ -75,6 +75,23 @@ SELECT * FROM app.orders WHERE user_id = ANY(@user_ids);
 | `@name` | named parameter, rewritten to `$N`; the same name maps to the same `$N` |
 | `$N` | positional parameter |
 
+A header occupies its own `--` comment line; text in SQL literals and inline
+comments never starts a query. Each header owns exactly one nonempty statement,
+ending at the next header or EOF. A terminating semicolon is optional. Query
+annotations go after the header and before the first SQL token, for example:
+
+```sql
+-- name: UserByEmail :one
+-- @ratel.row User
+-- @go.row User
+SELECT id, email FROM app.users WHERE email = @email;
+```
+
+`@ratel.row` is a core annotation; a configured Go plugin owns the meaning of
+`@go.row`. The scanner preserves both, without doing type inference or parameter
+rewriting. It checks lexical SQL, headers and statement boundaries; inference
+parses the statement after named-parameter rewriting.
+
 There is no dynamic-query syntax. Optional filters, dynamic ordering and
 pagination are added at runtime by using a `SELECT` query as a builder source
 ([runtime.md](runtime.md#queries-as-builder-sources)). Parameter and column
@@ -120,8 +137,16 @@ annotation := "@" namespace "." name { arg }
 arg        := value | key "=" value
 value      := bare | quoted
 bare       := run of characters other than whitespace, '"' and '='
-quoted     := '"' { any character, '""' for a quote } '"'
+quoted     := '"' { any character except a line break, '""' for a quote } '"'
 ```
+
+An annotation starts at the beginning of a comment line, ignoring whitespace
+and one optional leading `*` in a block comment. Each line holds one annotation;
+mentions inside prose are ordinary text. Namespace, annotation name and argument
+keys are identifiers (Unicode letters, digits after the first character, and
+underscores). Keys are unquoted, and `=` has no surrounding whitespace. Values
+use Unicode whitespace as separators. Duplicate keys are syntax errors in every
+namespace.
 
 - One syntax for every namespace: positional values and `key=value` pairs. The
   host parses it and hands plugins the parsed form; the owner of a namespace
@@ -129,7 +154,17 @@ quoted     := '"' { any character, '""' for a quote } '"'
 - Annotations live in `--` and `/* */` comments. Attachment:
   - comments directly before a statement attach to the statement's object;
   - inside a column or constraint list, comments directly before an element
-    and a trailing comment on its line attach to that element.
+    and a trailing comment on its line attach to that element;
+  - whitespace and ordinary comments do not break adjacency. A same-line
+    trailing comment wins over attachment to the next element, including after
+    a comma. Outside the list, a trailing comment has no element target;
+  - an annotation before `ALTER TABLE ... ADD CONSTRAINT` attaches to the added
+    constraint when exactly one constraint is added; otherwise it targets the
+    table. An annotation on an individual constraint still targets that
+    constraint. `COMMENT ON` targets its referenced object; `GRANT` targets its
+    referenced object only when the statement names one distinct object.
+    Multi-object grants have no single annotation target. Annotations without
+    an adjacent target are errors.
 - The scanner is SQL-aware: text inside string literals, quoted identifiers and
   dollar-quoted bodies is never scanned.
 - Core annotations are validated by the host: unknown name, wrong target,
@@ -151,6 +186,17 @@ quoted     := '"' { any character, '""' for a quote } '"'
 | `@ratel.nullable <param>` / `@ratel.notnull <param or column>` | query | overrides inferred nullability |
 | `@ratel.row <Name>` | query | the result type is the shared generated type `<Name>` |
 | `@ratel.origin <ref>` | table, column | emitted by frontends: where the object came from (e.g. a proto field) |
+
+Core arguments must be nonempty. Relation names and shared row names are
+exported Go-style identifiers, including Unicode uppercase letters. `batch` is
+a positive unsigned 64-bit integer; `using` and `expr` must parse as SQL
+expressions. Permission codes have the form `RTL-` followed by an uppercase
+ASCII letter and two digits.
+
+Core annotations are single-use per target, except `allow` (one per code),
+`nullable` and `notnull` (one per referenced name). `rel` conflicts with `norel`;
+`nullable` conflicts with `notnull` for the same name. Plugin owners, not the
+host, validate their annotation names, values, target kinds and repeatability.
 
 Rename, retype and backfill annotations are consumed by the next planned
 migration. `ratel migrate plan` reports annotations whose intent is already

@@ -73,7 +73,7 @@ assemble a catalog, resolve references, infer types, derive relations, invent
 constraint names, expand serial columns, or apply server-dependent defaults.
 The AST is read-only; each call builds a fresh IR tree.
 
-Create a mapper with `mapper.New(file, sql, rawStmt, ordinal)` for each
+Create a mapper with `mapper.New(parser, file, sql, rawStmt, ordinal)` for each
 `ParseResult.stmts` entry. `sql` is the complete original file, not a statement
 substring; `ordinal` is the zero-based position in that file. `MapStatement`
 handles SELECT, INSERT, UPDATE, DELETE and MERGE. Dedicated `MapCreate*`,
@@ -142,14 +142,18 @@ Syntax and IR do not have identical representational capacity:
   target is an enum, domain, composite or range.
 
 Run mapper/parser tests with
-`cd cmd/ratel && go test -race ./internal/...`. Parallel parser users call
-`parse.Warm()` before starting concurrent parsing. Benchmarks use
+`cd cmd/ratel && go test -race ./internal/...`. Construct one shared
+`parse.Parser` with `parse.New(config)` before starting concurrent work; the
+constructor warms WASM, and parsing, scanning and deparsing share its configured
+semaphore. Tests construct one shared parser in each package's parent test.
+Benchmarks use
 `cd cmd/ratel && go test -run '^$' -bench . -benchmem ./internal/mapper`.
 
 ## Catalog builder
 
-`cmd/ratel/internal/catalog.Build(files, major, builtins)` accepts complete
-`File{Name, SQL}` sources, a PostgreSQL major from 16 through 18, and schemas
+`cmd/ratel/internal/catalog.Build(parser, files, major, builtins)` accepts a
+shared parser, complete `File{Name, SQL}` sources, a PostgreSQL major from 16
+through 18, and schemas
 containing the target server's built-in function signatures. Built-in signatures
 are an explicit input, not a hand-maintained function whitelist. They are not
 copied into the desired catalog. Scalar built-in type names use pgx's type
@@ -241,11 +245,51 @@ and 18 and checks catalog facts through `pg_catalog`. The introspection producer
 is not implemented, so this test does not claim the full build/introspect
 round-trip equality. Run it with `make test-integration`.
 
-Build parses files serially. Independent concurrent callers warm the parser
-with `parse.Warm()` before starting, as required by the parser's wazero cache.
+Build parses files serially. Independent concurrent callers inject the same
+parser; its semaphore also bounds embedded-schema scanning, mapper deparsing,
+routine/sequence reference parsing and annotation validation.
 Run builder tests and benchmarks with
 `cd cmd/ratel && go test -race ./internal/catalog` and
 `cd cmd/ratel && go test -run '^$' -bench . -benchmem ./internal/catalog`.
+
+## Annotation scanner and query sources
+
+`cmd/ratel/internal/annotate.Scan(parser, file, sql)` reads libpg_query comment tokens
+and returns parsed annotations with both comment ranges and exact annotation
+spans. Byte offsets have exclusive ends; columns count Unicode code points.
+Strings, quoted identifiers and dollar-quoted bodies never produce annotations.
+Inject the application parser so scanning shares its concurrency bound.
+
+`annotate.Attach(parser, file, targets, ownedNamespaces)` selects the adjacent declared
+object, validates core annotations and appends them to `Metadata.annotations`
+in source order. Each annotation carries its resolved `ObjectRef` and its own
+source span. A target can supply a separate attachment span for an additive
+statement without replacing the declaration's provenance. Composite fields and
+domain constraints carry `Metadata` too (`CompositeField.meta`, field 4;
+`DomainConstraint.meta`, field 3).
+
+`catalog.Build` runs attachment after collecting and resolving declarations,
+including table-local objects and additive constraints. Embedded `CREATE SCHEMA`
+declarations get separate mapper ranges, so their leading annotations don't
+attach to the enclosing schema. Core failures return `*annotate.Error`, whose
+`Diagnostic` has code `RTL-A01` and a `file:line:column` position. Plugin syntax
+survives unchanged. Unknown namespace owners produce warning `RTL-A02`;
+`Catalog.diagnostics` (field 9) retains these warnings in file/source order.
+`Build` has no plugin ownership input and therefore reports all non-core
+namespaces; the annotation APIs accept owned namespace names explicitly.
+
+`annotate.Queries(parser, files, ownedNamespaces)` returns a `QuerySet` containing typed
+`QuerySource` records and namespace warnings. Files are ordered by filename and
+queries retain source order inside each file. Names are unique across the whole
+input. Each record carries its name, `QueryCommand`, exact original SQL token
+range, SQL metadata span, header span and query-targeted annotations. This is
+not an inferred `ir.Query`: named parameters remain unchanged, and the later
+inference stage supplies rewritten SQL, AST and signatures. Header, annotation
+and statement-boundary errors use the same `RTL-A01` diagnostic contract.
+
+Run scanner tests and benchmarks with
+`cd cmd/ratel && go test -race ./internal/annotate` and
+`cd cmd/ratel && go test -run '^$' -bench . -benchmem ./internal/annotate`.
 
 ## Relations
 

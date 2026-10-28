@@ -60,7 +60,7 @@ PostgreSQL sees.
 
 | Component | Role | Origin |
 |---|---|---|
-| parse | libpg_query AST via `wasilibs/go-pgquery` on wazero | sqld `internal/parse`, as is |
+| parse | libpg_query AST, scanning and deparsing via one injected, concurrency-bounded WASM parser | sqld `internal/parse`, bounded wrapper |
 | mapper | AST to IR messages, deterministic `node_id` | sqld `internal/mapper`, extended |
 | catalog | Builds one Catalog from a set of DDL files, order-independent | sqld `internal/catalog`, reworked |
 | query | Parameter and column inference with nullability | sqld `internal/query`, extended |

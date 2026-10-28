@@ -9,9 +9,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestResolution(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testResolution(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct{ name, sql, failure string }{
 		{"target column", `CREATE TABLE a(id int PRIMARY KEY);
@@ -47,7 +46,7 @@ func TestResolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := catalog.Build([]catalog.File{{Name: "resolve.sql", SQL: tc.sql}}, 17, nil)
+			_, err := catalog.Build(parser, []catalog.File{{Name: "resolve.sql", SQL: tc.sql}}, 17, nil)
 			if tc.failure == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -63,9 +62,8 @@ func TestResolution(t *testing.T) {
 	}
 }
 
-func TestBuiltinSnapshot(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testBuiltinSnapshot(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	signatures, err := builtins.For(17)
 	if err != nil {
@@ -74,7 +72,7 @@ func TestBuiltinSnapshot(t *testing.T) {
 
 	files := []catalog.File{{Name: "builtin.sql", SQL: `CREATE TABLE a(id int DEFAULT abs((-1)::int4));`}}
 
-	result, err := catalog.Build(files, 17, signatures)
+	result, err := catalog.Build(parser, files, 17, signatures)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,12 +83,12 @@ func TestBuiltinSnapshot(t *testing.T) {
 }
 
 func BenchmarkResolution(b *testing.B) {
-	parse.Warm()
+	parser := newParser(b)
 
 	files := []catalog.File{{Name: "resolve.sql", SQL: `CREATE TABLE a(id int PRIMARY KEY);
  CREATE TABLE b(id int REFERENCES a);`}}
 	for b.Loop() {
-		if _, err := catalog.Build(files, 17, nil); err != nil {
+		if _, err := catalog.Build(parser, files, 17, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

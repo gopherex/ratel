@@ -7,14 +7,13 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestNormalization(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testNormalization(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	files := []catalog.File{{Name: "sorted.sql", SQL: `CREATE TABLE z(b int,a int,
  CONSTRAINT z_check CHECK(b>0),CONSTRAINT a_check CHECK(a>0)); CREATE TABLE a(id int);`}}
 
-	result, err := catalog.Build(files, 17, nil)
+	result, err := catalog.Build(parser, files, 17, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,14 +36,13 @@ func TestNormalization(t *testing.T) {
 	}
 }
 
-func TestUnnamedIndexes(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testUnnamedIndexes(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	files := []catalog.File{{Name: "indexes.sql", SQL: `CREATE INDEX ON a(id);
  CREATE INDEX ON a(value); CREATE TABLE a(id int,value int);`}}
 
-	result, err := catalog.Build(files, 17, nil)
+	result, err := catalog.Build(parser, files, 17, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,11 +54,11 @@ func TestUnnamedIndexes(t *testing.T) {
 }
 
 func BenchmarkNormalization(b *testing.B) {
-	parse.Warm()
+	parser := newParser(b)
 
 	files := []catalog.File{{Name: "sorted.sql", SQL: `CREATE TABLE z(id int); CREATE TABLE a(id int);`}}
 	for b.Loop() {
-		if _, err := catalog.Build(files, 17, nil); err != nil {
+		if _, err := catalog.Build(parser, files, 17, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

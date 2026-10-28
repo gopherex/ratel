@@ -9,9 +9,8 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
-func TestMapRoutine(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testMapRoutine(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		sql   string
@@ -31,13 +30,13 @@ func TestMapRoutine(t *testing.T) {
 		t.Run(tc.sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(tc.sql)
+			tree, err := parser.Parse(tc.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("routine.sql", tc.sql, raw, 0)
+			current := mapper.New(parser, "routine.sql", tc.sql, raw, 0)
 			tc.check(t, current, raw.GetStmt())
 		})
 	}
@@ -110,9 +109,8 @@ func checkMaterializedView(t *testing.T, current mapper.Mapper, node *pg.Node) {
 	}
 }
 
-func TestFunctionReturns(t *testing.T) {
-	parse.Warm()
-	t.Parallel()
+func testFunctionReturns(t *testing.T, parser parse.Parser) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		sql, signature, returns string
@@ -128,13 +126,13 @@ func TestFunctionReturns(t *testing.T) {
 		t.Run(tc.sql, func(t *testing.T) {
 			t.Parallel()
 
-			tree, err := parse.Parse(tc.sql)
+			tree, err := parser.Parse(tc.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			raw := tree.GetStmts()[0]
-			current := mapper.New("function.sql", tc.sql, raw, 0)
+			current := mapper.New(parser, "function.sql", tc.sql, raw, 0)
 
 			function, procedure := current.MapCreateFunction(raw.GetStmt().GetCreateFunctionStmt())
 			if procedure != nil || function.GetName().GetParts()[1] != tc.signature ||
@@ -153,15 +151,17 @@ func TestFunctionReturns(t *testing.T) {
 }
 
 func BenchmarkRoutine(b *testing.B) {
+	parser := newParser(b)
+
 	sql := "CREATE FUNCTION app.f(a int DEFAULT 1) RETURNS int LANGUAGE sql AS $$ SELECT a $$"
 
-	tree, err := parse.Parse(sql)
+	tree, err := parser.Parse(sql)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	raw := tree.GetStmts()[0]
-	current := mapper.New("bench.sql", sql, raw, 0)
+	current := mapper.New(parser, "bench.sql", sql, raw, 0)
 
 	for b.Loop() {
 		current.MapCreateFunction(raw.GetStmt().GetCreateFunctionStmt())
