@@ -563,7 +563,12 @@ Generated descriptors construct each edge with
   one element per input model, just like insert-field array projections.
   Nullable keys use pgx-native nullable array elements. Composite keys are
   parallel arrays in declared component order. No runtime reflection or
-  string encoding of keys is used.
+  string encoding of keys is used. `Parent` names the parent's own key column,
+  which `Has` correlates on.
+- `rel.Has(cond)` is a `Cond[M]` on the parent: a correlated
+  `EXISTS (SELECT 1 FROM <target> AS "h0" [JOIN <through>] WHERE <keys> AND
+  <rel.Where predicates> AND <cond>)`. Nested `Has` take deeper aliases
+  (`h1`, ...). A key without `Parent` renders `ErrInvalidQuery`.
 - `attach func(*M, []R)` assigns `LoadedFrom(children)` to the generated
   model's `R` field. For to-one edges it maps an empty slice to nil and a
   singleton to `&children[0]`.

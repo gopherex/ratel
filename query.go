@@ -23,6 +23,8 @@ type sqlWriter struct {
 	strings.Builder
 	args    []any
 	invalid bool
+	alias   string // source alias model columns render with; empty is "q"
+	depth   int    // nesting of correlated subqueries, for unique aliases
 }
 
 func (w *sqlWriter) param(value any) {
@@ -31,7 +33,16 @@ func (w *sqlWriter) param(value any) {
 	w.WriteString(strconv.Itoa(len(w.args)))
 }
 
-func (w *sqlWriter) column(name string) { w.qualifiedColumn("q", name) }
+func (w *sqlWriter) column(name string) { w.qualifiedColumn(w.source(), name) }
+
+// source is the alias the current model's columns render with.
+func (w *sqlWriter) source() string {
+	if w.alias == "" {
+		return "q"
+	}
+
+	return w.alias
+}
 
 func (w *sqlWriter) qualifiedColumn(alias, name string) {
 	w.identifier(alias)

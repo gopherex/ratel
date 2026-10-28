@@ -56,7 +56,7 @@ func relationDescriptors() (relationUsers, ratel.Table[relationOrder]) {
 		ID: ratel.NewCol[relationUser, int64]("id"),
 	}
 	users.Orders = ratel.NewRel(orders, ratel.RelMany, []ratel.RelKey[relationUser]{
-		{Column: "user_id", Type: pgx.Identifier{"pg_catalog", "int8"}, Values: func(models []relationUser) any {
+		{Column: "user_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"}, Values: func(models []relationUser) any {
 			values := make([]int64, len(models))
 			for index, model := range models {
 				values[index] = model.ID

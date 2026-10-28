@@ -50,6 +50,8 @@ type RelKey[M any] struct {
 	Column string
 	Type   pgx.Identifier
 	Values func([]M) any
+	// Parent is the parent's own key column; Has correlates on it.
+	Parent string
 }
 
 // Relation is a generated relation descriptor or its count projection.

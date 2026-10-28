@@ -268,7 +268,8 @@ func relKey(model string, local column, remote string) string {
 		element, project = "*"+element, project+".Ptr()"
 	}
 
-	return "{\n\t\t\tColumn: " + strconv.Quote(remote) + ", Type: " + local.pgType + ",\n" +
+	return "{\n\t\t\tColumn: " + strconv.Quote(remote) + ", Parent: " + strconv.Quote(local.name) +
+		", Type: " + local.pgType + ",\n" +
 		"\t\t\tValues: func(models []" + model + ") any {\n\t\t\t\tout := make([]" + element + ", len(models))\n" +
 		"\t\t\t\tfor index, model := range models {\n\t\t\t\t\tout[index] = " + project + "\n\t\t\t\t}\n\n" +
 		"\t\t\t\treturn out\n\t\t\t},\n\t\t}"

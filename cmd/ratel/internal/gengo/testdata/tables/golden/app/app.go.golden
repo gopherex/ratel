@@ -116,7 +116,7 @@ var OrderTags = orderTagsTable{
 	TagID:      ratel.NewCol[OrderTag, int32]("tag_id"),
 	Order: ratel.NewRel[OrderTag, Order](ordersBase, ratel.RelOne,
 		[]ratel.RelKey[OrderTag]{{
-			Column: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Column: "id", Parent: "order_id", Type: pgx.Identifier{"pg_catalog", "int8"},
 			Values: func(models []OrderTag) any {
 				out := make([]int64, len(models))
 				for index, model := range models {
@@ -136,7 +136,7 @@ var OrderTags = orderTagsTable{
 		}),
 	Tag: ratel.NewRel[OrderTag, Tag](tagsBase, ratel.RelOne,
 		[]ratel.RelKey[OrderTag]{{
-			Column: "id", Type: pgx.Identifier{"pg_catalog", "int4"},
+			Column: "id", Parent: "tag_id", Type: pgx.Identifier{"pg_catalog", "int4"},
 			Values: func(models []OrderTag) any {
 				out := make([]int32, len(models))
 				for index, model := range models {
@@ -291,7 +291,7 @@ var Orders = ordersTable{
 	Total:      ratel.NewCol[Order, decimal.Decimal]("total"),
 	OrderTags: ratel.NewRel[Order, OrderTag](orderTagsBase, ratel.RelMany,
 		[]ratel.RelKey[Order]{{
-			Column: "order_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Column: "order_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
 			Values: func(models []Order) any {
 				out := make([]int64, len(models))
 				for index, model := range models {
@@ -307,7 +307,7 @@ var Orders = ordersTable{
 		ratel.RelCount[Order, OrderTag](func(model *Order, count int64) { model.R.OrderTagCount = ratel.LoadedFrom(count) })),
 	Tags: ratel.NewRel[Order, Tag](tagsBase, ratel.RelMany,
 		[]ratel.RelKey[Order]{{
-			Column: "order_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Column: "order_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
 			Values: func(models []Order) any {
 				out := make([]int64, len(models))
 				for index, model := range models {
@@ -324,7 +324,7 @@ var Orders = ordersTable{
 		ratel.Through[Order, Tag]("app", "order_tags", "tag_id")),
 	User: ratel.NewRel[Order, User](usersBase, ratel.RelOne,
 		[]ratel.RelKey[Order]{{
-			Column: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Column: "id", Parent: "user_id", Type: pgx.Identifier{"pg_catalog", "int8"},
 			Values: func(models []Order) any {
 				out := make([]int64, len(models))
 				for index, model := range models {
@@ -460,7 +460,7 @@ var Tags = tagsTable{
 	Label:      ratel.NewCol[Tag, string]("label"),
 	Orders: ratel.NewRel[Tag, Order](ordersBase, ratel.RelMany,
 		[]ratel.RelKey[Tag]{{
-			Column: "tag_id", Type: pgx.Identifier{"pg_catalog", "int4"},
+			Column: "tag_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int4"},
 			Values: func(models []Tag) any {
 				out := make([]int32, len(models))
 				for index, model := range models {
@@ -477,7 +477,7 @@ var Tags = tagsTable{
 		ratel.Through[Tag, Order]("app", "order_tags", "order_id")),
 	OrderTags: ratel.NewRel[Tag, OrderTag](orderTagsBase, ratel.RelMany,
 		[]ratel.RelKey[Tag]{{
-			Column: "tag_id", Type: pgx.Identifier{"pg_catalog", "int4"},
+			Column: "tag_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int4"},
 			Values: func(models []Tag) any {
 				out := make([]int32, len(models))
 				for index, model := range models {
@@ -728,7 +728,7 @@ var Users = usersTable{
 	Doubled:    ratel.NewNullCol[User, int64]("doubled"),
 	Orders: ratel.NewRel[User, Order](ordersBase, ratel.RelMany,
 		[]ratel.RelKey[User]{{
-			Column: "user_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Column: "user_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
 			Values: func(models []User) any {
 				out := make([]int64, len(models))
 				for index, model := range models {
@@ -744,7 +744,7 @@ var Users = usersTable{
 		ratel.RelCount[User, Order](func(model *User, count int64) { model.R.OrderCount = ratel.LoadedFrom(count) })),
 	Manager: ratel.NewRel[User, User](usersBase, ratel.RelOne,
 		[]ratel.RelKey[User]{{
-			Column: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Column: "id", Parent: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"},
 			Values: func(models []User) any {
 				out := make([]*int64, len(models))
 				for index, model := range models {
@@ -764,7 +764,7 @@ var Users = usersTable{
 		}),
 	Users: ratel.NewRel[User, User](usersBase, ratel.RelMany,
 		[]ratel.RelKey[User]{{
-			Column: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Column: "manager_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
 			Values: func(models []User) any {
 				out := make([]int64, len(models))
 				for index, model := range models {

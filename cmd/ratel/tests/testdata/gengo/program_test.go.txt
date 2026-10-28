@@ -88,6 +88,11 @@ func TestGenerated(t *testing.T) {
 		t.Fatalf("relation = %v, %v", orders, err)
 	}
 
+	rich, err := db.From(app.Users).Where(app.Users.Orders.Has(app.Orders.Total.Gt(decimal.NewFromInt(25)))).List(ctx)
+	if err != nil || len(rich) != 1 || rich[0].ID != bob.ID {
+		t.Fatalf("Has = %+v, %v", rich, err)
+	}
+
 	byEmail, err := queries.UserByEmail(ctx, db, "bob@example.com")
 	if err != nil || byEmail.ID != bob.ID || byEmail.Status != app.UserStatusOnHold {
 		t.Fatalf("UserByEmail = %+v, %v", byEmail, err)
