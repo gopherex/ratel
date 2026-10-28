@@ -79,7 +79,7 @@ func NewTable[M any](schema, name string, columns []string, scan Scanner[M], opt
 }
 
 func (t Table[M]) renderProjection() string {
-	writer := &sqlWriter{}
+	writer := newSQLWriter()
 
 	for index, column := range t.columns {
 		if index > 0 {

@@ -65,7 +65,7 @@ func (q Write[M]) SQL() (Statement, error) {
 		return Statement{}, ErrInvalidQuery
 	}
 
-	writer := &sqlWriter{}
+	writer := newSQLWriter()
 	writer.WriteString(q.operation)
 
 	if q.operation == deleteOperation {
@@ -95,7 +95,7 @@ func (q Write[M]) SQL() (Statement, error) {
 		return Statement{}, ErrInvalidQuery
 	}
 
-	return Statement{SQL: writer.String(), Args: writer.args}, nil
+	return writer.statement(), nil
 }
 
 func (q Write[M]) appendAssignments(writer *sqlWriter) error {

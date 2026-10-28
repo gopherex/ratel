@@ -129,7 +129,7 @@ func (r Rel[M, R]) renderStatement(count bool) (Statement, error) {
 		return Statement{}, ErrInvalidQuery
 	}
 
-	writer := &sqlWriter{}
+	writer := newSQLWriter()
 
 	switch {
 	case count:
@@ -146,7 +146,7 @@ func (r Rel[M, R]) renderStatement(count bool) (Statement, error) {
 		return Statement{}, ErrInvalidQuery
 	}
 
-	return Statement{SQL: writer.String(), Args: writer.args}, nil
+	return writer.statement(), nil
 }
 
 func (r Rel[M, R]) internalColumn(name string) string {
@@ -379,7 +379,7 @@ func (r Rel[M, R]) appendCount(writer *sqlWriter) {
 
 func (r Rel[M, R]) appendCorrelatedCount(writer *sqlWriter) {
 	// Bind parent arrays first so child predicates always follow the key parameters.
-	input := &sqlWriter{}
+	input := newSQLWriter()
 	r.appendInput(input)
 	writer.args = input.args
 	writer.WriteString("(SELECT count(*) FROM ")

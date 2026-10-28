@@ -212,7 +212,7 @@ func (q Insert[M, I]) rowValues(row I) insertRow {
 }
 
 func (q Insert[M, I]) render(fields []int, rows [][]any, inputs []I) (Statement, error) {
-	writer := &sqlWriter{}
+	writer := newSQLWriter()
 	writer.WriteString("INSERT INTO ")
 
 	if err := q.table.render(writer); err != nil {
@@ -237,7 +237,7 @@ func (q Insert[M, I]) render(fields []int, rows [][]any, inputs []I) (Statement,
 		q.appendConflict(writer)
 	}
 
-	return Statement{SQL: writer.String(), Args: writer.args}, nil
+	return writer.statement(), nil
 }
 
 func (q Insert[M, I]) scalarFields(fields []int) bool {

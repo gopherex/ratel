@@ -27,6 +27,30 @@ type sqlWriter struct {
 	depth   int    // nesting of correlated subqueries, for unique aliases
 }
 
+// Initial capacities of a statement being written: room for a typical
+// SELECT and its parameters, so the buffers rarely grow (BenchmarkSelect).
+const (
+	writerBytes      = 128
+	writerParameters = 4
+)
+
+// statement is the written statement; one without parameters has nil Args.
+func (w *sqlWriter) statement() Statement {
+	if len(w.args) == 0 {
+		return Statement{SQL: w.String()}
+	}
+
+	return Statement{SQL: w.String(), Args: w.args}
+}
+
+// newSQLWriter is a writer with room for a typical statement.
+func newSQLWriter() *sqlWriter {
+	writer := &sqlWriter{args: make([]any, 0, writerParameters)}
+	writer.Grow(writerBytes)
+
+	return writer
+}
+
 func (w *sqlWriter) param(value any) {
 	w.args = append(w.args, value)
 	w.WriteByte('$')
@@ -147,7 +171,7 @@ func (q Select[M]) SQL() (Statement, error) {
 		return Statement{SQL: q.source.table.selectSQL}, nil
 	}
 
-	writer := &sqlWriter{}
+	writer := newSQLWriter()
 	writer.Grow(len(q.source.table.selectSQL))
 
 	if err := q.appendSQL(writer); err != nil {
@@ -158,7 +182,7 @@ func (q Select[M]) SQL() (Statement, error) {
 		return Statement{}, ErrInvalidQuery
 	}
 
-	return Statement{SQL: writer.String(), Args: writer.args}, nil
+	return writer.statement(), nil
 }
 
 // plain reports a SELECT without added clauses.

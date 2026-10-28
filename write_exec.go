@@ -63,7 +63,7 @@ func executeWriteStatement[M any](ctx context.Context, database *DB, table Table
 func collectWrite[M any](ctx context.Context, database *DB, table Table[M],
 	sql string, args []any,
 ) (writeResult[M], error) {
-	writer := &sqlWriter{}
+	writer := newSQLWriter()
 
 	for index, column := range table.columns {
 		if index > 0 {

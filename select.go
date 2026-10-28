@@ -177,7 +177,7 @@ func (q Select[M]) PluckNull[V any](column NullCol[M, V]) Plucked[Null[V]] {
 
 func pluck[V, M any](query Select[M], name string) Plucked[V] {
 	return Plucked[V]{db: query.db, statement: func() (Statement, error) {
-		writer := &sqlWriter{}
+		writer := newSQLWriter()
 		writer.WriteString("SELECT ")
 		writer.qualifiedColumn("p", name)
 		writer.WriteString(" FROM (")
