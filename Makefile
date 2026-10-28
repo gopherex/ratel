@@ -55,7 +55,8 @@ test: ## Run unit tests (-race) in every module
 		( cd $$m && $(GO) test -race ./... )
 	done
 
-test-integration: ## Run the integration suite in tests/ (needs Docker; RATEL_PG_IMAGE overrides the image, default postgres:18-alpine)
+test-integration: ## Run integration suites (needs Docker; RATEL_PG_IMAGE overrides postgres:18-alpine)
+	( cd rateltest && $(GO) test -tags integration ./... )
 	( cd tests && $(GO) test -tags integration ./... )
 
 bench: ## Run every benchmark in every module

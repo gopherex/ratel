@@ -14,14 +14,127 @@ interface, so ratel offers two test seams instead of mocks of itself:
 
 | Helper | Does |
 |---|---|
-| `rateltest.Postgres(t)` | starts (once per test binary) a testcontainers PostgreSQL of the configured version, applies all migration phases (expand, backfill, contract) to a template database, and returns a fresh database per test via `CREATE DATABASE ... TEMPLATE`; dropped in `t.Cleanup` |
-| `rateltest.RollbackTx(t, pool)` | a transaction rolled back at cleanup, for tests whose code opens no transactions of its own |
-| `rateltest.Recorder` | a pgx tracer that records executed SQL and arguments, for assertions on query count (N+1 checks) |
-| `rateltest.FailWith(code)` | an executor wrapper that returns a `*pgconn.PgError` with the given SQLSTATE for chosen statements, to test refusal handling |
-| `rateltest.Executor` | a scripted fake `ratel.Executor` (expected SQL and rows), for testing the runtime itself without a server |
+| `rateltest.NewServer(t, options...)` | starts a suite-owned testcontainers PostgreSQL and applies expand, backfill and contract SQL to a template database |
+| `server.Postgres(t)` | returns a fresh `*pgxpool.Pool` for a database cloned with `CREATE DATABASE ... TEMPLATE`; closes the pool and drops the database in `t.Cleanup` |
+| `rateltest.Postgres(t, options...)` | convenience form owning a private server for one test |
+| `rateltest.RollbackTx(t, pool, timeout...)` | a transaction rolled back at cleanup, for tests whose code opens no transactions of its own |
+| `rateltest.Recorder` | a pgx query, batch and COPY tracer that records attempted SQL and arguments, for query-count assertions |
+| `rateltest.FailWith(code).Wrap(executor, match)` | injects `*pgconn.PgError` for matching statements without contacting the executor |
+| `rateltest.NewExecutor(t)` | constructs a scripted `*rateltest.Executor` backed by `pgxmock/v5`, with cleanup assertions |
 
 Per-test databases from a template are the default; rollback isolation is
-offered only where the code under test does not manage transactions.
+offered only where the code under test does not manage transactions. Container
+ownership is explicit rather than process-global: create one server in a parent
+test, then call `server.Postgres(t)` in parallel subtests. Parent cleanup runs
+after all children, including parallel children. This shares one container per
+suite without global state; separate top-level suites own separate containers.
+
+### PostgreSQL configuration and schema
+
+`WithImage` overrides `RATEL_PG_IMAGE`; without either, the image is
+`postgres:18-alpine`. Use PostgreSQL 16, 17 or 18. `WithTimeout` bounds startup,
+database setup and each cleanup independently; its default is five minutes.
+`RollbackTx` accepts one optional positive timeout, also defaulting to five
+minutes. Cleanup uses a fresh context, not the test's cancelled context.
+
+`WithMigrations(expand, backfill, contract []string)` copies and applies trusted
+SQL in phase order. Each string may contain multiple SQL commands. The helper
+executes supplied SQL, not the CLI migration planner or its journal. Use expand
+alone for a schema with no data migration. Repeated migration options append
+phases in option order. Migration failures fail setup before any child database
+is returned. Each clone contains the same migrated rows; parallel tests can
+reuse identical primary keys without sharing mutations.
+
+`WithPoolConfig(func(*pgxpool.Config))` configures each isolated pool, after
+schema application. Callbacks compose in option order and must support
+concurrent setup. Set `AfterConnect` to generated `RegisterTypes`, or explicitly
+load custom codecs and call `ratel.RegisterValue` on every connection. No Go type
+mapping is guessed or registered globally. The template and administrative
+connections do not run application hooks.
+
+```go
+func TestUserStore(t *testing.T) {
+    t.Parallel()
+    server := rateltest.NewServer(t,
+        rateltest.WithMigrations([]string{
+            `CREATE SCHEMA app; CREATE TABLE app.users (id bigint PRIMARY KEY, email text NOT NULL)`,
+        }, nil, nil),
+        rateltest.WithPoolConfig(func(config *pgxpool.Config) {
+            config.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+                return ratel.RegisterValue[string](conn.TypeMap(), "text")
+            }
+        }),
+    )
+    for _, name := range []string{"first", "second"} {
+        t.Run(name, func(t *testing.T) {
+            t.Parallel()
+            pool := server.Postgres(t)
+            _, err := pool.Exec(t.Context(),
+                `INSERT INTO app.users VALUES (1, $1)`, ratel.NullFrom(name))
+            if err != nil {
+                t.Fatal(err)
+            }
+        })
+    }
+}
+```
+
+Always release acquired connections and close cursors before test cleanup.
+`pgxpool.Close` waits for borrowed connections. Database cleanup uses
+`DROP DATABASE ... WITH (FORCE)` to close other connections to the fixture.
+Do not commit a `RollbackTx` transaction: cleanup tolerates an already closed
+transaction, but cannot undo a commit. Use a cloned database for code that
+commits, begins transactions or needs multiple independent connections.
+
+### Recorder and failure injection
+
+Assign `&rateltest.Recorder{}` to `config.ConnConfig.Tracer` before creating a
+pool. `Statements()` returns `[]ratel.Statement` in trace-start order, with
+independent statement and argument slices. Argument values are shallow copies;
+mutable values keep pgx's caller-owned lifetime contract. `Reset()` clears the
+history. Both methods are concurrency-safe. Avoid sharing a recorder between
+parallel tests when asserting a per-test query count.
+
+Queries are counted at start, including failures. Each queued batch statement
+is counted once, even if the batch later fails; batch callbacks do not count it
+again. COPY contributes one `COPY ... FROM STDIN` entry without consuming or
+recording its row source. Registration queries and setup queries traced through
+the configured pool also appear; reset after setup or filter by SQL. Recorded
+SQL and arguments may contain secrets and must not be logged or published.
+
+`FailWith` accepts a five-character uppercase ASCII SQLSTATE; invalid fixture
+codes panic. `Wrap` takes a `ratel.Executor` and `func(sql string) bool` selector.
+Nonmatching operations delegate, preserving error causes. Matching operations
+get fresh `*pgconn.PgError` values. QueryRow fails on Scan; COPY selectors receive
+the sanitized table name, not SQL. A batch with any matching statement fails as
+a whole before being sent, including Close. This is deterministic failure
+injection, not a simulation of partially executed server batches.
+
+The scripted executor embeds pgxmock's pool API: use `ExpectQuery`, `ExpectExec`,
+`ExpectBatch`, `ExpectCopyFrom`, `pgxmock.NewRows` and `pgxmock.NewResult`.
+Matching is exact after whitespace normalization; expectations are ordered by
+default. Unexpected calls return pgxmock errors; missing expectations fail
+cleanup. For PostgreSQL codecs, SQL semantics and transaction behavior, use the
+real database rather than the fake.
+
+Run helper unit tests and benchmarks with:
+
+```sh
+go -C rateltest test -race ./...
+go -C rateltest test -run '^$' -bench . -benchmem ./...
+go -C rateltest test -tags integration -run '^$' -bench 'Benchmark(NewServer|Postgres)$' -benchtime=1x -benchmem
+```
+
+Lifecycle benchmarks run fixture cleanup inside each iteration, so databases,
+transactions and cleanup callbacks do not accumulate. The server benchmark
+includes container startup and teardown; the clone benchmark reuses one server.
+
+The container tests live beside the helpers under the `integration` build tag.
+`make test-integration` runs them and the suite in `tests/`. Run the PostgreSQL
+matrix with `RATEL_PG_IMAGE=postgres:16-alpine make test-integration`, then repeat
+with `postgres:17-alpine` and `postgres:18-alpine`. Helper integration covers
+phase ordering, parallel database isolation, pool type registration, rollback,
+real pgx tracing and recovery after a terminated connection.
 
 ## For ratel itself
 
