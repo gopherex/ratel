@@ -168,12 +168,20 @@ type Plucked[V any] struct {
 
 // Pluck selects one non-null column of the result.
 func (q Select[M]) Pluck[V any](column Col[M, V]) Plucked[V] {
+	if column.codec != nil {
+		return pluck(q, column.name, column.codec.scanValue)
+	}
+
 	return pluck(q, column.name, scanPlain[V])
 }
 
 // PluckNull selects one nullable column of the result. It reads through *V,
 // so Null[V] needs no type registration.
 func (q Select[M]) PluckNull[V any](column NullCol[M, V]) Plucked[Null[V]] {
+	if column.codec != nil {
+		return pluck(q, column.name, column.codec.scanNull)
+	}
+
 	return pluck(q, column.name, scanNull[V])
 }
 

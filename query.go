@@ -17,6 +17,9 @@ const (
 	ErrInvalidQuery refusal = "ratel: invalid query"
 	// ErrMultipleRows means One found more than one result.
 	ErrMultipleRows refusal = "ratel: more than one row"
+	// ErrUnexpectedNull means a column declared NOT NULL read as NULL: the
+	// generated code does not match the database.
+	ErrUnexpectedNull refusal = "ratel: unexpected NULL"
 )
 
 type sqlWriter struct {

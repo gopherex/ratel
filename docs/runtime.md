@@ -252,6 +252,15 @@ with explicit model-field addresses. `ratel.NewCol[M, V](name)` and
 refer to the current source's output names; the renderer binds and quotes its
 alias independently from the descriptor's physical schema.
 
+A column whose Go type is not its PostgreSQL value, such as a proto enum
+stored as its name, is built with `ratel.NewCodecCol[M](name, codec)` or
+`ratel.NewCodecNullCol`. `ratel.Codec[V]` has `Encode func(V) any`, applied to
+every argument the column binds (comparisons, `In`, `Between`, `To`), and
+`Scan func(pgx.Rows) (Null[V], error)`, which `Pluck` and `PluckNull` use; a
+NULL in `Pluck` returns `ratel.ErrUnexpectedNull`. Package
+`github.com/gopherex/ratel/ratelpb` holds the proto conversions generated
+code uses ([proto-frontend.md](proto-frontend.md#go-models)).
+
 `ratel.PrimaryKey(columns, func(M) []any)` supplies the ordered primary-key
 columns and their generated field projection. These keys are non-null and
 unique. Views omit this option unless their result has a proven unique,
@@ -764,6 +773,7 @@ Generated descriptors construct each edge with
 |---|---|---|
 | `ratel.ErrNotFound` | expected refusal | `One` or `First` found no row |
 | `ratel.ErrMultipleRows` | expected refusal | `One` found more than one row |
+| `ratel.ErrUnexpectedNull` | programming error | a NOT NULL codec column read NULL: the generated code does not match the database |
 | `ratel.ErrInvalidQuery` | programming error | invalid descriptor, pagination or chunk ordering |
 | `ratel.ErrInvalidInsert` | programming error | empty insert input or missing generated constructor flag; no SQL sent |
 | `ratel.ErrStaleVersion` | expected refusal | optimistic-locking predicate matched no row |

@@ -87,10 +87,14 @@ type Assignment[M any] struct {
 
 // To binds a non-null column value for SET.
 func (c Col[M, V]) To(value V) Assignment[M] {
-	return Assignment[M]{name: c.name, value: value}
+	return Assignment[M]{name: c.name, value: c.arg(value)}
 }
 
 // To binds either a value or SQL NULL for SET.
 func (c NullCol[M, V]) To(value Null[V]) Assignment[M] {
-	return Assignment[M]{name: c.name, value: value.Arg()}
+	if !value.Valid {
+		return Assignment[M]{name: c.name}
+	}
+
+	return Assignment[M]{name: c.name, value: c.arg(value.V)}
 }

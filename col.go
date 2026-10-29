@@ -3,7 +3,10 @@ package ratel
 import "slices"
 
 // Col is a generated, model-typed column. Its value type controls operator inputs.
-type Col[M, V any] struct{ name string }
+type Col[M, V any] struct {
+	name  string
+	codec *Codec[V]
+}
 
 // NewCol constructs a column from its unqualified PostgreSQL name.
 func NewCol[M, V any](name string) Col[M, V] { return Col[M, V]{name: name} }
@@ -20,7 +23,7 @@ func (c Col[M, V]) compare(operator string, value V) Cond[M] {
 	return Cond[M]{expr: func(writer *sqlWriter) {
 		writer.column(c.name)
 		writer.WriteString(operator)
-		writer.param(value)
+		writer.param(c.arg(value))
 	}}
 }
 
@@ -56,9 +59,9 @@ func (c Col[M, V]) Between(lower, upper V) Cond[M] {
 	return Cond[M]{expr: func(writer *sqlWriter) {
 		writer.column(c.name)
 		writer.WriteString(" BETWEEN ")
-		writer.param(lower)
+		writer.param(c.arg(lower))
 		writer.WriteString(" AND ")
-		writer.param(upper)
+		writer.param(c.arg(upper))
 	}}
 }
 
@@ -87,7 +90,7 @@ func (c Col[M, V]) membership(negate bool, values []V) Cond[M] {
 			if index > 0 {
 				writer.WriteString(", ")
 			}
-			writer.param(value)
+			writer.param(c.arg(value))
 		}
 		writer.WriteByte(')')
 	}}
@@ -123,7 +126,7 @@ type Column[M, V any] interface{ ratelColumn() columnRef[M, V] }
 
 type columnRef[M, V any] struct{ name string }
 
-func (c Col[M, V]) ratelColumn() columnRef[M, V] { return columnRef[M, V](c) }
+func (c Col[M, V]) ratelColumn() columnRef[M, V] { return columnRef[M, V]{name: c.name} }
 
 // EqCol creates a typed join predicate. Joins assign independent source aliases.
 func (c Col[M, V]) EqCol[N any](other Column[N, V]) Cond2[M, N] {
