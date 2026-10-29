@@ -74,3 +74,23 @@ CREATE TABLE "shop"."customers" (
 	CONSTRAINT "customers_tenant_positive" CHECK (tenant_no > 0)
 );
 CREATE UNIQUE INDEX "customers_email_idx" ON "shop"."customers" ("email");
+
+-- order_kind is used only by a proto model: it gets no Go type. audit_kind
+-- is also used by a plain table: it keeps its Go type.
+CREATE TYPE shop.order_kind AS ENUM ('ORDER_KIND_UNSPECIFIED', 'ORDER_KIND_WEB');
+CREATE TYPE shop.audit_kind AS ENUM ('AUDIT_KIND_UNSPECIFIED', 'AUDIT_KIND_LOGIN');
+
+-- @go.message example.com/shop/v1;shopv1.Order
+CREATE TABLE shop.orders (
+	-- @go.field Id value
+	id bigint PRIMARY KEY,
+	-- @go.field Kind enum type=example.com/shop/v1;shopv1.OrderKind
+	kind shop.order_kind NOT NULL,
+	-- @go.field Audit enum type=example.com/shop/v1;shopv1.AuditKind
+	audit shop.audit_kind NOT NULL
+);
+
+CREATE TABLE shop.audit (
+	id bigint PRIMARY KEY,
+	kind shop.audit_kind NOT NULL
+);

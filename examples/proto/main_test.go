@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -73,13 +74,22 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool, err := pgxpool.New(t.Context(), url)
+	config, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config.AfterConnect = shop.RegisterTypes
+
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pool.Close()
 
 	database := ratel.New(pool)
+
+	checkExecMode(t, database)
 
 	meta, err := structpb.NewStruct(map[string]any{"vip": true, "rank": 3.5})
 	if err != nil {
@@ -134,6 +144,25 @@ func TestRoundTrip(t *testing.T) {
 	if read.GetAddress() != nil || read.GetContact() != nil || read.GetStatus() != shopv1.Status_STATUS_ACTIVE ||
 		read.GetCreatedAt() == nil {
 		t.Fatalf("defaults and absent messages: %v", read.Customer)
+	}
+}
+
+// checkExecMode inserts and reads the enum array in exec mode, where pgx
+// learns no parameter types from the server: the loaded type supplies them.
+func checkExecMode(t *testing.T, database *ratel.DB) {
+	t.Helper()
+
+	order := shop.Orders.Row().ID(20).CustomerID(1).Kind(shopv1.OrderKind_ORDER_KIND_PHONE).
+		History([]shopv1.OrderKind{shopv1.OrderKind_ORDER_KIND_WEB, shopv1.OrderKind_ORDER_KIND_PHONE})
+	if _, err := database.Run(shop.Orders.Insert(order)).Exec(t.Context(),
+		ratel.ExecMode(pgx.QueryExecModeExec)); err != nil {
+		t.Fatal(err)
+	}
+
+	history, err := database.Run(shop.Orders.Select().Where(shop.Orders.ID.Eq(20)).
+		Pluck(shop.Orders.History)).List(t.Context(), ratel.ExecMode(pgx.QueryExecModeExec))
+	if err != nil || len(history) != 1 || len(history[0]) != 2 || history[0][1] != shopv1.OrderKind_ORDER_KIND_PHONE {
+		t.Fatalf("history = %v, %v", history, err)
 	}
 }
 

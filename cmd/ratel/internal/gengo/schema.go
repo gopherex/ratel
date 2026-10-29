@@ -80,6 +80,10 @@ func (s *state) schemaFiles(schema *ir.Schema) ([]*pluginpb.File, error) {
 
 func (s *state) enums(file *unit, schema *ir.Schema) error {
 	for _, enum := range schema.GetEnums() {
+		if s.protoOnlyEnum(enum.GetName()) {
+			continue
+		}
+
 		object := objectOf(enum.GetName())
 		typeName := pascal(object)
 

@@ -1,6 +1,7 @@
 package gengo
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -364,6 +365,109 @@ func writeProtoModel(file *unit, names identifiers, model *protoModel, related b
 	}
 
 	file.printf("}\n\n")
+}
+
+// protoOnlyEnum reports an enum that only proto models use: their columns
+// convert it to the proto enum, so its Go type would be dead code. Any other
+// use (a table, view, composite, domain or query) keeps it.
+func (s *state) protoOnlyEnum(name *ir.QualifiedName) bool {
+	key := schemaOf(name) + "." + objectOf(name)
+	proto := false
+
+	for _, schema := range s.catalog.GetSchemas() {
+		for _, table := range schema.GetTables() {
+			for _, value := range table.GetColumns() {
+				if !s.refers(value.GetType(), key) {
+					continue
+				}
+
+				if s.protoModelOf(table) == nil {
+					return false
+				}
+
+				proto = true
+			}
+		}
+
+		if s.otherSchemaUse(schema, key) {
+			return false
+		}
+	}
+
+	for _, query := range s.queries {
+		if s.queryUse(query, key) {
+			return false
+		}
+	}
+
+	return proto
+}
+
+// otherSchemaUse reports a use of a type by a view, composite or domain.
+func (s *state) otherSchemaUse(schema *ir.Schema, key string) bool {
+	var types []*ir.TypeRef
+
+	for _, view := range schema.GetViews() {
+		for _, value := range view.GetOutput() {
+			types = append(types, value.GetType())
+		}
+	}
+
+	for _, view := range schema.GetMaterializedViews() {
+		for _, value := range view.GetOutput() {
+			types = append(types, value.GetType())
+		}
+	}
+
+	for _, composite := range schema.GetComposites() {
+		for _, field := range composite.GetFields() {
+			types = append(types, field.GetType())
+		}
+	}
+
+	for _, domain := range schema.GetDomains() {
+		types = append(types, domain.GetBaseType())
+	}
+
+	return slices.ContainsFunc(types, func(typ *ir.TypeRef) bool { return s.refers(typ, key) })
+}
+
+// queryUse reports a use of a type by a query's parameters or columns.
+func (s *state) queryUse(query *ir.Query, key string) bool {
+	for _, parameter := range query.GetParameters() {
+		if s.refers(parameter.GetType(), key) {
+			return true
+		}
+	}
+
+	for _, value := range query.GetColumns() {
+		if s.refers(value.GetType(), key) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// refers reports whether a type is the named user type, an array of it, or a
+// domain over it.
+func (s *state) refers(typ *ir.TypeRef, key string) bool {
+	for typ.GetElement() != nil {
+		typ = typ.GetElement()
+	}
+
+	if !isUserType(typ) {
+		return false
+	}
+
+	name := pgName(typ)
+	if name == key {
+		return true
+	}
+
+	found, ok := s.types[name]
+
+	return ok && found.kind == ir.TypeKind_TYPE_KIND_DOMAIN && s.refers(found.base, key)
 }
 
 // checkProtoKeys rejects a relation key column whose conversion has no typed

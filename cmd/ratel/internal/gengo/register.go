@@ -104,6 +104,11 @@ func (s *state) load(file *unit, element *ir.TypeRef) {
 
 	switch found.kind {
 	case ir.TypeKind_TYPE_KIND_ENUM:
+		// An enum only proto models use has no Go type to default.
+		if s.protoOnlyEnum(element.GetUdt().GetName()) {
+			return
+		}
+
 		file.registry.defaults[goName+`("")`] = key
 	case ir.TypeKind_TYPE_KIND_COMPOSITE:
 		file.registry.defaults[goName+"{}"] = key

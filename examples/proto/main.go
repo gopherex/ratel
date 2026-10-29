@@ -38,7 +38,9 @@ const (
 	orderID     = 10
 )
 
-func run(ctx context.Context, url string, out io.Writer) error {
+// applyMigrations runs the planned migrations on a pool of its own: the
+// types RegisterTypes loads exist only after them.
+func applyMigrations(ctx context.Context, url string) error {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
@@ -50,9 +52,28 @@ func run(ctx context.Context, url string, out io.Writer) error {
 		return fmt.Errorf("migrations: %w", err)
 	}
 
-	if err := migrate.Apply(ctx, pool, dir); err != nil {
+	return migrate.Apply(ctx, pool, dir)
+}
+
+func run(ctx context.Context, url string, out io.Writer) error {
+	if err := applyMigrations(ctx, url); err != nil {
 		return err
 	}
+
+	config, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return fmt.Errorf("database url: %w", err)
+	}
+
+	// orders.history is an array of a PostgreSQL enum, whose OID pgx loads on
+	// every connection (docs/runtime.md, Generated code).
+	config.AfterConnect = shop.RegisterTypes
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer pool.Close()
 
 	database := ratel.New(pool)
 

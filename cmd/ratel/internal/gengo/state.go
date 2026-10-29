@@ -30,12 +30,13 @@ type state struct {
 	packages map[string]string      // query name -> Go package of its group
 	shapes   map[string]string      // row type body -> first query declaring it
 	protos   map[string]*protoModel // tables modeled by proto messages, by "schema.table"
+	queries  []*ir.Query
 	warnings []*ir.Diagnostic
 }
 
 func newState(options Options, request *pluginpb.GenerateRequest) (*state, error) {
 	result := &state{
-		options: options, catalog: request.GetCatalog(),
+		options: options, catalog: request.GetCatalog(), queries: request.GetQueries(),
 		types: make(map[string]userType), columns: make(map[string]string), packages: make(map[string]string),
 		shapes: make(map[string]string), protos: make(map[string]*protoModel),
 	}

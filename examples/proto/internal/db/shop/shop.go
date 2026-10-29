@@ -19,15 +19,6 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// OrderKind is the PostgreSQL enum shop.order_kind.
-type OrderKind string
-
-const (
-	OrderKindOrderKindUnspecified OrderKind = "ORDER_KIND_UNSPECIFIED"
-	OrderKindOrderKindWeb         OrderKind = "ORDER_KIND_WEB"
-	OrderKindOrderKindPhone       OrderKind = "ORDER_KIND_PHONE"
-)
-
 // Customer is a row of customers: its proto message and loaded relations.
 type Customer struct {
 	*shopv1.Customer
@@ -1403,10 +1394,6 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 
 		types.RegisterType(loaded)
 	}
-
-	types.RegisterDefaultPgType(OrderKind(""), "shop.order_kind")
-	types.RegisterDefaultPgType([]*OrderKind(nil), "shop._order_kind")
-	types.RegisterDefaultPgType([]OrderKind(nil), "shop._order_kind")
 
 	return nil
 }

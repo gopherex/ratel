@@ -211,7 +211,10 @@ Rules:
   non-built-in type, or an array of an enum, domain or composite:
   PostgreSQL assigns their OIDs per database, so pgx loads them per
   connection. It loads those types and calls `ratel.RegisterValue` for the
-  `Null` fields of composites.
+  `Null` fields of composites. The types exist only after the migrations
+  that create them, so an application applies its migrations on a pool of
+  its own before opening the pool whose `AfterConnect` is `RegisterTypes`
+  (`examples/proto/main.go`).
 
 ### Descriptor construction
 

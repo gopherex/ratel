@@ -17,6 +17,129 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
+// AuditKind is the PostgreSQL enum shop.audit_kind.
+type AuditKind string
+
+const (
+	AuditKindAuditKindUnspecified AuditKind = "AUDIT_KIND_UNSPECIFIED"
+	AuditKindAuditKindLogin       AuditKind = "AUDIT_KIND_LOGIN"
+)
+
+// Audit is a row of audit.
+type Audit struct {
+	ID   int64
+	Kind AuditKind
+}
+
+func scanAudit(row pgx.Row) (Audit, error) {
+	var model Audit
+
+	if err := row.Scan(&model.ID, &model.Kind); err != nil {
+		return model, err
+	}
+
+	return model, nil
+}
+
+// AuditInsert is the input of an insert into audit. Start it with Row.
+type AuditInsert struct {
+	id    int64
+	kind  AuditKind
+	valid bool
+}
+
+// Row starts an insert row of audit: one step per required column, in column order.
+func (t *auditsTable) Row() auditRowID {
+	return auditRowID{}
+}
+
+type auditRowID struct{ insert AuditInsert }
+
+// ID sets the column id.
+func (s auditRowID) ID(v int64) auditRowKind {
+	s.insert.id = v
+
+	return auditRowKind{s.insert}
+}
+
+type auditRowKind struct{ insert AuditInsert }
+
+// Kind sets the column kind.
+func (s auditRowKind) Kind(v AuditKind) AuditInsert {
+	s.insert.kind = v
+	s.insert.valid = true
+
+	return s.insert
+}
+
+var auditsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
+	ratel.NewTable("shop", "audit", []string{"id", "kind"}, scanAudit,
+		ratel.PrimaryKey([]string{"id"}, func(model Audit) []any { return []any{model.ID} }),
+		ratel.Constraints[Audit](
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "audit", Constraint: "audit_id_not_null", Columns: []string{"id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "audit", Constraint: "audit_kind_not_null", Columns: []string{"kind"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "shop", Table: "audit", Constraint: "audit_pkey", Columns: []string{"id"}},
+		),
+		ratel.ModelValues(func(model Audit) []any { return []any{model.ID, model.Kind} })),
+	func(insert AuditInsert) bool { return insert.valid },
+	ratel.InsertField[AuditInsert]{
+		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Value: func(insert AuditInsert) (any, bool) { return insert.id, true },
+		Set:   func(AuditInsert) bool { return true },
+		Values: func(rows []AuditInsert) any {
+			out := make([]int64, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.id
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[AuditInsert]{
+		Name: "kind", Type: pgx.Identifier{"shop", "audit_kind"}, Base: pgx.Identifier{"pg_catalog", "text"},
+		Value: func(insert AuditInsert) (any, bool) { return insert.kind, true },
+		Set:   func(AuditInsert) bool { return true },
+		Values: func(rows []AuditInsert) any {
+			out := make([]string, len(rows))
+			for index, insert := range rows {
+				out[index] = string(insert.kind)
+			}
+
+			return out
+		},
+	},
+))
+
+// Audits describes shop.audit.
+var Audits = &auditsTable{
+	KeyedTable: auditsBase,
+	ID:         ratel.NewCol[Audit, int64]("id"),
+	Kind:       ratel.NewCol[Audit, AuditKind]("kind"),
+}
+
+type auditsTable struct {
+	ratel.KeyedTable[Audit, AuditInsert]
+	ID   ratel.Col[Audit, int64]
+	Kind ratel.Col[Audit, AuditKind]
+}
+
+// InSchema is the descriptor for a copy of audit in another schema.
+func (t *auditsTable) InSchema(schema string) *auditsTable {
+	copied := *t
+	copied.KeyedTable = t.KeyedTable.InSchema(schema)
+
+	return &copied
+}
+
+// ErrAuditIDNotNull matches a violation of audit_id_not_null on shop.audit.
+var ErrAuditIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "audit", Constraint: "audit_id_not_null", Columns: []string{"id"}}
+
+// ErrAuditKindNotNull matches a violation of audit_kind_not_null on shop.audit.
+var ErrAuditKindNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "audit", Constraint: "audit_kind_not_null", Columns: []string{"kind"}}
+
+// ErrAuditPkey matches a violation of audit_pkey on shop.audit.
+var ErrAuditPkey = &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "shop", Table: "audit", Constraint: "audit_pkey", Columns: []string{"id"}}
+
 // Customer is a row of customers: its proto message and loaded relations.
 type Customer struct {
 	*shopv1.Customer
@@ -1050,3 +1173,243 @@ var ErrCustomersTenantPositive = &ratel.ConstraintError{Kind: ratel.ConstraintCh
 
 // ErrCustomersTotalNotNull matches a violation of customers_total_not_null on shop.customers.
 var ErrCustomersTotalNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "customers", Constraint: "customers_total_not_null", Columns: []string{"total"}}
+
+// Order is a row of orders: its proto message and loaded relations.
+type Order struct {
+	*shopv1.Order
+}
+
+// ordersStoreID is the stored value of the column id.
+func ordersStoreID(v int64) int64 {
+	return v
+}
+
+// ordersReadID is the value of the column id in a message; absent is NULL.
+func ordersReadID(m *shopv1.Order) int64 {
+	return ordersStoreID(m.Id)
+}
+
+// ordersStoreKind is the stored value of the column kind.
+func ordersStoreKind(v shopv1.OrderKind) string {
+	return v.String()
+}
+
+// ordersReadKind is the value of the column kind in a message; absent is NULL.
+func ordersReadKind(m *shopv1.Order) string {
+	return ordersStoreKind(m.Kind)
+}
+
+// ordersStoreAudit is the stored value of the column audit.
+func ordersStoreAudit(v shopv1.AuditKind) string {
+	return v.String()
+}
+
+// ordersReadAudit is the value of the column audit in a message; absent is NULL.
+func ordersReadAudit(m *shopv1.Order) string {
+	return ordersStoreAudit(m.Audit)
+}
+
+func scanOrder(row pgx.Row) (Order, error) {
+	model := Order{Order: &shopv1.Order{}}
+	m := model.Order
+
+	var scan1 string
+	var scan2 string
+
+	if err := row.Scan(&m.Id, &scan1, &scan2); err != nil {
+		return model, err
+	}
+
+	{
+		value, err := ratelpb.FromEnum[shopv1.OrderKind](shopv1.OrderKind_value, scan1)
+		if err != nil {
+			return model, err
+		}
+		m.Kind = value
+	}
+
+	{
+		value, err := ratelpb.FromEnum[shopv1.AuditKind](shopv1.AuditKind_value, scan2)
+		if err != nil {
+			return model, err
+		}
+		m.Audit = value
+	}
+
+	return model, nil
+}
+
+// OrderInsert is the input of an insert into orders. Start it with Row.
+type OrderInsert struct {
+	id    int64
+	kind  string
+	audit string
+	valid bool
+}
+
+// Row starts an insert row of orders: one step per required column, in column order.
+func (t *ordersTable) Row() orderRowID {
+	return orderRowID{}
+}
+
+type orderRowID struct{ insert OrderInsert }
+
+// ID sets the column id.
+func (s orderRowID) ID(v int64) orderRowKind {
+	s.insert.id = ordersStoreID(v)
+
+	return orderRowKind{s.insert}
+}
+
+type orderRowKind struct{ insert OrderInsert }
+
+// Kind sets the column kind.
+func (s orderRowKind) Kind(v shopv1.OrderKind) orderRowAudit {
+	s.insert.kind = ordersStoreKind(v)
+
+	return orderRowAudit{s.insert}
+}
+
+type orderRowAudit struct{ insert OrderInsert }
+
+// Audit sets the column audit.
+func (s orderRowAudit) Audit(v shopv1.AuditKind) OrderInsert {
+	s.insert.audit = ordersStoreAudit(v)
+	s.insert.valid = true
+
+	return s.insert
+}
+
+// RowOf is an insert row of orders with every insertable column from the message; a
+// column with a default keeps it while its field holds the zero value.
+func (t *ordersTable) RowOf(m *shopv1.Order) OrderInsert {
+	if m == nil {
+		m = &shopv1.Order{}
+	}
+
+	return OrderInsert{
+		id:    ordersReadID(m),
+		kind:  ordersReadKind(m),
+		audit: ordersReadAudit(m),
+		valid: true,
+	}
+}
+
+var ordersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
+	ratel.NewTable("shop", "orders", []string{"id", "kind", "audit"}, scanOrder,
+		ratel.PrimaryKey([]string{"id"}, func(model Order) []any { return []any{ordersReadID(model.Order)} }),
+		ratel.Constraints[Order](
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "orders", Constraint: "orders_audit_not_null", Columns: []string{"audit"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "orders", Constraint: "orders_id_not_null", Columns: []string{"id"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "orders", Constraint: "orders_kind_not_null", Columns: []string{"kind"}},
+			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "shop", Table: "orders", Constraint: "orders_pkey", Columns: []string{"id"}},
+		),
+		ratel.ModelValues(func(model Order) []any {
+			return []any{ordersReadID(model.Order), ordersReadKind(model.Order), ordersReadAudit(model.Order)}
+		})),
+	func(insert OrderInsert) bool { return insert.valid },
+	ratel.InsertField[OrderInsert]{
+		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+		Value: func(insert OrderInsert) (any, bool) { return insert.id, true },
+		Set:   func(OrderInsert) bool { return true },
+		Values: func(rows []OrderInsert) any {
+			out := make([]int64, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.id
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[OrderInsert]{
+		Name: "kind", Type: pgx.Identifier{"shop", "order_kind"},
+		Value: func(insert OrderInsert) (any, bool) { return insert.kind, true },
+		Set:   func(OrderInsert) bool { return true },
+		Values: func(rows []OrderInsert) any {
+			out := make([]string, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.kind
+			}
+
+			return out
+		},
+	},
+	ratel.InsertField[OrderInsert]{
+		Name: "audit", Type: pgx.Identifier{"shop", "audit_kind"},
+		Value: func(insert OrderInsert) (any, bool) { return insert.audit, true },
+		Set:   func(OrderInsert) bool { return true },
+		Values: func(rows []OrderInsert) any {
+			out := make([]string, len(rows))
+			for index, insert := range rows {
+				out[index] = insert.audit
+			}
+
+			return out
+		},
+	},
+))
+
+// Orders describes shop.orders.
+var Orders = &ordersTable{
+	KeyedTable: ordersBase,
+	ID:         ratel.NewCol[Order, int64]("id"),
+	Kind: ratel.NewCodecCol[Order]("kind", ratel.Codec[shopv1.OrderKind]{
+		Encode: func(v shopv1.OrderKind) any { return v.String() },
+		Scan: func(rows pgx.Rows) (ratel.Null[shopv1.OrderKind], error) {
+			var scanned pgtype.Text
+			if err := rows.Scan(&scanned); err != nil || !(scanned.Valid) {
+				return ratel.Null[shopv1.OrderKind]{}, err
+			}
+
+			value, err := ratelpb.FromEnum[shopv1.OrderKind](shopv1.OrderKind_value, scanned.String)
+			if err != nil {
+				return ratel.Null[shopv1.OrderKind]{}, err
+			}
+
+			return ratel.NullFrom(value), nil
+		},
+	}),
+	Audit: ratel.NewCodecCol[Order]("audit", ratel.Codec[shopv1.AuditKind]{
+		Encode: func(v shopv1.AuditKind) any { return v.String() },
+		Scan: func(rows pgx.Rows) (ratel.Null[shopv1.AuditKind], error) {
+			var scanned pgtype.Text
+			if err := rows.Scan(&scanned); err != nil || !(scanned.Valid) {
+				return ratel.Null[shopv1.AuditKind]{}, err
+			}
+
+			value, err := ratelpb.FromEnum[shopv1.AuditKind](shopv1.AuditKind_value, scanned.String)
+			if err != nil {
+				return ratel.Null[shopv1.AuditKind]{}, err
+			}
+
+			return ratel.NullFrom(value), nil
+		},
+	}),
+}
+
+type ordersTable struct {
+	ratel.KeyedTable[Order, OrderInsert]
+	ID    ratel.Col[Order, int64]
+	Kind  ratel.Col[Order, shopv1.OrderKind]
+	Audit ratel.Col[Order, shopv1.AuditKind]
+}
+
+// InSchema is the descriptor for a copy of orders in another schema.
+func (t *ordersTable) InSchema(schema string) *ordersTable {
+	copied := *t
+	copied.KeyedTable = t.KeyedTable.InSchema(schema)
+
+	return &copied
+}
+
+// ErrOrdersAuditNotNull matches a violation of orders_audit_not_null on shop.orders.
+var ErrOrdersAuditNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "orders", Constraint: "orders_audit_not_null", Columns: []string{"audit"}}
+
+// ErrOrdersIDNotNull matches a violation of orders_id_not_null on shop.orders.
+var ErrOrdersIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "orders", Constraint: "orders_id_not_null", Columns: []string{"id"}}
+
+// ErrOrdersKindNotNull matches a violation of orders_kind_not_null on shop.orders.
+var ErrOrdersKindNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "shop", Table: "orders", Constraint: "orders_kind_not_null", Columns: []string{"kind"}}
+
+// ErrOrdersPkey matches a violation of orders_pkey on shop.orders.
+var ErrOrdersPkey = &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "shop", Table: "orders", Constraint: "orders_pkey", Columns: []string{"id"}}
