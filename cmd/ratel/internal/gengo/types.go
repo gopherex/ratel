@@ -12,7 +12,9 @@ const (
 	uuidImport    = "github.com/google/uuid"
 	ratelImport   = "github.com/gopherex/ratel"
 
-	numericType = "numeric" // its Go type needs the decimal codec registered
+	numericType = "numeric"
+	boolType    = "bool" // the PostgreSQL and the Go name
+	stringType  = "string"
 )
 
 // goType is a Go type expression and the import paths it needs.
@@ -30,9 +32,9 @@ func scalar(name string) (goType, bool) {
 
 	switch name {
 	case "text", "varchar", "bpchar", "char", "name", "citext":
-		return goType{expr: "string"}, true
-	case "bool":
-		return goType{expr: "bool"}, true
+		return goType{expr: stringType}, true
+	case boolType:
+		return goType{expr: boolType}, true
 	case "bytea":
 		return goType{expr: "[]byte"}, true
 	case "uuid":

@@ -64,6 +64,7 @@ func (s *state) checkEnums(file *unit, names identifiers, table *ir.Table, colum
 		}
 
 		columns[index].goType = mapped
+		columns[index].wire = &wire{text: true}
 	}
 
 	return nil
@@ -91,13 +92,6 @@ func writeCheckEnum(file *unit, names identifiers, column *ir.Column, labels []s
 	}
 
 	file.printf(")\n\n")
-
-	// Its values encode as the column's text type when pgx infers parameter
-	// types (exec and simple protocol modes).
-	element := column.GetType().GetPgName()
-	file.registry.defaults[typeName+`("")`] = element
-	file.registry.defaults["[]"+typeName+"(nil)"] = "_" + element
-	file.registry.defaults["[]*"+typeName+"(nil)"] = "_" + element
 
 	return goType{expr: typeName}, nil
 }

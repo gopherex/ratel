@@ -79,7 +79,7 @@ func WithMigrationsDir(migrations fs.FS, options ...migrate.Option) PostgresOpti
 }
 
 // WithPoolConfig configures each isolated pool before creation. Use AfterConnect
-// for generated RegisterTypes or ratel.RegisterValue calls, and ConnConfig.Tracer
+// for a generated RegisterTypes, when a package has one, and ConnConfig.Tracer
 // for Recorder. Hooks run only on isolated databases, after migrations. Multiple
 // options run in order. The callback must be safe for concurrent test setup.
 func WithPoolConfig(configure func(*pgxpool.Config)) PostgresOption {

@@ -54,9 +54,9 @@ apply in option order.
 
 `WithPoolConfig(func(*pgxpool.Config))` configures each isolated pool, after
 schema application. Callbacks compose in option order and must support
-concurrent setup. Set `AfterConnect` to generated `RegisterTypes`, or explicitly
-load custom codecs and call `ratel.RegisterValue` on every connection. No Go type
-mapping is guessed or registered globally. The template and administrative
+concurrent setup. Generated packages need no connection setup unless they
+have a `RegisterTypes` (composite, custom range or custom array types); then set
+`AfterConnect` to it. No Go type mapping is guessed or registered globally. The template and administrative
 connections do not run application hooks.
 
 ```go
@@ -67,9 +67,7 @@ func TestUserStore(t *testing.T) {
             `CREATE SCHEMA app; CREATE TABLE app.users (id bigint PRIMARY KEY, email text NOT NULL)`,
         }, nil, nil),
         rateltest.WithPoolConfig(func(config *pgxpool.Config) {
-            config.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
-                return ratel.RegisterValue[string](conn.TypeMap(), "text")
-            }
+            config.ConnConfig.Tracer = &rateltest.Recorder{}
         }),
     )
     for _, name := range []string{"first", "second"} {

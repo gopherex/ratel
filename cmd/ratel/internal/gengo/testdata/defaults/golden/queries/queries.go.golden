@@ -3,8 +3,6 @@
 package queries
 
 import (
-	"context"
-
 	"github.com/gopherex/ratel"
 	"github.com/jackc/pgx/v5"
 )
@@ -57,18 +55,5 @@ type eventsAfterArg2 struct {
 
 // Arg2 sets the parameter arg2.
 func (s eventsAfterArg2) Arg2(v int64) ratel.Query[EventsAfterRow] {
-	return ratel.NewQuery([]string{"id"}, scanEventsAfter, "SELECT id FROM app.events WHERE note = $1 AND id > $2", s.arg1, v)
-}
-
-// RegisterTypes registers the PostgreSQL types of this package and the
-// ratel value wrappers its fields use. Call it on every connection, for
-// example from pgxpool.Config.AfterConnect.
-func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
-	types := conn.TypeMap()
-
-	if err := ratel.RegisterValue[string](types, "text"); err != nil {
-		return err
-	}
-
-	return nil
+	return ratel.NewQuery([]string{"id"}, scanEventsAfter, "SELECT id FROM app.events WHERE note = $1 AND id > $2", s.arg1.Arg(), v)
 }

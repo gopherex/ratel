@@ -160,6 +160,18 @@ func validIdentifier(name string) bool {
 	return name != "" && !strings.ContainsRune(name, 0)
 }
 
+// validIdentifiers reports whether every part of a qualified name is valid;
+// an empty name is valid.
+func validIdentifiers(parts []string) bool {
+	for _, part := range parts {
+		if !validIdentifier(part) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // Query is a generated static row query, bound to its arguments. It is a
 // value: Build renders it, db.Run runs its statement verbatim (so DML with
 // RETURNING works) with the row verbs, and Select starts a SELECT over its result.

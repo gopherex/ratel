@@ -3,7 +3,6 @@
 package public
 
 import (
-	"context"
 	"time"
 
 	"github.com/gopherex/ratel"
@@ -30,9 +29,11 @@ func (m *Order) User() (*User, error) { return m.R.User.Get() }
 func scanOrder(row pgx.Row) (Order, error) {
 	var model Order
 
-	err := row.Scan(&model.ID, &model.UserID, &model.Total, &model.Status)
+	if err := row.Scan(&model.ID, &model.UserID, &model.Total, &model.Status); err != nil {
+		return model, err
+	}
 
-	return model, err
+	return model, nil
 }
 
 // OrderInsert is the input of an insert into orders. Start it with Row.
@@ -236,9 +237,11 @@ func (m *User) Orders() ([]Order, error) { return m.R.Orders.Get() }
 func scanUser(row pgx.Row) (User, error) {
 	var model User
 
-	err := row.Scan(&model.ID, &model.Email, &model.Name, &model.CreatedAt)
+	if err := row.Scan(&model.ID, &model.Email, &model.Name, &model.CreatedAt); err != nil {
+		return model, err
+	}
 
-	return model, err
+	return model, nil
 }
 
 // UserInsert is the input of an insert into users. Start it with Row.
@@ -414,20 +417,3 @@ var ErrUsersNameNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, 
 
 // ErrUsersPkey matches a violation of users_pkey on public.users.
 var ErrUsersPkey = &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "public", Table: "users", Constraint: "users_pkey", Columns: []string{"id"}}
-
-// RegisterTypes registers the PostgreSQL types of this package and the
-// ratel value wrappers its fields use. Call it on every connection, for
-// example from pgxpool.Config.AfterConnect.
-func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
-	types := conn.TypeMap()
-
-	if err := ratel.RegisterValue[int64](types, "int8"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[time.Time](types, "timestamptz"); err != nil {
-		return err
-	}
-
-	return nil
-}

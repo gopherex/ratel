@@ -11,7 +11,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -35,21 +34,7 @@ func main() {
 const topCustomers = 10
 
 func run(ctx context.Context, url string, out io.Writer) error {
-	config, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		return fmt.Errorf("database url: %w", err)
-	}
-
-	// Each generated package registers the codecs of its types.
-	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		if err := app.RegisterTypes(ctx, conn); err != nil {
-			return err
-		}
-
-		return users.RegisterTypes(ctx, conn)
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, config)
+	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}

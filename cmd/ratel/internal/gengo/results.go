@@ -10,11 +10,13 @@ import (
 
 // resultColumn is one output column with the Go expression it scans into.
 type resultColumn struct {
+	typ      *ir.TypeRef
 	name     string
 	goType   goType
 	nullable bool
 	field    string // Row field, for a Row with one field per column
 	target   string // scan target expression
+	null     *nullTarget
 }
 
 // shape is a query's Go result type and how each column scans into it.
@@ -181,10 +183,10 @@ func (s *state) modelType(file *unit, table *ir.Table) string {
 // modelShape scans every column of one table into its model.
 func (s *state) modelShape(file *unit, value *ir.Query, group tableGroup) shape {
 	result := shape{typeName: s.modelType(file, group.table)}
-	targets := groupTargets(value, group, "model")
+	targets := s.groupTargets(file, value, group, "model")
 
-	for index, column := range value.GetColumns() {
-		result.columns = append(result.columns, resultColumn{name: column.GetName(), target: targets[index]})
+	for index := range value.GetColumns() {
+		result.columns = append(result.columns, targets[index])
 	}
 
 	return result
@@ -192,12 +194,21 @@ func (s *state) modelShape(file *unit, value *ir.Query, group tableGroup) shape 
 
 // groupTargets maps each output position of a table group to the model field
 // at prefix it scans into.
-func groupTargets(value *ir.Query, group tableGroup, prefix string) map[int]string {
-	targets := make(map[int]string, len(group.indexes))
+func (s *state) groupTargets(file *unit, value *ir.Query, group tableGroup, prefix string) map[int]resultColumn {
+	targets := make(map[int]resultColumn, len(group.indexes))
 
 	for _, index := range group.indexes {
-		field := pascal(value.GetColumns()[index].GetSourceColumn().GetName().GetParts()[2])
-		targets[index] = "&" + prefix + "." + field
+		name := value.GetColumns()[index].GetSourceColumn().GetName().GetParts()[2]
+		target := resultColumn{name: value.GetColumns()[index].GetName(), target: "&" + prefix + "." + pascal(name)}
+
+		declared := group.table.GetColumns()[slices.IndexFunc(group.table.GetColumns(),
+			func(c *ir.Column) bool { return c.GetName() == name })]
+		if declared.GetNullable() {
+			mapped, _ := s.columnType(group.table.GetName(), declared, "")
+			target.null = s.nullTarget(file, declared.GetType(), mapped)
+		}
+
+		targets[index] = target
 	}
 
 	return targets
@@ -211,10 +222,11 @@ func (s *state) column(file *unit, value *ir.Query, index int) (resultColumn, er
 		return resultColumn{}, err
 	}
 
-	s.use(file, column.GetType(), mapped, column.GetNullable())
+	s.use(file, column.GetType())
 
 	return resultColumn{
-		name: column.GetName(), goType: mapped, nullable: column.GetNullable(), field: pascal(column.GetName()),
+		typ: column.GetType(), name: column.GetName(), goType: mapped, nullable: column.GetNullable(),
+		field: pascal(column.GetName()),
 	}, nil
 }
 
@@ -260,6 +272,11 @@ func (s *state) ownShape(file *unit, value *ir.Query, name string, shared bool) 
 
 		seen[column.field] = true
 		column.target = "&model." + column.field
+
+		if column.nullable {
+			column.null = s.nullTarget(file, column.typ, column.goType)
+		}
+
 		result.columns = append(result.columns, column)
 		declaration.WriteString("\t" + column.field + " " + column.fieldType(file) + "\n")
 	}
@@ -322,7 +339,7 @@ func (s *state) embeddedShape(file *unit, value *ir.Query, group tableGroup, res
 	embedded := model[strings.LastIndex(model, ".")+1:]
 	name := value.GetName() + "Row"
 
-	targets := groupTargets(value, group, "model."+embedded)
+	targets := s.groupTargets(file, value, group, "model."+embedded)
 	result := shape{typeName: name}
 
 	var declaration strings.Builder
@@ -339,6 +356,11 @@ func (s *state) embeddedShape(file *unit, value *ir.Query, group tableGroup, res
 		}
 
 		column.target = "&model." + column.field
+
+		if column.nullable {
+			column.null = s.nullTarget(file, column.typ, column.goType)
+		}
+
 		extra[index] = column
 		declaration.WriteString("\t" + column.field + " " + column.fieldType(file) + "\n")
 	}
@@ -346,11 +368,11 @@ func (s *state) embeddedShape(file *unit, value *ir.Query, group tableGroup, res
 	declaration.WriteString("}\n\n")
 	result.declare = declaration.String()
 
-	for index, column := range value.GetColumns() {
+	for index := range value.GetColumns() {
 		if computed, ok := extra[index]; ok {
 			result.columns = append(result.columns, computed)
 		} else {
-			result.columns = append(result.columns, resultColumn{name: column.GetName(), target: targets[index]})
+			result.columns = append(result.columns, targets[index])
 		}
 	}
 
@@ -362,7 +384,7 @@ func (s *state) embeddedShape(file *unit, value *ir.Query, group tableGroup, res
 func (s *state) joinedShape(file *unit, value *ir.Query, groups []tableGroup) (shape, error) {
 	name := value.GetName() + "Row"
 	result := shape{typeName: name}
-	targets := make(map[int]string)
+	targets := make(map[int]resultColumn)
 
 	var declaration, before, after strings.Builder
 
@@ -395,7 +417,7 @@ func (s *state) joinedShape(file *unit, value *ir.Query, groups []tableGroup) (s
 		if !groupNullable(group, value) {
 			declaration.WriteString("\t" + field + " " + model + "\n")
 
-			for index, target := range groupTargets(value, group, "model."+field) {
+			for index, target := range s.groupTargets(file, value, group, "model."+field) {
 				targets[index] = target
 			}
 
@@ -409,8 +431,8 @@ func (s *state) joinedShape(file *unit, value *ir.Query, groups []tableGroup) (s
 	declaration.WriteString("}\n\n")
 	result.declare, result.before, result.after = declaration.String(), before.String(), after.String()
 
-	for index, column := range value.GetColumns() {
-		result.columns = append(result.columns, resultColumn{name: column.GetName(), target: targets[index]})
+	for index := range value.GetColumns() {
+		result.columns = append(result.columns, targets[index])
 	}
 
 	return result, nil
@@ -422,7 +444,7 @@ type nullable struct{ field, model string }
 // nullableGroup scans an outer-joined table into temporaries and builds its
 // model only when its first key column is not NULL.
 func (s *state) nullableGroup(file *unit, value *ir.Query, group tableGroup, target nullable,
-	targets map[int]string, before, after *strings.Builder,
+	targets map[int]resultColumn, before, after *strings.Builder,
 ) {
 	key := primaryKey(group.table)
 	assignments := make([]string, 0, len(group.indexes))
@@ -431,25 +453,27 @@ func (s *state) nullableGroup(file *unit, value *ir.Query, group tableGroup, tar
 	for _, index := range group.indexes {
 		name := value.GetColumns()[index].GetSourceColumn().GetName().GetParts()[2]
 		temporary := camel(target.field) + pascal(name)
-		targets[index] = "&" + temporary
+		targets[index] = resultColumn{name: value.GetColumns()[index].GetName(), target: "&" + temporary}
 
 		declared := group.table.GetColumns()[slices.IndexFunc(group.table.GetColumns(),
 			func(c *ir.Column) bool { return c.GetName() == name })]
 		mapped, _ := s.columnType(group.table.GetName(), declared, "")
-		s.use(file, declared.GetType(), mapped, true)
+		s.use(file, declared.GetType())
 
-		file.imports = append(file.imports, ratelImport)
-		before.WriteString("\tvar " + temporary + " ratel.Null[" + file.use(mapped) + "]\n")
+		// Every column of an outer-joined table can be NULL, so each scans
+		// through a temporary; the model is built only when its key is set.
+		temp := s.nullTarget(file, declared.GetType(), mapped)
+		before.WriteString("\tvar " + temporary + " " + temp.temp + "\n")
 
-		assigned := temporary + ".V"
+		assigned := temp.valueOf(temporary)
 		if declared.GetNullable() {
-			assigned = temporary
+			assigned = temp.null(temporary)
 		}
 
 		assignments = append(assignments, pascal(name)+": "+assigned)
 
 		if len(key) > 0 && name == key[0] {
-			check = temporary + ".Valid"
+			check = temp.valid(temporary)
 		}
 	}
 

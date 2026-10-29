@@ -146,6 +146,7 @@ type usersTable struct {
 	Manager   ratel.Rel[User, User]
 }
 
+// only in a package with composite, custom range or custom array types (below)
 func RegisterTypes(ctx context.Context, conn *pgx.Conn) error // for pgxpool AfterConnect
 ```
 
@@ -187,8 +188,8 @@ Rules:
   or `char` column with a `CHECK (column IN ('a', ...))` of string literals,
   becomes a Go string type with one constant per value; the column's type is
   `<Model><Column>` (`TagKind`, constants `TagKindTopic`, ...) unless
-  `@go.type` overrides it. `RegisterTypes` maps it to the column's text type
-  for pgx's parameter inference.
+  `@go.type` overrides it. pgx sends and reads a scalar enum as text without
+  registration; arrays carry enum values as `string` (above).
 - Views and materialized views get a model and a read-only descriptor (no
   write methods).
 - Composite primary and foreign keys are supported everywhere; batched loading
@@ -201,9 +202,14 @@ Rules:
 - Generated identifiers come from one naming function (singular model, plural
   descriptor, Go initialisms). A collision is a generation error naming both
   sources, never a silent suffix.
-- `RegisterTypes` registers every enum, domain, composite and range type the
-  package uses, then calls `ratel.RegisterValue[T](conn.TypeMap(), name)` for
-  each Go/PostgreSQL mapping used by nullable or optional fields.
+- Scalars, enums, domains, `numeric` and nullable or optional values need no
+  connection setup: `ratel.New(pool)` is all a package without the types
+  below requires. `RegisterTypes` exists only in a package whose columns,
+  parameters or results use a composite type, a range or multirange of a
+  non-built-in type, or an array of an enum, domain or composite:
+  PostgreSQL assigns their OIDs per database, so pgx loads them per
+  connection. It loads those types and calls `ratel.RegisterValue` for the
+  `Null` fields of composites.
 
 ### Descriptor construction
 
@@ -281,60 +287,44 @@ while preserving its result model and scanner.
 
 ### Nullable and optional pgx values
 
-`ratel.RegisterValue[T](typeMap, name)` enables `Null[T]`, `Opt[T]` and
-`Opt[Null[T]]` for the named PostgreSQL type. It also registers their pointer
-forms and default PostgreSQL type names, so parameter inference works with
-pgx's extended and simple query protocols. Call it on every connection before
-queries, after loading custom types and registering their codecs. Repeating
-registration is safe; a Go wrapper type has one default PostgreSQL type name,
-with the last registration winning, as with `pgtype.Map.RegisterDefaultPgType`.
-Explicit parameter OIDs can still select another registered PostgreSQL type.
+`Null[T]` and `Opt[T]` never reach pgx as values, so they need no connection
+setup:
 
-For handwritten models, the equivalent of generated `RegisterTypes` is:
+- Arguments: generated code and the builder pass pgx `nil` for NULL and `V`
+  otherwise (`Null.Arg()`); a set `Opt` passes `V`, an unset one omits its
+  column. `NullCol.To(Null[V])` unwraps the same way.
+- Results: a generated scanner reads a nullable column into a pgx-native
+  nullable target and builds the `Null[T]` from it: `pgtype.Bool`, `Int2`,
+  `Int4`, `Int8`, `Float4`, `Float8`, `Text`, `Timestamptz`, `Timestamp`,
+  `Date` and `UUID` for the matching built-in Go types and for enums (through
+  `pgtype.Text`), and `*T` for every other type, which pgx allocates only for
+  a non-NULL value. `PluckNull` reads through `*V` the same way.
+- Arrays sent by inserts and relation loads carry pgx-native elements: `*T`
+  for nullable values, and enum values as `string`; the SQL casts the array
+  to the column type, as in `unnest($1::text[]::"app"."user_status"[])`, so
+  pgx encodes a built-in array type. `InsertField.Base` and `RelKey.Base` name
+  that wire type; when empty, `Type` is sent as is.
 
-```go
-config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-    if err := ratel.RegisterValue[int64](conn.TypeMap(), "int8"); err != nil {
-        return err
-    }
-    return ratel.RegisterValue[Profile](conn.TypeMap(), "jsonb")
-}
-```
+`ratel.RegisterValue[T](typeMap, name)` remains for values pgx itself scans
+field by field: the fields of generated composite types (`Null[T]` inside a
+struct read by pgx's composite codec), and handwritten code that scans into
+`Null[T]` or `Opt[T]` directly. It decorates the existing `pgtype.Codec`,
+preserving its formats and configuration; encoding uses `V`, scanning `&V`,
+and the runtime still neither imports `reflect` nor implements
+`database/sql.Scanner` or `driver.Valuer`. A `TryWrapScanPlanFuncs` hook alone
+is insufficient: pgx v5.11 calls the codec first, and its JSON codecs would
+marshal the wrapper's fields. Call it on every connection before queries,
+after loading the PostgreSQL type; a missing type name returns
+`ratel.ValueTypeError`.
 
-Registration decorates the existing `pgtype.Codec`, preserving its supported
-formats, preferred format, decoding and custom configuration. Optional plans
-unwrap values and delegate to the same `pgtype.Map`: encoding uses `V`;
-scanning uses `&V`. Thus `T` has exactly the codec support pgx provides,
-including pointer, array and custom JSONB struct targets. The runtime neither
-imports `reflect` nor implements `database/sql.Scanner` or `driver.Valuer`.
-The underlying pgx codecs may use reflection themselves.
-Optional scan plans cache their delegate by OID, format and underlying Go type
-on the registering map; a copied pgx map plans against its own configuration.
-Scans decode directly into `V` and clear it on failure. Concrete built-in scalar
-encoders retain their delegate plan; interfaces and nil-capable values still
-use `Map.Encode` so dynamic types and pgx's native NULL handling remain intact.
-
-A `TryWrapScanPlanFuncs` / `TryWrapEncodePlanFuncs` hook alone is insufficient:
-pgx v5.11 calls the codec before those hooks. Its JSON/JSONB codecs accept
-arbitrary values and destinations, so they would marshal the wrapper's fields
-or unmarshal into the wrapper rather than process `V`. The decorator intercepts
-only ratel values before the existing codec; plain values keep pgx's behavior.
-
-- Invalid `Null[T]` encodes as SQL NULL without inspecting `V`. Scanning SQL
-  NULL clears `V` and `Valid`; non-NULL input sets `Valid` only after a successful
-  scan. JSON `null` is not SQL NULL: `Valid` remains true and pgx determines `V`.
-- Set `Opt[T]` encodes `V`. Scanning sets `Set` only after pgx accepts the value.
-  SQL NULL therefore requires a `T` that accepts it, such as `Null[U]` or `*U`.
-  A failed scan clears the wrapper, rather than retaining a stale value.
-- Unset `Opt[T]` must be omitted from generated writes so the column default
-  applies. Encoding it directly returns `ratel.UnsetOptError`, detectable with
-  `errors.As`; unset never silently becomes SQL NULL.
+- Invalid `Null[T]` is SQL NULL without inspecting `V`. Scanning SQL NULL
+  clears `V` and `Valid`; non-NULL input sets `Valid` only after a successful
+  scan. JSON `null` is not SQL NULL: `Valid` remains true.
+- Unset `Opt[T]` is omitted from generated writes so the column default
+  applies. Encoding it directly through `RegisterValue` returns
+  `ratel.UnsetOptError`; unset never silently becomes SQL NULL.
 - `Null[T]{Valid: true}` and `Opt[T]{Set: true}` do not override `T`'s native
   NULL semantics: a nil pointer or a nullable pgtype value still encodes NULL.
-- A missing PostgreSQL type name returns `ratel.ValueTypeError`; load/register
-  that type before registering the ratel wrappers. Replacing its codec later
-  requires calling `RegisterValue` again. Configure each map before concurrent
-  use, following pgx's own map ownership rules.
 
 ### Type mapping
 
@@ -342,7 +332,7 @@ only ratel values before the existing codec; plain values keep pgx's behavior.
 |---|---|
 | `int2`, `int4`, `int8` | `int16`, `int32`, `int64` |
 | `float4`, `float8` | `float32`, `float64` |
-| `numeric` | `decimal.Decimal` (`github.com/shopspring/decimal` through `github.com/jackc/pgx-shopspring-decimal`) |
+| `numeric` | `decimal.Decimal` (`github.com/shopspring/decimal`), encoded and scanned through its `database/sql` methods; `pgxdecimal.Register(conn.TypeMap())` from `github.com/jackc/pgx-shopspring-decimal` in `AfterConnect` switches to the binary codec |
 | `text`, `varchar`, `char` | `string` |
 | `bool` | `bool` |
 | `bytea` | `[]byte` |
@@ -357,8 +347,9 @@ only ratel values before the existing codec; plain values keep pgx's behavior.
 | enum, composite, domain | generated types |
 
 Every mapping can be overridden in the plugin options per type or per column
-(`@go.type`). An override type must have a pgx codec; `RegisterTypes` wires
-the codecs the package needs.
+(`@go.type`). An override type must have a pgx codec or implement
+`database/sql`'s `Scanner` and `driver.Valuer`; a codec that needs registration
+is registered by the application in `AfterConnect`.
 
 ## Static queries
 
@@ -420,8 +411,9 @@ Two queries with identical shapes and no `@ratel.row` produce warning
   generated function that executes.
 - Nullable parameters take `ratel.Null[T]`. Unnamed `$N` parameters are
   `ArgN` steps.
-- Every query package has its own `RegisterTypes` for the types and value
-  wrappers its parameters and rows use.
+- A query package has its own `RegisterTypes` under the same rule as table
+  packages. `@go.row` structs are the user's: their fields scan as pgx scans
+  them, so a `Null[T]` field there needs `ratel.RegisterValue`.
 - Arrays of scalars and of composite types map natively. `json` and `jsonb`
   values get a Go type only through `@go.type`; ratel does not guess the shape
   of JSON built in SQL.

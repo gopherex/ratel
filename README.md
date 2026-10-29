@@ -96,6 +96,8 @@ the generated code:
 //go:embed migrations
 var migrations embed.FS
 
+pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL")) // no type registration needed
+
 dir, _ := fs.Sub(migrations, "migrations")
 err := migrate.Apply(ctx, pool, dir) // no table is locked longer than a moment
 
@@ -118,8 +120,7 @@ orders, err := ann.Orders()
 top, err := db.Run(users.TopCustomers().Limit(10)).List(ctx)
 ```
 
-Error checks are left out here. The complete program, with the pool setup
-that registers the generated types, is
+Error checks are left out here. The complete program is
 [examples/shop/main.go](examples/shop/main.go); CI runs it against
 PostgreSQL.
 

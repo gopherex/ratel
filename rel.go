@@ -49,6 +49,9 @@ const (
 type RelKey[M any] struct {
 	Column string
 	Type   pgx.Identifier
+	// Base is the built-in type the key array is sent as, cast to Type in SQL;
+	// empty sends Type as is (see InsertField.Base).
+	Base   pgx.Identifier
 	Values func([]M) any
 	// Parent is the parent's own key column; Has correlates on it.
 	Parent string
@@ -95,6 +98,7 @@ func NewRel[M, R any](target RelationTarget[R], cardinality Cardinality, keys []
 	keys = slices.Clone(keys)
 	for index := range keys {
 		keys[index].Type = slices.Clone(keys[index].Type)
+		keys[index].Base = slices.Clone(keys[index].Base)
 	}
 
 	relation := Rel[M, R]{

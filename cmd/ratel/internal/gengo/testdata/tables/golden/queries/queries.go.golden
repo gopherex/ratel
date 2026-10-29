@@ -12,17 +12,29 @@ import (
 	"example.com/app/db/app"
 	"github.com/acme/doc"
 	"github.com/gopherex/ratel"
-	pgxdecimal "github.com/jackc/pgx-shopspring-decimal"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
 )
 
 func scanUserByEmail(row pgx.Row) (app.User, error) {
 	var model app.User
 
-	if err := row.Scan(&model.ID, &model.Email, &model.Status, &model.ManagerID, &model.Balance, &model.Tags, &model.Home, &model.Type, &model.CreatedAt, &model.Profile, &model.Doubled); err != nil {
+	var null3 pgtype.Int8
+	var null6 *app.Address
+	var null7 pgtype.Text
+	var null9 *doc.Profile
+	var null10 pgtype.Int8
+
+	if err := row.Scan(&model.ID, &model.Email, &model.Status, &null3, &model.Balance, &model.Tags, &null6, &null7, &model.CreatedAt, &null9, &null10); err != nil {
 		return model, err
 	}
+
+	model.ManagerID = ratel.Null[int64]{V: null3.Int64, Valid: null3.Valid}
+	model.Home = ratel.NullFromPtr(null6)
+	model.Type = ratel.Null[string]{V: null7.String, Valid: null7.Valid}
+	model.Profile = ratel.NullFromPtr(null9)
+	model.Doubled = ratel.Null[int64]{V: null10.Int64, Valid: null10.Valid}
 
 	return model, nil
 }
@@ -78,9 +90,21 @@ type UsersWithOrderCountRow struct {
 func scanUsersWithOrderCount(row pgx.Row) (UsersWithOrderCountRow, error) {
 	var model UsersWithOrderCountRow
 
-	if err := row.Scan(&model.User.ID, &model.User.Email, &model.User.Status, &model.User.ManagerID, &model.User.Balance, &model.User.Tags, &model.User.Home, &model.User.Type, &model.User.CreatedAt, &model.User.Profile, &model.User.Doubled, &model.OrderCount); err != nil {
+	var null3 pgtype.Int8
+	var null6 *app.Address
+	var null7 pgtype.Text
+	var null9 *doc.Profile
+	var null10 pgtype.Int8
+
+	if err := row.Scan(&model.User.ID, &model.User.Email, &model.User.Status, &null3, &model.User.Balance, &model.User.Tags, &null6, &null7, &model.User.CreatedAt, &null9, &null10, &model.OrderCount); err != nil {
 		return model, err
 	}
+
+	model.User.ManagerID = ratel.Null[int64]{V: null3.Int64, Valid: null3.Valid}
+	model.User.Home = ratel.NullFromPtr(null6)
+	model.User.Type = ratel.Null[string]{V: null7.String, Valid: null7.Valid}
+	model.User.Profile = ratel.NullFromPtr(null9)
+	model.User.Doubled = ratel.Null[int64]{V: null10.Int64, Valid: null10.Valid}
 
 	return model, nil
 }
@@ -131,23 +155,23 @@ type OrdersWithUsersRow struct {
 func scanOrdersWithUsers(row pgx.Row) (OrdersWithUsersRow, error) {
 	var model OrdersWithUsersRow
 
-	var userID ratel.Null[int64]
-	var userEmail ratel.Null[app.Email]
-	var userStatus ratel.Null[app.UserStatus]
-	var userManagerID ratel.Null[int64]
-	var userBalance ratel.Null[decimal.Decimal]
-	var userTags ratel.Null[[]string]
-	var userHome ratel.Null[app.Address]
-	var userType ratel.Null[string]
-	var userCreatedAt ratel.Null[time.Time]
-	var userProfile ratel.Null[doc.Profile]
-	var userDoubled ratel.Null[int64]
+	var userID pgtype.Int8
+	var userEmail *app.Email
+	var userStatus *app.UserStatus
+	var userManagerID pgtype.Int8
+	var userBalance *decimal.Decimal
+	var userTags *[]string
+	var userHome *app.Address
+	var userType pgtype.Text
+	var userCreatedAt *time.Time
+	var userProfile *doc.Profile
+	var userDoubled pgtype.Int8
 	if err := row.Scan(&model.Order.ID, &model.Order.UserID, &model.Order.Total, &userID, &userEmail, &userStatus, &userManagerID, &userBalance, &userTags, &userHome, &userType, &userCreatedAt, &userProfile, &userDoubled); err != nil {
 		return model, err
 	}
 
 	if userID.Valid {
-		model.User = &app.User{ID: userID.V, Email: userEmail.V, Status: userStatus.V, ManagerID: userManagerID, Balance: userBalance.V, Tags: userTags.V, Home: userHome, Type: userType, CreatedAt: userCreatedAt.V, Profile: userProfile, Doubled: userDoubled}
+		model.User = &app.User{ID: userID.Int64, Email: *userEmail, Status: *userStatus, ManagerID: ratel.Null[int64]{V: userManagerID.Int64, Valid: userManagerID.Valid}, Balance: *userBalance, Tags: *userTags, Home: ratel.NullFromPtr(userHome), Type: ratel.Null[string]{V: userType.String, Valid: userType.Valid}, CreatedAt: *userCreatedAt, Profile: ratel.NullFromPtr(userProfile), Doubled: ratel.Null[int64]{V: userDoubled.Int64, Valid: userDoubled.Valid}}
 	}
 
 	return model, nil
@@ -167,9 +191,13 @@ type Total struct {
 func scanOrderTotals(row pgx.Row) (Total, error) {
 	var model Total
 
-	if err := row.Scan(&model.UserID, &model.Amount); err != nil {
+	var null1 *decimal.Decimal
+
+	if err := row.Scan(&model.UserID, &null1); err != nil {
 		return model, err
 	}
+
+	model.Amount = ratel.NullFromPtr(null1)
 
 	return model, nil
 }
@@ -194,9 +222,13 @@ func OrderTotals() ratel.Query[Total] {
 func scanTopTotals(row pgx.Row) (Total, error) {
 	var model Total
 
-	if err := row.Scan(&model.UserID, &model.Amount); err != nil {
+	var null1 *decimal.Decimal
+
+	if err := row.Scan(&model.UserID, &null1); err != nil {
 		return model, err
 	}
+
+	model.Amount = ratel.NullFromPtr(null1)
 
 	return model, nil
 }
@@ -285,7 +317,7 @@ type emailsLikeMinimum struct {
 
 // Minimum sets the parameter minimum.
 func (s emailsLikeMinimum) Minimum(v decimal.Decimal) ratel.Query[EmailsLikeRow] {
-	return ratel.NewQuery([]string{"id", "email"}, scanEmailsLike, "SELECT id, email FROM app.users WHERE email LIKE $1 AND status = $2 AND manager_id = $3 AND balance > $4", s.pattern, s.status, s.manager, v)
+	return ratel.NewQuery([]string{"id", "email"}, scanEmailsLike, "SELECT id, email FROM app.users WHERE email LIKE $1 AND status = $2 AND manager_id = $3 AND balance > $4", s.pattern, s.status, s.manager.Arg(), v)
 }
 
 // EmailsOfManagersRow is a row of EmailsOfManagers.
@@ -397,15 +429,14 @@ func CopyTags(ctx context.Context, db *ratel.DB, rows iter.Seq[CopyTagsParams]) 
 	}))
 }
 
-// RegisterTypes registers the PostgreSQL types of this package and the
-// ratel value wrappers its fields use. Call it on every connection, for
-// example from pgxpool.Config.AfterConnect.
+// RegisterTypes loads the PostgreSQL types of this package whose OIDs pgx
+// must know (composites, user ranges, arrays of user types) and registers
+// the ratel value wrappers of composite fields. Call it on every
+// connection, for example from pgxpool.Config.AfterConnect.
 func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	types := conn.TypeMap()
 
-	pgxdecimal.Register(types)
-
-	for _, name := range []string{"app.address", "app.email", "app.user_status", "app._address", "app._email", "app._user_status"} {
+	for _, name := range []string{"app.address", "app._address"} {
 		loaded, err := conn.LoadType(ctx, name)
 		if err != nil {
 			return fmt.Errorf("load type %s: %w", name, err)
@@ -415,51 +446,8 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	}
 
 	types.RegisterDefaultPgType([]*app.Address(nil), "app._address")
-	types.RegisterDefaultPgType([]*app.UserStatus(nil), "app._user_status")
 	types.RegisterDefaultPgType([]app.Address(nil), "app._address")
-	types.RegisterDefaultPgType([]app.UserStatus(nil), "app._user_status")
 	types.RegisterDefaultPgType(app.Address{}, "app.address")
-	types.RegisterDefaultPgType(app.UserStatus(""), "app.user_status")
-
-	if err := ratel.RegisterValue[[]string](types, "_text"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[app.Address](types, "app.address"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[app.Email](types, "text"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[app.UserStatus](types, "app.user_status"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[decimal.Decimal](types, "numeric"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[doc.Profile](types, "jsonb"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[int64](types, "int8"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[json.RawMessage](types, "jsonb"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[string](types, "text"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[time.Time](types, "timestamptz"); err != nil {
-		return err
-	}
 
 	return nil
 }

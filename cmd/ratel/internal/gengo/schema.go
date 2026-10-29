@@ -60,11 +60,13 @@ func (s *state) schemaFiles(schema *ir.Schema) ([]*pluginpb.File, error) {
 		}
 	}
 
-	if err := file.declare("RegisterTypes", "schema "+schema.GetName()); err != nil {
-		return nil, err
-	}
+	if !file.registry.empty() {
+		if err := file.declare("RegisterTypes", "schema "+schema.GetName()); err != nil {
+			return nil, err
+		}
 
-	writeRegisterTypes(file)
+		writeRegisterTypes(file)
+	}
 
 	name := packageName(schema.GetName())
 
@@ -165,7 +167,10 @@ func (s *state) composites(file *unit, schema *ir.Schema) error {
 
 			// Composite fields are nullable in PostgreSQL.
 			file.imports = append(file.imports, ratelImport)
-			s.use(file, field.GetType(), fieldType, true)
+			// pgx's composite codec scans the fields itself, so their ratel.Null
+			// wrappers are registered on the connection.
+			s.use(file, field.GetType())
+			file.registry.values[valuePair{goType: file.use(fieldType), pgType: s.valueName(field.GetType())}] = true
 			file.printf("\t%s ratel.Null[%s] `db:%s`\n", pascal(field.GetName()), file.use(fieldType),
 				strconv.Quote(field.GetName()))
 		}

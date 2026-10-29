@@ -115,7 +115,7 @@ func TestWriteSQL(t *testing.T) {
 		},
 		{
 			name: "null assignment", query: users.Update().Set(users.Note.To(ratel.Null[int64]{})).All(),
-			sql: `UPDATE "app"."users" AS "q" SET "manager_id" = $1`, args: []any{ratel.Null[int64]{}},
+			sql: `UPDATE "app"."users" AS "q" SET "manager_id" = $1`, args: []any{nil},
 		},
 		{
 			name: "conjoined where", query: users.Delete().Where(users.ID.Eq(1)).Where(users.Email.Eq("a")),

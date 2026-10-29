@@ -48,6 +48,16 @@ func (value Null[T]) IsZero() bool {
 	return !value.Valid
 }
 
+// Arg is the value as a pgx argument: nil for NULL, V otherwise. It needs no
+// type registration, unlike passing the wrapper itself.
+func (value Null[T]) Arg() any {
+	if !value.Valid {
+		return nil
+	}
+
+	return value.V
+}
+
 func (value Null[T]) encodeValue(plan *valuePlan, buffer []byte) ([]byte, error) {
 	if !value.Valid {
 		return nil, nil

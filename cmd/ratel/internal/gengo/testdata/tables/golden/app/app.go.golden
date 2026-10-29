@@ -9,8 +9,8 @@ import (
 
 	"github.com/acme/doc"
 	"github.com/gopherex/ratel"
-	pgxdecimal "github.com/jackc/pgx-shopspring-decimal"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
 )
 
@@ -54,9 +54,11 @@ func (m *OrderTag) Tag() (*Tag, error) { return m.R.Tag.Get() }
 func scanOrderTag(row pgx.Row) (OrderTag, error) {
 	var model OrderTag
 
-	err := row.Scan(&model.OrderID, &model.TagID)
+	if err := row.Scan(&model.OrderID, &model.TagID); err != nil {
+		return model, err
+	}
 
-	return model, err
+	return model, nil
 }
 
 // OrderTagInsert is the input of an insert into order_tags. Start it with Row.
@@ -237,9 +239,11 @@ func (m *Order) User() (*User, error) { return m.R.User.Get() }
 func scanOrder(row pgx.Row) (Order, error) {
 	var model Order
 
-	err := row.Scan(&model.ID, &model.UserID, &model.Total)
+	if err := row.Scan(&model.ID, &model.UserID, &model.Total); err != nil {
+		return model, err
+	}
 
-	return model, err
+	return model, nil
 }
 
 // OrderInsert is the input of an insert into orders. Start it with Row.
@@ -463,9 +467,11 @@ func (m *Tag) OrderTags() ([]OrderTag, error) { return m.R.OrderTags.Get() }
 func scanTag(row pgx.Row) (Tag, error) {
 	var model Tag
 
-	err := row.Scan(&model.ID, &model.Label, &model.Kind)
+	if err := row.Scan(&model.ID, &model.Label, &model.Kind); err != nil {
+		return model, err
+	}
 
-	return model, err
+	return model, nil
 }
 
 // TagInsert is the input of an insert into tags. Start it with Row.
@@ -550,9 +556,9 @@ var tagsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 		Value: func(insert TagInsert) (any, bool) { return insert.kind.V, insert.kind.Set },
 		Set:   func(insert TagInsert) bool { return insert.kind.Set },
 		Values: func(rows []TagInsert) any {
-			out := make([]TagKind, len(rows))
+			out := make([]string, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.kind.V
+				out[index] = string(insert.kind.V)
 			}
 
 			return out
@@ -670,9 +676,23 @@ func (m *User) Users() ([]User, error) { return m.R.Users.Get() }
 func scanUser(row pgx.Row) (User, error) {
 	var model User
 
-	err := row.Scan(&model.ID, &model.Email, &model.Status, &model.ManagerID, &model.Balance, &model.Tags, &model.Home, &model.Type, &model.CreatedAt, &model.Profile, &model.Doubled)
+	var null3 pgtype.Int8
+	var null6 *Address
+	var null7 pgtype.Text
+	var null9 *doc.Profile
+	var null10 pgtype.Int8
 
-	return model, err
+	if err := row.Scan(&model.ID, &model.Email, &model.Status, &null3, &model.Balance, &model.Tags, &null6, &null7, &model.CreatedAt, &null9, &null10); err != nil {
+		return model, err
+	}
+
+	model.ManagerID = ratel.Null[int64]{V: null3.Int64, Valid: null3.Valid}
+	model.Home = ratel.NullFromPtr(null6)
+	model.Type = ratel.Null[string]{V: null7.String, Valid: null7.Valid}
+	model.Profile = ratel.NullFromPtr(null9)
+	model.Doubled = ratel.Null[int64]{V: null10.Int64, Valid: null10.Valid}
+
+	return model, nil
 }
 
 // UserInsert is the input of an insert into users. Start it with Row.
@@ -785,7 +805,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "users", Constraint: "users_tags_not_null", Columns: []string{"tags"}},
 		),
 		ratel.ModelValues(func(model User) []any {
-			return []any{model.ID, model.Email, model.Status, model.ManagerID, model.Balance, model.Tags, model.Home, model.Type, model.CreatedAt, model.Profile, model.Doubled}
+			return []any{model.ID, model.Email, model.Status, model.ManagerID.Arg(), model.Balance, model.Tags, model.Home.Arg(), model.Type.Arg(), model.CreatedAt, model.Profile.Arg(), model.Doubled.Arg()}
 		})),
 	func(insert UserInsert) bool { return insert.valid },
 	ratel.InsertField[UserInsert]{
@@ -802,7 +822,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 		},
 	},
 	ratel.InsertField[UserInsert]{
-		Name: "email", Type: pgx.Identifier{"app", "email"},
+		Name: "email", Type: pgx.Identifier{"app", "email"}, Base: pgx.Identifier{"pg_catalog", "text"},
 		Value: func(insert UserInsert) (any, bool) { return insert.email, true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
@@ -815,13 +835,13 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 		},
 	},
 	ratel.InsertField[UserInsert]{
-		Name: "status", Type: pgx.Identifier{"app", "user_status"},
+		Name: "status", Type: pgx.Identifier{"app", "user_status"}, Base: pgx.Identifier{"pg_catalog", "text"},
 		Value: func(insert UserInsert) (any, bool) { return insert.status, true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
-			out := make([]UserStatus, len(rows))
+			out := make([]string, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.status
+				out[index] = string(insert.status)
 			}
 
 			return out
@@ -829,7 +849,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"},
-		Value: func(insert UserInsert) (any, bool) { return insert.managerID, true },
+		Value: func(insert UserInsert) (any, bool) { return insert.managerID.Arg(), true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]*int64, len(rows))
@@ -861,7 +881,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "home", Type: pgx.Identifier{"app", "address"},
-		Value: func(insert UserInsert) (any, bool) { return insert.home, true },
+		Value: func(insert UserInsert) (any, bool) { return insert.home.Arg(), true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]*Address, len(rows))
@@ -874,7 +894,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "type", Type: pgx.Identifier{"pg_catalog", "text"},
-		Value: func(insert UserInsert) (any, bool) { return insert.typeValue, true },
+		Value: func(insert UserInsert) (any, bool) { return insert.typeValue.Arg(), true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]*string, len(rows))
@@ -900,7 +920,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "profile", Type: pgx.Identifier{"pg_catalog", "jsonb"},
-		Value: func(insert UserInsert) (any, bool) { return insert.profile, true },
+		Value: func(insert UserInsert) (any, bool) { return insert.profile.Arg(), true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]*doc.Profile, len(rows))
@@ -1044,9 +1064,15 @@ type ActiveUser struct {
 func scanActiveUser(row pgx.Row) (ActiveUser, error) {
 	var model ActiveUser
 
-	err := row.Scan(&model.ID, &model.Email, &model.Home)
+	var null2 *Address
 
-	return model, err
+	if err := row.Scan(&model.ID, &model.Email, &null2); err != nil {
+		return model, err
+	}
+
+	model.Home = ratel.NullFromPtr(null2)
+
+	return model, nil
 }
 
 // ActiveUsers describes the view app.active_users; it is read-only.
@@ -1072,15 +1098,14 @@ func (t *activeUsersTable) InSchema(schema string) *activeUsersTable {
 	return &copied
 }
 
-// RegisterTypes registers the PostgreSQL types of this package and the
-// ratel value wrappers its fields use. Call it on every connection, for
-// example from pgxpool.Config.AfterConnect.
+// RegisterTypes loads the PostgreSQL types of this package whose OIDs pgx
+// must know (composites, user ranges, arrays of user types) and registers
+// the ratel value wrappers of composite fields. Call it on every
+// connection, for example from pgxpool.Config.AfterConnect.
 func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	types := conn.TypeMap()
 
-	pgxdecimal.Register(types)
-
-	for _, name := range []string{"app.address", "app.email", "app.user_status", "app._address", "app._email", "app._user_status"} {
+	for _, name := range []string{"app.address", "app._address"} {
 		loaded, err := conn.LoadType(ctx, name)
 		if err != nil {
 			return fmt.Errorf("load type %s: %w", name, err)
@@ -1090,48 +1115,14 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	}
 
 	types.RegisterDefaultPgType(Address{}, "app.address")
-	types.RegisterDefaultPgType(TagKind(""), "text")
-	types.RegisterDefaultPgType(UserStatus(""), "app.user_status")
 	types.RegisterDefaultPgType([]*Address(nil), "app._address")
-	types.RegisterDefaultPgType([]*TagKind(nil), "_text")
-	types.RegisterDefaultPgType([]*UserStatus(nil), "app._user_status")
 	types.RegisterDefaultPgType([]Address(nil), "app._address")
-	types.RegisterDefaultPgType([]TagKind(nil), "_text")
-	types.RegisterDefaultPgType([]UserStatus(nil), "app._user_status")
-
-	if err := ratel.RegisterValue[Address](types, "app.address"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[TagKind](types, "text"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[[]string](types, "_text"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[decimal.Decimal](types, "numeric"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[doc.Profile](types, "jsonb"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[int64](types, "int8"); err != nil {
-		return err
-	}
 
 	if err := ratel.RegisterValue[string](types, "text"); err != nil {
 		return err
 	}
 
 	if err := ratel.RegisterValue[string](types, "varchar"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[time.Time](types, "timestamptz"); err != nil {
 		return err
 	}
 

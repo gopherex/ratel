@@ -124,8 +124,13 @@ func tableOptions(names identifiers, columns []column, table *ir.Table) string {
 	}
 
 	values := make([]string, 0, len(columns))
+
 	for _, value := range columns {
-		values = append(values, "model."+value.field)
+		if value.nullable {
+			values = append(values, "model."+value.field+".Arg()")
+		} else {
+			values = append(values, "model."+value.field)
+		}
 	}
 
 	options.WriteString(",\n\t\t\tratel.ModelValues(func(model " + names.model + ") []any { return []any{" +
@@ -155,9 +160,15 @@ func writeInsertField(file *unit, names identifiers, value column) {
 	case insertRequired, insertNullable, insertOmitted:
 	}
 
-	file.printf("\t\tratel.InsertField[%s]{\n\t\t\tName: %s, Type: %s,\n", names.insert, strconv.Quote(value.name),
-		value.pgType)
-	file.printf("\t\t\tValue: func(insert %s) (any, bool) { return %s, %s },\n", names.insert, access, set)
+	file.printf("\t\tratel.InsertField[%s]{\n\t\t\tName: %s, Type: %s%s,\n", names.insert, strconv.Quote(value.name),
+		pgTypeName(value.typ), baseField(value))
+
+	argument := access
+	if value.nullable {
+		argument += ".Arg()"
+	}
+
+	file.printf("\t\t\tValue: func(insert %s) (any, bool) { return %s, %s },\n", names.insert, argument, set)
 	file.printf("\t\t\tSet: func(%s) bool { return %s },\n", setParameter(names.insert, set), set)
 
 	if value.array {
@@ -166,12 +177,9 @@ func writeInsertField(file *unit, names identifiers, value column) {
 		return
 	}
 
-	element, project := file.use(value.goType), access
-	if value.nullable {
-		element, project = "*"+element, access+".Ptr()"
-	}
+	element, statement := projection(value, file.use(value.goType), access)
 
 	file.printf("\t\t\tValues: func(rows []%s) any {\n\t\t\t\tout := make([]%s, len(rows))\n"+
-		"\t\t\t\tfor index, insert := range rows {\n\t\t\t\t\tout[index] = %s\n\t\t\t\t}\n\n"+
-		"\t\t\t\treturn out\n\t\t\t},\n\t\t},\n", names.insert, element, project)
+		"\t\t\t\tfor index, insert := range rows {\n\t\t\t\t\t%s\n\t\t\t\t}\n\n"+
+		"\t\t\t\treturn out\n\t\t\t},\n\t\t},\n", names.insert, element, statement)
 }

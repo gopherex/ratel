@@ -3,11 +3,11 @@
 package app
 
 import (
-	"context"
 	"time"
 
 	"github.com/gopherex/ratel"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Event is a row of events.
@@ -20,9 +20,15 @@ type Event struct {
 func scanEvent(row pgx.Row) (Event, error) {
 	var model Event
 
-	err := row.Scan(&model.ID, &model.Note, &model.CreatedAt)
+	var null1 pgtype.Text
 
-	return model, err
+	if err := row.Scan(&model.ID, &null1, &model.CreatedAt); err != nil {
+		return model, err
+	}
+
+	model.Note = ratel.Null[string]{V: null1.String, Valid: null1.Valid}
+
+	return model, nil
 }
 
 // EventInsert is the input of an insert into events. Start it with Row.
@@ -67,7 +73,7 @@ var eventsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 			ratel.ConstraintError{Kind: ratel.ConstraintNotNull, Schema: "app", Table: "events", Constraint: "events_id_not_null", Columns: []string{"id"}},
 			ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "events", Constraint: "events_pkey", Columns: []string{"id"}},
 		),
-		ratel.ModelValues(func(model Event) []any { return []any{model.ID, model.Note, model.CreatedAt} })),
+		ratel.ModelValues(func(model Event) []any { return []any{model.ID, model.Note.Arg(), model.CreatedAt} })),
 	func(insert EventInsert) bool { return insert.valid },
 	ratel.InsertField[EventInsert]{
 		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
@@ -84,7 +90,7 @@ var eventsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[EventInsert]{
 		Name: "note", Type: pgx.Identifier{"pg_catalog", "text"},
-		Value: func(insert EventInsert) (any, bool) { return insert.note, true },
+		Value: func(insert EventInsert) (any, bool) { return insert.note.Arg(), true },
 		Set:   func(EventInsert) bool { return true },
 		Values: func(rows []EventInsert) any {
 			out := make([]*string, len(rows))
@@ -141,24 +147,3 @@ var ErrEventsIDNotNull = &ratel.ConstraintError{Kind: ratel.ConstraintNotNull, S
 
 // ErrEventsPkey matches a violation of events_pkey on app.events.
 var ErrEventsPkey = &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Schema: "app", Table: "events", Constraint: "events_pkey", Columns: []string{"id"}}
-
-// RegisterTypes registers the PostgreSQL types of this package and the
-// ratel value wrappers its fields use. Call it on every connection, for
-// example from pgxpool.Config.AfterConnect.
-func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
-	types := conn.TypeMap()
-
-	if err := ratel.RegisterValue[int64](types, "int8"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[string](types, "text"); err != nil {
-		return err
-	}
-
-	if err := ratel.RegisterValue[time.Time](types, "timestamptz"); err != nil {
-		return err
-	}
-
-	return nil
-}

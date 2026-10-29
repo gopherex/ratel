@@ -15,6 +15,18 @@ type parameter struct {
 	name   string // Go field name in a step
 	method string // step method, Params struct field
 	goType string
+	// nullable values are ratel.Null, passed to pgx through Arg so they need
+	// no type registration.
+	nullable bool
+}
+
+// argument is the pgx argument of a value held in expression.
+func (p parameter) argument(expression string) string {
+	if p.nullable {
+		return expression + ".Arg()"
+	}
+
+	return expression
 }
 
 // queryFiles renders one package per query group.
@@ -44,11 +56,13 @@ func (s *state) queryFiles(queries []*ir.Query) ([]*pluginpb.File, error) {
 			}
 		}
 
-		if err := file.declare("RegisterTypes", "query package "+group); err != nil {
-			return nil, err
-		}
+		if !file.registry.empty() {
+			if err := file.declare("RegisterTypes", "query package "+group); err != nil {
+				return nil, err
+			}
 
-		writeRegisterTypes(file)
+			writeRegisterTypes(file)
+		}
 
 		name := packageName(group)
 
@@ -87,7 +101,7 @@ func (s *state) parameters(file *unit, value *ir.Query) ([]parameter, error) {
 			name = "arg" + strconv.Itoa(int(item.GetNumber()))
 		}
 
-		s.use(file, item.GetType(), mapped, item.GetNullable())
+		s.use(file, item.GetType())
 
 		goType := file.use(mapped)
 
@@ -96,7 +110,9 @@ func (s *state) parameters(file *unit, value *ir.Query) ([]parameter, error) {
 			goType = "ratel.Null[" + goType + "]"
 		}
 
-		out = append(out, parameter{name: parameterName(name), method: pascal(name), goType: goType})
+		out = append(out, parameter{
+			name: parameterName(name), method: pascal(name), goType: goType, nullable: item.GetNullable(),
+		})
 	}
 
 	return out, nil
@@ -152,7 +168,7 @@ func writeSteps(file *unit, name, result string, parameters []parameter, build f
 			file.printf("\n")
 		}
 
-		returned, next := result, build(stepArguments(carried))
+		returned, next := result, build(stepArguments(parameters[:index+1]))
 
 		if index < len(parameters)-1 {
 			returned = steps[index+1]
@@ -180,14 +196,15 @@ func stepLiteral(step string, names []string) string {
 	return step + "{" + strings.Join(fields, ", ") + "}"
 }
 
-// stepArguments are the carried values followed by the method argument v.
-func stepArguments(carried []string) string {
-	arguments := make([]string, 0, len(carried)+1)
-	for _, name := range carried {
-		arguments = append(arguments, "s."+name)
+// stepArguments are the pgx arguments of the last step: the carried values
+// followed by the method argument v.
+func stepArguments(parameters []parameter) string {
+	arguments := make([]string, 0, len(parameters))
+	for _, value := range parameters[:len(parameters)-1] {
+		arguments = append(arguments, value.argument("s."+value.name))
 	}
 
-	return strings.Join(append(arguments, "v"), ", ")
+	return strings.Join(append(arguments, parameters[len(parameters)-1].argument("v")), ", ")
 }
 
 func (s *state) query(file *unit, value *ir.Query) error {
@@ -261,7 +278,7 @@ func (s *state) writeCopy(file *unit, value *ir.Query, parameters []parameter) e
 				": every :copyfrom value must be a parameter", Source: value.GetMeta().GetSource()}
 		}
 
-		values = append(values, "row."+parameters[number-1].method)
+		values = append(values, parameters[number-1].argument("row."+parameters[number-1].method))
 	}
 
 	table := insert.GetTableName()

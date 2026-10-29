@@ -141,10 +141,6 @@ func source(packageName string, imports []string, body string) ([]byte, error) {
 
 // quoteImport names an import whose last element is not its package name.
 func quoteImport(importPath string) string {
-	if importPath == decimalCodecImport {
-		return `pgxdecimal "` + importPath + `"`
-	}
-
 	base := path.Base(importPath)
 	if strings.HasPrefix(base, "v") && len(base) > 1 && strings.Trim(base[1:], "0123456789") == "" {
 		base = path.Base(path.Dir(importPath))

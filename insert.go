@@ -159,10 +159,8 @@ func (q Insert[M, I]) validateFields() error {
 			return ErrInvalidQuery
 		}
 
-		for _, part := range field.Type {
-			if !validIdentifier(part) {
-				return ErrInvalidQuery
-			}
+		if !validIdentifiers(field.Type) || !validIdentifiers(field.Base) {
+			return ErrInvalidQuery
 		}
 
 		names[index] = field.Name
@@ -298,6 +296,13 @@ func (q Insert[M, I]) appendUnnest(writer *sqlWriter, fields []int, rows []I) {
 		}
 
 		writer.param(q.table.fields[field].Values(rows))
+
+		if base := q.table.fields[field].Base; len(base) > 0 {
+			writer.WriteString("::")
+			writer.WriteString(base.Sanitize())
+			writer.WriteString("[]")
+		}
+
 		writer.WriteString("::")
 		writer.WriteString(q.table.fields[field].Type.Sanitize())
 		writer.WriteString("[]")

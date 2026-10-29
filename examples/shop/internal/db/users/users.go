@@ -3,11 +3,8 @@
 package users
 
 import (
-	"context"
-
 	"github.com/gopherex/ratel"
 	"github.com/gopherex/ratel/examples/shop/internal/db/app"
-	pgxdecimal "github.com/jackc/pgx-shopspring-decimal"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 )
@@ -57,9 +54,13 @@ type TopCustomersRow struct {
 func scanTopCustomers(row pgx.Row) (TopCustomersRow, error) {
 	var model TopCustomersRow
 
-	if err := row.Scan(&model.Email, &model.Spent); err != nil {
+	var null1 *decimal.Decimal
+
+	if err := row.Scan(&model.Email, &null1); err != nil {
 		return model, err
 	}
+
+	model.Spent = ratel.NullFromPtr(null1)
 
 	return model, nil
 }
@@ -86,19 +87,4 @@ type topCustomersLimit struct{}
 // Limit sets the parameter limit.
 func (s topCustomersLimit) Limit(v int64) ratel.Query[TopCustomersRow] {
 	return ratel.NewQuery([]string{"email", "spent"}, scanTopCustomers, "SELECT u.email, sum(o.total) AS spent\nFROM app.users u JOIN app.orders o ON o.user_id = u.id\nGROUP BY u.email\nORDER BY spent DESC\nLIMIT $1", v)
-}
-
-// RegisterTypes registers the PostgreSQL types of this package and the
-// ratel value wrappers its fields use. Call it on every connection, for
-// example from pgxpool.Config.AfterConnect.
-func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
-	types := conn.TypeMap()
-
-	pgxdecimal.Register(types)
-
-	if err := ratel.RegisterValue[decimal.Decimal](types, "numeric"); err != nil {
-		return err
-	}
-
-	return nil
 }

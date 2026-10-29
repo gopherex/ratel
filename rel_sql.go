@@ -47,14 +47,13 @@ func (r Rel[M, R]) validKeys() bool {
 	}
 
 	for _, key := range r.keys {
-		if !validIdentifier(key.Column) || len(key.Type) != 2 || key.Values == nil {
+		if !validIdentifier(key.Column) || len(key.Type) != 2 || key.Values == nil ||
+			(len(key.Base) != 0 && len(key.Base) != 2) {
 			return false
 		}
 
-		for _, part := range key.Type {
-			if !validIdentifier(part) {
-				return false
-			}
+		if !validIdentifiers(key.Type) || !validIdentifiers(key.Base) {
+			return false
 		}
 
 		if len(r.through) == 0 && !slices.Contains(r.query.source.table.columns, key.Column) {
@@ -166,6 +165,13 @@ func (r Rel[M, R]) appendInput(writer *sqlWriter) {
 		}
 
 		writer.param(nil)
+
+		if len(key.Base) > 0 {
+			writer.WriteString("::")
+			writer.qualifiedColumn(key.Base[0], key.Base[len(key.Base)-1])
+			writer.WriteString("[]")
+		}
+
 		writer.WriteString("::")
 		writer.qualifiedColumn(key.Type[0], key.Type[1])
 		writer.WriteString("[]")

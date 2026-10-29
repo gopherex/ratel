@@ -22,6 +22,33 @@ func Scalar(name string) (Mapped, bool) {
 	return Mapped{Expr: mapped.expr, Imports: mapped.imports}, ok
 }
 
+// ScanColumn is a Scan argument: a field address and, for a nullable field,
+// the temporary's Go type and pgtype value field ("" for a *T pointer).
+type ScanColumn struct{ Target, Temp, Field, Value string }
+
+// ScanCode returns the Scan arguments and the code around Scan.
+func ScanCode(columns []ScanColumn) ([]string, string, string) {
+	scanned := make([]scanColumn, len(columns))
+	for index, value := range columns {
+		scanned[index] = scanColumn{target: value.Target}
+		if value.Temp != "" {
+			scanned[index].null = &nullTarget{temp: value.Temp, field: value.Field, value: value.Value}
+		}
+	}
+
+	return scanCode(scanned)
+}
+
+// Projection is the array element type and store statement of a value.
+func Projection(text, nullable bool, elementType, access string) (string, string) {
+	value := column{nullable: nullable}
+	if text {
+		value.wire = &wire{text: true}
+	}
+
+	return projection(value, elementType, access)
+}
+
 // Override parses an override value.
 func Override(value string) Mapped {
 	mapped := override(value)

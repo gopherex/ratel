@@ -84,15 +84,12 @@ func (s *state) checkShape(value *ir.Query, result shape) {
 }
 
 func writeQueryScanner(file *unit, scanner string, result shape) {
-	targets := make([]string, 0, len(result.columns))
+	columns := make([]scanColumn, 0, len(result.columns))
 	for _, column := range result.columns {
-		targets = append(targets, column.target)
+		columns = append(columns, scanColumn{target: column.target, null: column.null})
 	}
 
-	file.printf("func %s(row pgx.Row) (%s, error) {\n\tvar model %s\n\n%s", scanner, result.typeName, result.typeName,
-		result.before)
-	file.printf("\tif err := row.Scan(%s); err != nil {\n\t\treturn model, err\n\t}\n\n%s\treturn model, nil\n}\n\n",
-		strings.Join(targets, ", "), result.after)
+	writeScan(file, scanner, result.typeName, columns, result.before, result.after)
 }
 
 // writeColumns writes the descriptor <Name>Q of a SELECT query: its columns

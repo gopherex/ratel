@@ -5,8 +5,8 @@
 // Postgres is the private-server convenience form. RollbackTx provides cheaper
 // transaction isolation when the application does not manage transactions.
 //
-// Configure pgxpool AfterConnect through WithPoolConfig to call generated
-// RegisterTypes or ratel.RegisterValue. Recorder traces query, batch and COPY
+// Configure pgxpool AfterConnect through WithPoolConfig to call a generated
+// RegisterTypes, when a package has one. Recorder traces query, batch and COPY
 // attempts. FailWith injects selected SQLSTATE failures, while NewExecutor
 // provides a pgxmock-backed scripted executor with cleanup assertions.
 //

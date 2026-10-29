@@ -80,7 +80,7 @@ func TestRelationInvalidMetadata(t *testing.T) {
 	t.Parallel()
 
 	for _, name := range []string{
-		"zero", "schema", "primary key", "key column", "type", "projection",
+		"zero", "schema", "primary key", "key column", "type", "base", "projection",
 		"cardinality", "attach", "through", "through keys", "count",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -105,6 +105,8 @@ func TestRelationInvalidMetadata(t *testing.T) {
 				keys[0].Column = "missing"
 			case "type":
 				keys[0].Type = pgx.Identifier{"int8"}
+			case "base":
+				keys[0].Base = pgx.Identifier{"text"}
 			case "projection":
 				keys[0].Values = nil
 			case "cardinality":
@@ -184,6 +186,16 @@ func TestRelationSQLShapes(t *testing.T) {
 			},
 			absent: []string{`ORDER BY "p"`},
 			args:   3,
+		},
+		{
+			name: "base type cast to the key type",
+			relation: ratel.NewRel(relTable(plain, []string{"id"}), ratel.RelMany, []ratel.RelKey[relationOrder]{{
+				Column: "user_id", Parent: "user_id", Type: pgx.Identifier{"app", "status"},
+				Base:   pgx.Identifier{"pg_catalog", "text"},
+				Values: func(models []relationOrder) any { return make([]string, len(models)) },
+			}}, attach),
+			fragments: []string{`unnest($1::"pg_catalog"."text"[]::"app"."status"[]) WITH ORDINALITY`},
+			args:      1,
 		},
 		{
 			name:     "lateral unordered",

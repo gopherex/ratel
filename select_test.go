@@ -219,8 +219,8 @@ func (r *selXRows) Scan(dest ...any) error {
 		if value, ok := r.values[r.index-1].(int64); ok {
 			*target = value
 		}
-	case *ratel.Null[int64]:
-		if value, ok := r.values[r.index-1].(ratel.Null[int64]); ok {
+	case **int64:
+		if value, ok := r.values[r.index-1].(*int64); ok {
 			*target = value
 		}
 	default:
@@ -365,7 +365,8 @@ func TestPluckNull(t *testing.T) {
 	t.Parallel()
 
 	users := userDescriptor()
-	rows := &selXRows{values: []any{ratel.NullFrom(int64(3)), ratel.Null[int64]{}, ratel.NullFrom(int64(5))}}
+	three, five := int64(3), int64(5)
+	rows := &selXRows{values: []any{&three, (*int64)(nil), &five}}
 
 	var (
 		sql  string

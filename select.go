@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"iter"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // After continues keyset pagination after the row whose ordering values are
@@ -161,20 +163,41 @@ func (r *SelectRunner[M]) scalar(ctx context.Context, operation, prefix, suffix 
 // Build and, run by db.Run, yields the column's values.
 type Plucked[V any] struct {
 	render func() (stmt, error)
+	scan   func(pgx.Rows) (V, error)
 }
 
 // Pluck selects one non-null column of the result.
 func (q Select[M]) Pluck[V any](column Col[M, V]) Plucked[V] {
-	return pluck[V](q, column.name)
+	return pluck(q, column.name, scanPlain[V])
 }
 
-// PluckNull selects one nullable column of the result.
+// PluckNull selects one nullable column of the result. It reads through *V,
+// so Null[V] needs no type registration.
 func (q Select[M]) PluckNull[V any](column NullCol[M, V]) Plucked[Null[V]] {
-	return pluck[Null[V]](q, column.name)
+	return pluck(q, column.name, scanNull[V])
 }
 
-func pluck[V, M any](query Select[M], name string) Plucked[V] {
-	return Plucked[V]{render: func() (stmt, error) {
+func scanPlain[V any](rows pgx.Rows) (V, error) {
+	var value V
+	if err := rows.Scan(&value); err != nil {
+		return value, fmt.Errorf("ratel: scan pluck: %w", err)
+	}
+
+	return value, nil
+}
+
+func scanNull[V any](rows pgx.Rows) (Null[V], error) {
+	var value *V
+
+	if err := rows.Scan(&value); err != nil {
+		return Null[V]{}, fmt.Errorf("ratel: scan pluck: %w", err)
+	}
+
+	return NullFromPtr(value), nil
+}
+
+func pluck[V, M any](query Select[M], name string, scan func(pgx.Rows) (V, error)) Plucked[V] {
+	return Plucked[V]{scan: scan, render: func() (stmt, error) {
 		writer := newSQLWriter()
 		writer.WriteString("SELECT ")
 		writer.qualifiedColumn("p", name)
@@ -250,9 +273,9 @@ func (r PluckRunner[V]) All(ctx context.Context, options ...CallOption) iter.Seq
 		defer rows.Close()
 
 		for rows.Next() {
-			var value V
-			if err := rows.Scan(&value); err != nil {
-				yield(zero, fmt.Errorf("ratel: scan pluck: %w", err))
+			value, err := r.column.scan(rows)
+			if err != nil {
+				yield(zero, err)
 
 				return
 			}

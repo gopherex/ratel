@@ -275,6 +275,22 @@ func TestBwInsertRendering(t *testing.T) {
 			args: []any{[]string{"a", "b"}, []int64{1, 2}},
 		},
 		{
+			name: "base type cast to the column type",
+			query: bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
+				f.Type, f.Base = pgx.Identifier{"app", "email"}, pgx.Identifier{"pg_catalog", "text"}
+			})).Insert(newWriteInsert("a"), newWriteInsert("b")),
+			sql: `INSERT INTO "app"."users" AS "q" ("email") SELECT * FROM unnest(` +
+				`$1::"pg_catalog"."text"[]::"app"."email"[])`,
+			args: []any{[]string{"a", "b"}},
+		},
+		{
+			name: "invalid base identifier",
+			query: bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
+				f.Base = pgx.Identifier{"pg_catalog", ""}
+			})).Insert(newWriteInsert("a")),
+			want: ratel.ErrInvalidQuery,
+		},
+		{
 			name:  "array column falls back to VALUES",
 			query: arrays.Insert(newWriteInsert("a"), newWriteInsert("b")),
 			sql:   `INSERT INTO "app"."users" AS "q" ("email", "manager_id") VALUES ($1, $2), ($3, $4)`,

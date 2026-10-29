@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/gopherex/ratel v0.0.0-20261028115519-e8cad066ce54
+	github.com/gopherex/ratel v0.0.0-20261029134138-0f0f137cd0a4
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pashagolub/pgxmock/v5 v5.2.0
 	github.com/testcontainers/testcontainers-go v0.44.0

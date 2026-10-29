@@ -24,7 +24,7 @@ type column struct {
 	field    string // Go field name
 	param    string // unexported field of the insert type
 	goType   goType
-	pgType   string // qualified element type, for InsertField.Type
+	wire     *wire // how arrays carry a user type; nil for a built-in one
 	nullable bool
 	array    bool
 	insert   insertKind
@@ -42,8 +42,8 @@ func (s *state) tableColumns(table *ir.Table) ([]column, error) {
 		columns = append(columns, column{
 			typ: value.GetType(), name: value.GetName(), field: pascal(value.GetName()),
 			param:  parameterName(value.GetName()),
-			goType: mapped, pgType: pgTypeName(value.GetType()), nullable: value.GetNullable(),
-			array: value.GetType().GetElement() != nil, insert: insertKindOf(value),
+			goType: mapped, wire: s.wire(value.GetType()),
+			nullable: value.GetNullable(), array: value.GetType().GetElement() != nil, insert: insertKindOf(value),
 		})
 	}
 
@@ -114,7 +114,7 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 		}
 
 		for _, value := range columns {
-			s.use(file, value.typ, value.goType, value.nullable || value.insert == insertOptional)
+			s.use(file, value.typ)
 		}
 
 		edges := s.edges(table)
@@ -138,7 +138,7 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 			}
 		}
 
-		writeScanner(file, names, columns)
+		s.writeScanner(file, names, columns)
 
 		if err := writeInsert(file, names, columns); err != nil {
 			return err
@@ -213,15 +213,26 @@ func writeModel(file *unit, names identifiers, columns []column, related bool) {
 	file.printf("}\n\n")
 }
 
-func writeScanner(file *unit, names identifiers, columns []column) {
-	targets := make([]string, 0, len(columns))
+func (s *state) writeScanner(file *unit, names identifiers, columns []column) {
+	scanned := make([]scanColumn, 0, len(columns))
 	for _, value := range columns {
-		targets = append(targets, "&model."+value.field)
+		scanned = append(scanned, scanColumn{target: "&model." + value.field})
+		if value.nullable {
+			scanned[len(scanned)-1].null = s.nullTarget(file, value.typ, value.goType)
+		}
 	}
 
-	file.printf("func %s(row pgx.Row) (%s, error) {\n\tvar model %s\n\n"+
-		"\terr := row.Scan(%s)\n\n\treturn model, err\n}\n\n",
-		names.scanner, names.model, names.model, strings.Join(targets, ", "))
+	writeScan(file, names.scanner, names.model, scanned, "", "")
+}
+
+// writeScan writes a scanner function; before and after surround Scan with
+// code of the caller's own temporaries.
+func writeScan(file *unit, scanner, model string, columns []scanColumn, before, after string) {
+	targets, declared, assigned := scanCode(columns)
+
+	file.printf("func %s(row pgx.Row) (%s, error) {\n\tvar model %s\n\n%s%s", scanner, model, model, before, declared)
+	file.printf("\tif err := row.Scan(%s); err != nil {\n\t\treturn model, err\n\t}\n\n%s%s\treturn model, nil\n}\n\n",
+		strings.Join(targets, ", "), assigned, after)
 }
 
 // writeInsert writes the insert type, its setters for optional columns, and

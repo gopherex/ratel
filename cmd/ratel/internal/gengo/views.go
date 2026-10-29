@@ -51,12 +51,12 @@ func (s *state) view(file *unit, schema string, name *ir.QualifiedName, output [
 			nullable: value.GetNullable(),
 		})
 
-		s.use(file, value.GetType(), mapped, value.GetNullable())
+		s.use(file, value.GetType())
 	}
 
 	file.imports = append(file.imports, ratelImport, "github.com/jackc/pgx/v5")
 	writeModel(file, names, columns, false)
-	writeScanner(file, names, columns)
+	s.writeScanner(file, names, columns)
 
 	outputs := make([]string, 0, len(columns))
 	for _, value := range columns {

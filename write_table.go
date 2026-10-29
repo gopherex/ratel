@@ -15,8 +15,12 @@ const ErrInvalidInsert refusal = "ratel: invalid insert"
 // Go type must have a default pgx array mapping, including in exec/simple mode.
 // Array marks array-valued columns, which use VALUES rather than scalar unnest.
 type InsertField[I any] struct {
-	Name  string
-	Type  pgx.Identifier
+	Name string
+	Type pgx.Identifier
+	// Base is the built-in type an array of the column's values is sent as,
+	// cast to Type in SQL, for types pgx cannot encode without registration
+	// (enums); empty sends Type as is.
+	Base  pgx.Identifier
 	Value func(I) (any, bool)
 	// Set reports whether a row sets the column without boxing its value,
 	// so rows are grouped by their set columns without allocations; when
@@ -55,6 +59,7 @@ func NewWriteTable[M, I any](table Table[M], valid func(I) bool, fields ...Inser
 	fields = slices.Clone(fields)
 	for index := range fields {
 		fields[index].Type = slices.Clone(fields[index].Type)
+		fields[index].Base = slices.Clone(fields[index].Base)
 	}
 
 	return WriteTable[M, I]{Table: table, fields: fields, validInsert: valid}
@@ -87,5 +92,5 @@ func (c Col[M, V]) To(value V) Assignment[M] {
 
 // To binds either a value or SQL NULL for SET.
 func (c NullCol[M, V]) To(value Null[V]) Assignment[M] {
-	return Assignment[M]{name: c.name, value: value}
+	return Assignment[M]{name: c.name, value: value.Arg()}
 }

@@ -39,6 +39,10 @@ func TestNull(t *testing.T) {
 			if (ptr != nil) != tc.valid || (ptr != nil && *ptr != tc.want) {
 				t.Fatal("unexpected pointer")
 			}
+
+			if arg := tc.value.Arg(); (arg != nil) != tc.valid || (arg != nil && arg != any(tc.want)) {
+				t.Fatalf("Arg() = %#v", arg)
+			}
 		})
 	}
 }

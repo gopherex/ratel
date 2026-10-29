@@ -10,20 +10,21 @@ import (
 	"github.com/gopherex/ratel/ir"
 )
 
-const decimalCodecImport = "github.com/jackc/pgx-shopspring-decimal"
-
 // registry records what a package's RegisterTypes sets up on a connection:
-// user types to load, Go defaults of enums and composites, and the ratel
-// value wrappers used by nullable and optional fields.
+// the user types pgx must load, their Go defaults, and the ratel value
+// wrappers of composite fields. A package with nothing to set up has no
+// RegisterTypes.
 type registry struct {
 	loads    map[string]int    // qualified PostgreSQL type -> load rank
 	defaults map[string]string // Go type -> qualified PostgreSQL type
 	// values are the Go/PostgreSQL type pairs for ratel.RegisterValue. It
 	// decorates the PostgreSQL type's codec, so every pair registers, even
 	// for one Go type (string as text and as varchar).
-	values  map[valuePair]bool
-	decimal bool
+	values map[valuePair]bool
 }
+
+// empty reports a package that needs no connection setup.
+func (r *registry) empty() bool { return len(r.loads)+len(r.values) == 0 }
 
 // valuePair is a Go type and the PostgreSQL type it registers for.
 type valuePair struct{ goType, pgType string }
@@ -50,24 +51,27 @@ func pgName(typ *ir.TypeRef) string {
 	return typ.GetPgName()
 }
 
-// use records a field type. A wrapped field (ratel.Null or ratel.Opt) also
-// needs the value registration of its Go type.
-func (s *state) use(file *unit, typ *ir.TypeRef, mapped goType, wrapped bool) {
+// use records a field, parameter or result type. pgx handles scalar enums
+// and domains without registration; a composite, a user range, or an array of
+// a user type needs its OID, which PostgreSQL assigns per database, so the
+// type is loaded on every connection.
+func (s *state) use(file *unit, typ *ir.TypeRef) {
 	element := typ
 	for element.GetElement() != nil {
 		element = element.GetElement()
 	}
 
-	if element.GetPgName() == numericType && element.GetUdt() == nil {
-		file.registry.decimal = true
+	if !isUserType(element) {
+		return
 	}
 
-	if isUserType(element) {
+	switch s.valueType(element).GetKind() {
+	case ir.TypeKind_TYPE_KIND_COMPOSITE, ir.TypeKind_TYPE_KIND_RANGE:
 		s.load(file, element)
-	}
-
-	if wrapped {
-		file.registry.values[valuePair{goType: file.use(mapped), pgType: s.valueName(typ)}] = true
+	default:
+		if element != typ {
+			s.load(file, element)
+		}
 	}
 }
 
@@ -166,15 +170,11 @@ func (s *state) valueType(typ *ir.TypeRef) *ir.TypeRef {
 
 func writeRegisterTypes(file *unit) {
 	file.imports = append(file.imports, "context", "github.com/jackc/pgx/v5")
-	file.printf("// RegisterTypes registers the PostgreSQL types of this package and the\n" +
-		"// ratel value wrappers its fields use. Call it on every connection, for\n" +
-		"// example from pgxpool.Config.AfterConnect.\n" +
+	file.printf("// RegisterTypes loads the PostgreSQL types of this package whose OIDs pgx\n" +
+		"// must know (composites, user ranges, arrays of user types) and registers\n" +
+		"// the ratel value wrappers of composite fields. Call it on every\n" +
+		"// connection, for example from pgxpool.Config.AfterConnect.\n" +
 		"func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {\n\ttypes := conn.TypeMap()\n\n")
-
-	if file.registry.decimal {
-		file.imports = append(file.imports, decimalCodecImport)
-		file.printf("\tpgxdecimal.Register(types)\n\n")
-	}
 
 	loads := slices.SortedFunc(maps.Keys(file.registry.loads), func(left, right string) int {
 		return cmp.Or(cmp.Compare(file.registry.loads[left], file.registry.loads[right]), cmp.Compare(left, right))
@@ -188,10 +188,6 @@ func writeRegisterTypes(file *unit) {
 
 	for _, zero := range slices.Sorted(maps.Keys(file.registry.defaults)) {
 		file.printf("\ttypes.RegisterDefaultPgType(%s, %s)\n", zero, strconv.Quote(file.registry.defaults[zero]))
-	}
-
-	if !file.registry.decimal && len(loads)+len(file.registry.values) == 0 {
-		file.printf("\t_ = types\n")
 	}
 
 	pairs := slices.SortedFunc(maps.Keys(file.registry.values), func(left, right valuePair) int {
