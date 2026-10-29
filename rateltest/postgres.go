@@ -2,6 +2,8 @@ package rateltest
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"os"
 	"testing"
 	"time"
@@ -12,6 +14,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/gopherex/ratel/migrate"
 )
 
 // PostgresOption configures a suite's container, template and connection pools.
@@ -20,7 +24,7 @@ type PostgresOption func(*postgresSettings)
 type postgresSettings struct {
 	image      string
 	timeout    time.Duration
-	migrations []string
+	migrations []func(context.Context, *pgxpool.Pool) error
 	configure  func(*pgxpool.Config)
 }
 
@@ -40,7 +44,38 @@ func WithTimeout(timeout time.Duration) PostgresOption {
 func WithMigrations(expand, backfill, contract []string) PostgresOption {
 	statements := append(append(append([]string{}, expand...), backfill...), contract...)
 
-	return func(settings *postgresSettings) { settings.migrations = append(settings.migrations, statements...) }
+	return func(settings *postgresSettings) {
+		settings.migrations = append(settings.migrations, func(ctx context.Context, template *pgxpool.Pool) error {
+			for _, statement := range statements {
+				if _, err := template.Exec(ctx, statement); err != nil {
+					return fmt.Errorf("migration: %w", err)
+				}
+			}
+
+			return nil
+		})
+	}
+}
+
+// WithMigrationsDir applies a migrations directory, as ratel migrate plan and
+// hash write it, to the template with package migrate: every phase, under the
+// guards and journal an application's own run uses. Pass the directory the
+// application embeds so tests run on the schema production gets. Options go
+// to migrate.Apply and migrate.Contract; repeated options apply in order.
+func WithMigrationsDir(migrations fs.FS, options ...migrate.Option) PostgresOption {
+	return func(settings *postgresSettings) {
+		settings.migrations = append(settings.migrations, func(ctx context.Context, template *pgxpool.Pool) error {
+			if err := migrate.Apply(ctx, template, migrations, options...); err != nil {
+				return fmt.Errorf("migrate apply: %w", err)
+			}
+
+			if err := migrate.Contract(ctx, template, migrations, options...); err != nil {
+				return fmt.Errorf("migrate contract: %w", err)
+			}
+
+			return nil
+		})
+	}
 }
 
 // WithPoolConfig configures each isolated pool before creation. Use AfterConnect
@@ -128,8 +163,8 @@ func NewServer(tb testing.TB, options ...PostgresOption) *Server {
 	server := &Server{admin: admin, settings: settings, template: databaseName()}
 	template := server.database(tb, server.template, "template0", false)
 
-	for _, statement := range settings.migrations {
-		if _, err := template.Exec(ctx, statement); err != nil {
+	for _, apply := range settings.migrations {
+		if err := apply(ctx, template); err != nil {
 			tb.Fatalf("rateltest: apply template migration: %v", err)
 		}
 	}

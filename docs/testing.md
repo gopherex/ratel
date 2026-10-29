@@ -45,6 +45,13 @@ phases in option order. Migration failures fail setup before any child database
 is returned. Each clone contains the same migrated rows; parallel tests can
 reuse identical primary keys without sharing mutations.
 
+`WithMigrationsDir(migrations fs.FS, options ...migrate.Option)` applies a
+migrations directory to the template with `migrate.Apply` and
+`migrate.Contract`: every phase, under the same guards and journal as an
+application's run, so tests get the schema production gets. Pass the
+directory the application embeds. `WithMigrations` and `WithMigrationsDir`
+apply in option order.
+
 `WithPoolConfig(func(*pgxpool.Config))` configures each isolated pool, after
 schema application. Callbacks compose in option order and must support
 concurrent setup. Set `AfterConnect` to generated `RegisterTypes`, or explicitly

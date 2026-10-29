@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gopherex/ratel"
+	"github.com/gopherex/ratel/migrate"
 
 	"github.com/gopherex/ratel/rateltest"
 )
@@ -168,6 +170,47 @@ func TestRateltestRollback(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// TestRateltestMigrationsDir migrates the template with a migrations
+// directory, between raw SQL options, in option order.
+func TestRateltestMigrationsDir(t *testing.T) {
+	t.Parallel()
+
+	file := `-- ratel:step id=a1 phase=expand tx=in class=short by=hand locks=app.items:AccessExclusive pg=16
+ALTER TABLE app.items ADD COLUMN name text;
+-- ratel:step id=a2 phase=backfill tx=in class=backfill pg=16 key=id
+UPDATE app.items SET name = 'item ' || id WHERE name IS NULL;
+-- ratel:step id=a3 phase=contract tx=in class=short locks=app.items:AccessExclusive pg=16
+ALTER TABLE app.items ALTER COLUMN name SET NOT NULL;
+`
+	migrations := fstest.MapFS{
+		"1_name.sql":    {Data: []byte(file)},
+		migrate.SumFile: {Data: migrate.Sum([]migrate.Source{{Name: "1_name.sql", SQL: file}})},
+	}
+
+	server := rateltest.NewServer(t,
+		rateltest.WithMigrations([]string{
+			`CREATE SCHEMA app; CREATE TABLE app.items (id bigint PRIMARY KEY); INSERT INTO app.items VALUES (1), (2)`,
+		}, nil, nil),
+		rateltest.WithMigrationsDir(migrations),
+		rateltest.WithMigrations([]string{`INSERT INTO app.items VALUES (3, 'three')`}, nil, nil),
+	)
+
+	pool := server.Postgres(t)
+
+	var names string
+
+	err := pool.QueryRow(t.Context(), `SELECT string_agg(name, ',' ORDER BY id) FROM app.items`).Scan(&names)
+	if err != nil || names != "item 1,item 2,three" {
+		t.Fatalf("names = %q, %v", names, err)
+	}
+
+	var steps int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM ratel.migrations_journal WHERE outcome = 'done'`).
+		Scan(&steps); err != nil || steps != 3 {
+		t.Fatalf("journal = %d, %v", steps, err)
+	}
 }
 
 func BenchmarkNewServer(b *testing.B) {
