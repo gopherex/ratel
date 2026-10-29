@@ -189,7 +189,7 @@ speed. A test checks that all six read and write the same rows. Median of
 10 runs; lower is better.
 
 <p align="center">
-  <img src="docs/assets/bench.svg" alt="Geometric mean over six scenarios relative to hand-written pgx: time ratel 0.91×, sqlc 0.95×, ent 1.48×, bun 2.39×, GORM 3.41×; allocations ratel 1.12×, sqlc 1.04×, ent 5.21×, bun 2.85×, GORM 5.69×." width="100%">
+  <img src="docs/assets/bench.svg" alt="Geometric mean over six scenarios relative to hand-written pgx: time ratel 0.96×, sqlc 1.00×, ent 1.48×, bun 2.35×, GORM 3.50×; allocations ratel 1.12×, sqlc 1.04×, ent 5.20×, bun 2.84×, GORM 5.68×." width="100%">
 </p>
 
 ratel's builder costs about as much as the hand-written query it replaces:
@@ -203,12 +203,12 @@ Time per operation:
 
 | | pgx (by hand) | **ratel** | sqlc | ent | bun | GORM |
 |---|---:|---:|---:|---:|---:|---:|
-| row by primary key | 87 µs | **88 µs** | 87 µs | 110 µs | 258 µs | 332 µs |
-| page of 100 rows | 122 µs | **88 µs** | 89 µs | 144 µs | 222 µs | 880 µs |
-| page with relations (100 users, 1000 orders) | 648 µs | **575 µs** | 618 µs | 967 µs | 1625 µs | 2091 µs |
-| insert one row | 34 µs | **36 µs** | 36 µs | 41 µs | 116 µs | 123 µs |
-| insert 100 rows | 493 µs | **405 µs** | 496 µs | 529 µs | 1379 µs | 810 µs |
-| update by primary key | 38 µs | **40 µs** | 38 µs | 142 µs | 55 µs | 116 µs |
+| row by primary key | 39 µs | **42 µs** | 39 µs | 46 µs | 116 µs | 139 µs |
+| page of 100 rows | 99 µs | **89 µs** | 88 µs | 99 µs | 172 µs | 621 µs |
+| page with relations (100 users, 1000 orders) | 508 µs | **474 µs** | 580 µs | 890 µs | 1190 µs | 2297 µs |
+| insert one row | 35 µs | **36 µs** | 35 µs | 43 µs | 130 µs | 131 µs |
+| insert 100 rows | 507 µs | **416 µs** | 511 µs | 598 µs | 1426 µs | 858 µs |
+| update by primary key | 44 µs | **46 µs** | 42 µs | 155 µs | 61 µs | 130 µs |
 
 Allocations per operation:
 
@@ -218,12 +218,12 @@ Allocations per operation:
 | page of 100 rows | 421 | **418** | 420 | 604 | 760 | 1329 |
 | page with relations | 3952 | **3475** | 3951 | 11428 | 9195 | 14467 |
 | insert one row | 12 | **19** | 16 | 81 | 72 | 122 |
-| insert 100 rows | 631 | **532** | 631 | 2988 | 746 | 1728 |
+| insert 100 rows | 632 | **532** | 631 | 2986 | 744 | 1727 |
 | update by primary key | 8 | **12** | 8 | 151 | 27 | 94 |
 
 pgx and sqlc bulk-insert with `COPY`, which `unnest` outruns here; the
 database/sql libraries run on pgx's stdlib driver over the same pool. Absolute numbers
-depend on the machine (here an i5-14600K under load); compare the columns.
+depend on the machine (here an i5-14600K); compare the columns.
 Reproduce with `make bench-compare`; the raw results are
 [bench/results-table.txt](bench/results-table.txt), the method is in
 [docs/testing.md](docs/testing.md#comparison-with-other-libraries).
