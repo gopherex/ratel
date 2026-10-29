@@ -20,7 +20,7 @@ func goField(field *protogen.Field, opt *options.Column, path string) string {
 	annotation := "-- @go.field " + path + " " + goConversion(field, opt)
 
 	if oneof := field.Oneof; oneof != nil && !oneof.Desc.IsSynthetic() {
-		annotation += " oneof=" + goIdent(field.GoIdent)
+		annotation += " oneof=" + goIdent(field.GoIdent) + " case=" + string(field.Desc.Name())
 	}
 
 	return annotation

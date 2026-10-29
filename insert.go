@@ -155,7 +155,7 @@ func (q Insert[M, I]) validateFields() error {
 	names := make([]string, len(q.table.fields))
 
 	for index, field := range q.table.fields {
-		if field.Value == nil || len(field.Type) == 0 || (!field.Array && field.Values == nil) {
+		if field.Value == nil || len(field.Type) == 0 {
 			return ErrInvalidQuery
 		}
 
@@ -265,7 +265,7 @@ func (q Insert[M, I]) render(fields []int, inputs []I) (stmt, error) {
 
 func (q Insert[M, I]) scalarFields(fields []int) bool {
 	for _, index := range fields {
-		if q.table.fields[index].Array {
+		if q.table.fields[index].Values == nil {
 			return false
 		}
 	}

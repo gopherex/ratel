@@ -242,7 +242,7 @@ func bwEmailWith(mutate func(*ratel.InsertField[writeInsert])) ratel.InsertField
 
 func bwArrayField() ratel.InsertField[writeInsert] {
 	return ratel.InsertField[writeInsert]{
-		Name: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"}, Array: true,
+		Name: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"},
 		Value: func(writeInsert) (any, bool) { return []int64{7}, true },
 	}
 }
@@ -336,11 +336,12 @@ func TestBwInsertRendering(t *testing.T) {
 			want:  ratel.ErrInvalidQuery,
 		},
 		{
-			name: "scalar field without Values",
+			name: "field without Values uses VALUES",
 			query: bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
 				f.Values = nil
-			})).Insert(newWriteInsert("a")),
-			want: ratel.ErrInvalidQuery,
+			})).Insert(newWriteInsert("a"), newWriteInsert("b")),
+			sql:  `INSERT INTO "app"."users" AS "q" ("email") VALUES ($1), ($2)`,
+			args: []any{"a", "b"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

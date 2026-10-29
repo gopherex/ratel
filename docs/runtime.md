@@ -236,11 +236,12 @@ Scalar fields also provide `Values func([]I) any`, projecting rows into a native
 typed slice for pgx (for example `[]string`, `[]int64`, or `[]pgtype.Text` for
 nullable text). Its length must equal the input length and preserve row order.
 Native typed arrays are required: `FlatArray[any]` has no default PostgreSQL
-type in exec/simple-protocol mode. Generated registration supplies default pgx
-array mappings for custom Go types used by these projections, as well as their
-scalar codecs. Array-valued columns set `Array: true`; their `Type` names the
-PostgreSQL array type and `Values` is unused. Metadata and field projections
-are generated, never reflected.
+type in exec/simple-protocol mode; generated projections use built-in element
+types (enum values as `string`, nullable values as pointers). A field without
+`Values` makes its rows use one multi-row `VALUES` statement: array-valued
+columns (their `Type` names the PostgreSQL array type) and values pgx encodes
+one by one, such as the lazily encoded proto conversions. Metadata and field
+projections are generated, never reflected.
 Only `WriteTable` implements `ratel.Writable[M, I]`; passing a view, materialized
 view, static query or SELECT to a DB write method fails to compile.
 

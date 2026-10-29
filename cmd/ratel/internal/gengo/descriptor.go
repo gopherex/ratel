@@ -172,7 +172,7 @@ func writeInsertField(file *unit, names identifiers, value column) {
 	file.printf("\t\t\tSet: func(%s) bool { return %s },\n", setParameter(names.insert, set), set)
 
 	if value.array {
-		file.printf("\t\t\tArray: true,\n\t\t},\n")
+		file.printf("\t\t},\n")
 
 		return
 	}

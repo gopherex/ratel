@@ -19,7 +19,7 @@ CREATE TABLE shop.customers (
 	status text NOT NULL,
 	-- @go.field Address.Street value
 	home_street text,
-	-- @go.field Contact.Phone value oneof=example.com/shop/v1.Customer_Phone
+	-- @go.field Contact.Phone value oneof=example.com/shop/v1.Customer_Phone case=phone
 	phone text,
 	-- @go.case Contact
 	contact_case text
@@ -82,6 +82,11 @@ func TestProtoAnnotations(t *testing.T) {
 			name:    "embed without its type",
 			schema:  strings.Replace(protoTable, " example.com/shop/v1.Address", "", 1),
 			failure: "@go.embed takes",
+		},
+		{
+			name:    "member without its case",
+			schema:  strings.Replace(protoTable, " case=phone", "", 1),
+			failure: "@go.field takes",
 		},
 		{
 			name:    "case with two paths",

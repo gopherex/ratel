@@ -22,6 +22,7 @@ type protoField struct {
 	conversion conversion
 	typ        goType // the Go type a conversion names, if any
 	oneof      goType // the oneof wrapper type of a member
+	caseName   string // the member's proto name, its case column value
 }
 
 // conversion names how a proto field converts to its column (@go.field).
@@ -183,12 +184,16 @@ func protoFieldOf(args []*ir.AnnotationArg) (protoField, bool) {
 			field.typ = override(arg.GetValue())
 		case "oneof":
 			field.oneof = override(arg.GetValue())
+		case "case":
+			field.caseName = arg.GetValue()
 		default:
 			return protoField{}, false
 		}
 	}
 
-	return field, typed == (field.typ.expr != "")
+	member := field.oneof.expr != ""
+
+	return field, typed == (field.typ.expr != "") && member == (field.caseName != "")
 }
 
 // checkProtos rejects a proto table without its message or with a column

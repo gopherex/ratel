@@ -13,7 +13,8 @@ const ErrInvalidInsert refusal = "ratel: invalid insert"
 // the column is set. Type is the qualified PostgreSQL element type, without [].
 // Values returns a native typed slice in input order, for scalar unnest. Its
 // Go type must have a default pgx array mapping, including in exec/simple mode.
-// Array marks array-valued columns, which use VALUES rather than scalar unnest.
+// A field without Values (an array-valued column, or values pgx must encode
+// one by one) makes its rows use VALUES rather than unnest.
 type InsertField[I any] struct {
 	Name string
 	Type pgx.Identifier
@@ -27,7 +28,6 @@ type InsertField[I any] struct {
 	// nil, Value's flag decides.
 	Set    func(I) bool
 	Values func([]I) any
-	Array  bool
 }
 
 // set reports whether row sets the column.

@@ -60,10 +60,10 @@ CREATE TABLE "shop"."customers" (
 	-- @go.field Total value
 	"total" int8 NOT NULL GENERATED ALWAYS AS (subtotal + subtotal / 5) STORED,
 	-- @ratel.origin shop.v1.Customer.phone
-	-- @go.field Contact.Phone value oneof=example.com/shop/v1.Customer_Phone
+	-- @go.field Contact.Phone value oneof=example.com/shop/v1.Customer_Phone case=phone
 	"phone" text,
 	-- @ratel.origin shop.v1.Customer.fax
-	-- @go.field Contact.Fax value oneof=example.com/shop/v1.Customer_Fax
+	-- @go.field Contact.Fax value oneof=example.com/shop/v1.Customer_Fax case=fax
 	"fax" text,
 	-- @ratel.origin shop.v1.Customer.contact
 	-- @go.case Contact

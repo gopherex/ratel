@@ -78,7 +78,7 @@ func TestGoAnnotations(t *testing.T) {
 		"-- @go.field Counts map\n",
 		"-- @go.field Named messagemap type=example.com/models/v1.Inner\n",
 		"-- @go.field Inner.Label value\n",
-		"-- @go.field Inner.Choice.Number value oneof=example.com/models/v1.Inner_Number\n",
+		"-- @go.field Inner.Choice.Number value oneof=example.com/models/v1.Inner_Number case=number\n",
 		"-- @go.case Inner.Choice\n",
 	} {
 		if !strings.Contains(sql, want) {

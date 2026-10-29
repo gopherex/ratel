@@ -91,11 +91,12 @@ passes what only protogen knows as annotations:
   (`example.com/shop/v1.Customer`).
 - `@go.embed <path> <import path>.<Type>` on a table, once per embedded
   message: its Go field path and type, so the model can allocate it.
-- `@go.field <path> <conversion> [type=<Go type>] [oneof=<Go type>]` on a
-  column: the Go field path from the message root through embeds and oneofs
-  (`Address.Street`, `Contact.Phone`), how the field's value becomes the
-  column's, the Go type the conversion needs, and for a oneof member its
-  wrapper type (`oneof=example.com/shop/v1.Customer_Phone`).
+- `@go.field <path> <conversion> [type=<Go type>] [oneof=<Go type> case=<name>]`
+  on a column: the Go field path from the message root through embeds and
+  oneofs (`Address.Street`, `Contact.Phone`), how the field's value becomes
+  the column's, the Go type the conversion needs, and for a oneof member its
+  wrapper type (`oneof=example.com/shop/v1.Customer_Phone`) and proto name,
+  the value its case column holds (`case=phone`).
 - `@go.case <path>` on a `<oneof>_case` column: the Go path of the oneof.
 
 Go types are written as `<import path>.<Name>`, as `@go.type` is.

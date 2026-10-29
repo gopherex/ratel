@@ -877,7 +877,6 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 		Name: "tags", Type: pgx.Identifier{"pg_catalog", "text"},
 		Value: func(insert UserInsert) (any, bool) { return insert.tags.V, insert.tags.Set },
 		Set:   func(insert UserInsert) bool { return insert.tags.Set },
-		Array: true,
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "home", Type: pgx.Identifier{"app", "address"},

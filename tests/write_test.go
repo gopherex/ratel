@@ -104,7 +104,7 @@ func recordDescriptor() writeRecords {
 				},
 			},
 			ratel.InsertField[recordInsert]{
-				Name: "labels", Type: pgx.Identifier{"pg_catalog", "_int8"}, Array: true,
+				Name: "labels", Type: pgx.Identifier{"pg_catalog", "_int8"},
 				Value: func(row recordInsert) (any, bool) { return row.Labels.V, row.Labels.Set },
 			}),
 		ID: ratel.NewCol[writeRecord, int64]("id"), Email: ratel.NewCol[writeRecord, string]("email"),
