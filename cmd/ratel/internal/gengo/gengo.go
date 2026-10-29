@@ -141,17 +141,35 @@ func source(packageName string, imports []string, body string) ([]byte, error) {
 
 // quoteImport names an import whose last element is not its package name.
 func quoteImport(importPath string) string {
-	base := path.Base(importPath)
-	if strings.HasPrefix(base, "v") && len(base) > 1 && strings.Trim(base[1:], "0123456789") == "" {
-		base = path.Base(path.Dir(importPath))
-	}
+	name := importName(importPath)
+	importPath, _, explicit := strings.Cut(importPath, ";")
 
-	name := packageName(base)
-	if name == base || strings.ReplaceAll(base, "-", "") == name {
+	if base := importBase(importPath); !explicit && (name == base || strings.ReplaceAll(base, "-", "") == name) {
 		return `"` + importPath + `"`
 	}
 
 	return name + ` "` + importPath + `"`
+}
+
+// importName is the package name code uses for an import: the name after ";"
+// when given (a proto go_package), else its base made a valid identifier.
+func importName(importPath string) string {
+	if _, name, explicit := strings.Cut(importPath, ";"); explicit {
+		return name
+	}
+
+	return packageName(importBase(importPath))
+}
+
+// importBase is the last path element, or the one before a major-version
+// element (github.com/jackc/pgx/v5 is pgx).
+func importBase(importPath string) string {
+	base := path.Base(importPath)
+	if strings.HasPrefix(base, "v") && len(base) > 1 && strings.Trim(base[1:], "0123456789") == "" {
+		return path.Base(path.Dir(importPath))
+	}
+
+	return base
 }
 
 // schemaOf and objectOf split a schema-qualified PostgreSQL name.

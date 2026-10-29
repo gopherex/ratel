@@ -20,6 +20,7 @@ type protoModel struct {
 type protoField struct {
 	path       string // Go field path from the message root
 	conversion conversion
+	optional   bool   // a proto3 optional field: a pointer
 	typ        goType // the Go type a conversion names, if any
 	key, value goType // a map's key and scalar value types
 	oneof      goType // the oneof wrapper type of a member
@@ -31,7 +32,6 @@ type conversion string
 
 const (
 	convValue      conversion = "value"
-	convOptional   conversion = "optional"
 	convUint32     conversion = "uint32"
 	convUint64     conversion = "uint64"
 	convTimestamp  conversion = "timestamp"
@@ -48,7 +48,7 @@ const (
 // type, key, value; known is false for an unknown conversion.
 func (c conversion) arguments() ([3]bool, bool) {
 	switch c {
-	case convValue, convOptional, convUint32, convUint64, convTimestamp, convDuration:
+	case convValue, convUint32, convUint64, convTimestamp, convDuration:
 		return [3]bool{}, true
 	case convEnum, convWrapper, convMessage, convMessages:
 		return [3]bool{true, false, false}, true
@@ -177,6 +177,16 @@ func protoFieldOf(args []*ir.AnnotationArg) (protoField, bool) {
 	}
 
 	field := protoField{path: args[0].GetValue(), conversion: conversion(args[1].GetValue())}
+
+	if len(args) > leading && args[leading].GetKey() == "" {
+		if args[leading].GetValue() != "optional" {
+			return protoField{}, false
+		}
+
+		field.optional = true
+
+		args = append(args[:leading:leading], args[leading+1:]...)
+	}
 
 	needs, known := field.conversion.arguments()
 	if !known {

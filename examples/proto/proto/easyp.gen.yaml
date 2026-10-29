@@ -1,0 +1,14 @@
+# protoc-gen-go and protoc-gen-ratel resolve from PATH (make proto-example
+# builds protoc-gen-ratel into ./bin first). The Go messages land in gen/, the
+# schema the proto frontend derives in schema/, both next to their .proto path.
+version: v1
+generate:
+  paths:
+    - shop
+plugins:
+  - name: go
+    out: ../gen
+    opts:
+      - paths=source_relative
+  - name: ratel
+    out: ../schema

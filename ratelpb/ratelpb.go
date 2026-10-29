@@ -218,8 +218,13 @@ func FromJSONMap[K comparable, T any, P interface {
 	return values, nil
 }
 
-// ScalarMap is a map with scalar values as a jsonb object.
+// ScalarMap is a map with scalar values as a jsonb object; an empty map,
+// which proto3 does not tell from an absent one, is {}.
 func ScalarMap[K comparable, V any](values map[K]V) any {
+	if values == nil {
+		values = map[K]V{}
+	}
+
 	return jsonValue{marshal: func() ([]byte, error) { return json.Marshal(values) }}
 }
 

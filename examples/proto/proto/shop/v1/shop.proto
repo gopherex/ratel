@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package shop.v1;
+
+option go_package = "github.com/gopherex/ratel/examples/proto/gen/shop/v1;shopv1";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "ratel/v1/options/ratel.proto";
+
+option (ratel.v1.options.file) = { schema: "shop" };
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACTIVE = 1;
+  STATUS_CLOSED = 2;
+}
+
+enum OrderKind {
+  option (ratel.v1.options.enum) = { pg_enum: true };
+
+  ORDER_KIND_UNSPECIFIED = 0;
+  ORDER_KIND_WEB = 1;
+  ORDER_KIND_PHONE = 2;
+}
+
+message Address {
+  string street = 1;
+  string city = 2;
+}
+
+message Note {
+  string text = 1;
+}
+
+// Customer is stored in shop.customers; ratel-gen-go uses it as the model.
+message Customer {
+  option (ratel.v1.options.table) = {
+    name: "customers"
+    primary_key: "id"
+    uniques: [{ fields: "email" }]
+  };
+
+  int64 id = 1;
+  uint32 tenant_no = 2;
+  string email = 3;
+  optional string nickname = 4;
+  Status status = 5 [(ratel.v1.options.column) = { default: "'STATUS_ACTIVE'" }];
+  google.protobuf.Timestamp created_at = 6 [(ratel.v1.options.column) = { default: "now()" }];
+  google.protobuf.Duration ttl = 7;
+  google.protobuf.Int32Value score = 8;
+  repeated string tags = 9;
+  map<string, int32> counters = 10;
+  Address address = 11 [(ratel.v1.options.column) = { embed: { prefix: "home_" } }];
+  uint64 balance = 12 [(ratel.v1.options.column) = { type: "numeric(20)" }];
+  google.protobuf.Struct meta = 13;
+  repeated Note notes = 14;
+  map<string, Note> pinned = 15;
+  int64 subtotal = 16;
+  int64 total = 17 [(ratel.v1.options.column) = { generated: "subtotal * 2" }];
+
+  oneof contact {
+    option (ratel.v1.options.oneof) = { embed: true };
+    string phone = 18;
+    string fax = 19;
+  }
+}
+
+// Order is stored in shop.orders; each belongs to a customer.
+message Order {
+  option (ratel.v1.options.table) = {
+    name: "orders"
+    primary_key: "id"
+    indexes: [{ fields: "customer_id" }]
+  };
+
+  int64 id = 1;
+  int64 customer_id = 2 [(ratel.v1.options.column) = {
+    references: { table: "shop.v1.Customer" columns: "id" rel: "Customer" inverse: "Orders" }
+  }];
+  OrderKind kind = 3;
+  repeated OrderKind history = 4;
+}

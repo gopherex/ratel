@@ -2,7 +2,7 @@
 -- source: customers.proto
 
 -- @ratel.origin shop.v1.Customer
--- @go.message example.com/shop/v1.Customer
+-- @go.message example.com/shop/v1;shopv1.Customer
 CREATE TABLE "shop"."customer" (
 	-- @ratel.origin shop.v1.Customer.id
 	-- @go.field Id value

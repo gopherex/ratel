@@ -61,7 +61,7 @@ func numeric(name string) (goType, bool) {
 	case "int4":
 		return goType{expr: "int32"}, true
 	case "int8":
-		return goType{expr: "int64"}, true
+		return goType{expr: int64Type}, true
 	case "float4":
 		return goType{expr: "float32"}, true
 	case "float8":
@@ -154,9 +154,8 @@ func override(value string) goType {
 	}
 
 	path := value[:dot]
-	name := path[strings.LastIndex(path, "/")+1:]
 
-	return goType{expr: name + "." + value[dot+1:], imports: []string{path}}
+	return goType{expr: importName(path) + "." + value[dot+1:], imports: []string{path}}
 }
 
 // isUserType reports whether a type reference names a generated type.

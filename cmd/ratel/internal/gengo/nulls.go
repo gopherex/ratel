@@ -25,7 +25,7 @@ func pgtypeOf(expr string) (string, bool) {
 		return "Int2", true
 	case "int32":
 		return "Int4", true
-	case "int64":
+	case int64Type:
 		return "Int8", true
 	case "float32":
 		return "Float4", true

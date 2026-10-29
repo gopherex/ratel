@@ -1,0 +1,17 @@
+version: 1
+
+postgres:
+  version: 18                 # production major version: inference and recipes target it
+
+schema: [schema/**/*.sql]     # schema.sql and what protoc-gen-ratel derives from proto/
+migrations: migrations        # planned migration files and ratel.sum
+
+dev:
+  image: postgres:18-alpine   # disposable server for plans and probes
+
+plugins:
+  - name: go
+    builtin: true
+    out: internal/db
+    options:
+      import_path: github.com/gopherex/ratel/examples/proto/internal/db

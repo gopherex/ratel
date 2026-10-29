@@ -18,7 +18,7 @@ MODULES := $(shell $(GO) work edit -json | sed -n 's/.*"DiskPath": "\([^"]*\)".*
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench bench-gen bench-compare readme-art proto builtins check
+.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench bench-gen bench-compare readme-art proto proto-example builtins check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -67,6 +67,7 @@ test-integration: ## Run integration suites (needs Docker; RATEL_PG_IMAGE overri
 	( cd tests && $(GO) test -tags integration ./... )
 	( cd bench && $(GO) test -tags integration ./... )
 	( cd examples/shop && $(GO) test -tags integration ./... )
+	( cd examples/proto && $(GO) test -tags integration ./... )
 
 bench: ## Run every benchmark in every module
 	for m in $(MODULES); do
@@ -117,6 +118,11 @@ proto: ## Generate Go from proto/ (needs protoc-gen-go on PATH; no-op until .pro
 	else
 		echo ">> proto: no .proto files yet, nothing to generate"
 	fi
+
+proto-example: easyp-bin ## Regenerate examples/proto: Go messages, their schema, ratel code (protoc-gen-go on PATH)
+	$(GO) build -o $(BIN)/protoc-gen-ratel ./cmd/protoc-gen-ratel
+	( cd examples/proto/proto && PATH="$(CURDIR)/$(BIN):$$PATH" ../../../$(BIN)/easyp generate )
+	( cd examples/proto && $(GO) run ../../cmd/ratel generate )
 
 builtins: ## Generate builtin signatures from pinned PostgreSQL 16, 17 and 18 containers (needs Docker)
 	( cd cmd/ratel && $(GO) generate ./internal/builtins )

@@ -62,23 +62,23 @@ func TestGoAnnotations(t *testing.T) {
 	sql := outputs["models.sql"]
 
 	for _, want := range []string{
-		"-- @go.message example.com/models/v1.Row\n",
-		"-- @go.embed Inner example.com/models/v1.Inner\n",
+		"-- @go.message example.com/models/v1;modelsv1.Row\n",
+		"-- @go.embed Inner example.com/models/v1;modelsv1.Inner\n",
 		"-- @go.field Id value\n",
-		"-- @go.field Note optional\n",
+		"-- @go.field Note value optional\n",
 		"-- @go.field Small uint32\n",
 		"-- @go.field Big uint64\n",
-		"-- @go.field Kind enum type=example.com/models/v1.Kind\n",
-		"-- @go.field Kinds enum type=example.com/models/v1.Kind\n",
+		"-- @go.field Kind enum type=example.com/models/v1;modelsv1.Kind\n",
+		"-- @go.field Kinds enum type=example.com/models/v1;modelsv1.Kind\n",
 		"-- @go.field At timestamp\n",
 		"-- @go.field Ttl duration\n",
 		"-- @go.field Score wrapper type=google.golang.org/protobuf/types/known/wrapperspb.Int64Value\n",
 		"-- @go.field Meta message type=google.golang.org/protobuf/types/known/structpb.Struct\n",
-		"-- @go.field History messages type=example.com/models/v1.Inner\n",
+		"-- @go.field History messages type=example.com/models/v1;modelsv1.Inner\n",
 		"-- @go.field Counts map key=string value=int32\n",
-		"-- @go.field Named messagemap key=string type=example.com/models/v1.Inner\n",
+		"-- @go.field Named messagemap key=string type=example.com/models/v1;modelsv1.Inner\n",
 		"-- @go.field Inner.Label value\n",
-		"-- @go.field Inner.Choice.Number value oneof=example.com/models/v1.Inner_Number case=number\n",
+		"-- @go.field Inner.Choice.Number value oneof=example.com/models/v1;modelsv1.Inner_Number case=number\n",
 		"-- @go.case Inner.Choice\n",
 	} {
 		if !strings.Contains(sql, want) {

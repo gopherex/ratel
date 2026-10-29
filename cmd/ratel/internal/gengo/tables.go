@@ -24,7 +24,8 @@ type column struct {
 	field    string // Go field name
 	param    string // unexported field of the insert type
 	goType   goType
-	wire     *wire // how arrays carry a user type; nil for a built-in one
+	wire     *wire        // how arrays carry a user type; nil for a built-in one
+	proto    *protoColumn // the proto field of a proto model's column; nil otherwise
 	nullable bool
 	array    bool
 	insert   insertKind
@@ -93,63 +94,98 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 			continue // partitions are reached through their parent
 		}
 
-		columns, err := s.tableColumns(table)
-		if err != nil {
-			return err
-		}
-
-		object := objectOf(table.GetName())
-		names := tableNames(object)
-
-		for identifier, source := range names.all() {
-			if err := file.declare(identifier, source); err != nil {
-				return err
-			}
-		}
-
-		file.imports = append(file.imports, ratelImport, "github.com/jackc/pgx/v5")
-
-		if err := s.checkEnums(file, names, table, columns); err != nil {
-			return err
-		}
-
-		for _, value := range columns {
-			s.use(file, value.typ)
-		}
-
-		edges := s.edges(table)
-		if err := checkEdges(names, columns, edges); err != nil {
-			return err
-		}
-
-		relations := make([]relationDecl, 0, len(edges))
-		for _, value := range edges {
-			relations = append(relations, relationDecl{
-				name: value.name, target: s.targetModel(file, value.target),
-				value: s.relationField(file, names, columns, value),
-			})
-		}
-
-		writeModel(file, names, columns, len(edges) > 0)
-
-		if len(edges) > 0 {
-			if err := s.writeRelations(file, names, edges); err != nil {
-				return err
-			}
-		}
-
-		s.writeScanner(file, names, columns)
-
-		if err := writeInsert(file, names, columns); err != nil {
-			return err
-		}
-
-		writeDescriptor(file, schema.GetName(), object, names, columns, table, relations)
-
-		if err := writeConstraints(file, schema.GetName(), object, names, table); err != nil {
+		if err := s.writeTable(file, schema.GetName(), table); err != nil {
 			return err
 		}
 	}
+
+	return nil
+}
+
+// writeTable writes a table's model, scanner, insert type and descriptor; a
+// table with a proto model uses its message as the model.
+func (s *state) writeTable(file *unit, schema string, table *ir.Table) error {
+	columns, err := s.tableColumns(table)
+	if err != nil {
+		return err
+	}
+
+	object := objectOf(table.GetName())
+	names := tableNames(object)
+
+	for identifier, source := range names.all() {
+		if err := file.declare(identifier, source); err != nil {
+			return err
+		}
+	}
+
+	file.imports = append(file.imports, ratelImport, "github.com/jackc/pgx/v5")
+
+	model := s.protoModelOf(table)
+	if model != nil {
+		s.protoColumns(file, names, model, columns)
+	} else if err := s.checkEnums(file, names, table, columns); err != nil {
+		return err
+	}
+
+	for _, value := range columns {
+		s.use(file, value.typ)
+	}
+
+	edges := s.edges(table)
+	if err := checkEdges(names, columns, edges); err != nil {
+		return err
+	}
+
+	if err := checkProtoKeys(names, columns, edges); err != nil {
+		return err
+	}
+
+	relations := make([]relationDecl, 0, len(edges))
+	for _, value := range edges {
+		relations = append(relations, relationDecl{
+			name: value.name, target: s.targetModel(file, value.target),
+			value: s.relationField(file, names, columns, value),
+		})
+	}
+
+	if model == nil {
+		writeModel(file, names, columns, len(edges) > 0)
+	} else {
+		writeProtoModel(file, names, model, len(edges) > 0)
+	}
+
+	if len(edges) > 0 {
+		if err := s.writeRelations(file, names, edges); err != nil {
+			return err
+		}
+	}
+
+	if err := s.writeRows(file, names, model, columns); err != nil {
+		return err
+	}
+
+	s.writeDescriptor(file, schema, object, names, columns, table, relations)
+
+	return writeConstraints(file, schema, object, names, table)
+}
+
+// writeRows writes the scanner and the insert type of the model.
+func (s *state) writeRows(file *unit, names identifiers, model *protoModel, columns []column) error {
+	if model == nil {
+		s.writeScanner(file, names, columns)
+
+		return writeInsert(file, names, columns)
+	}
+
+	writeProtoFunctions(file, model, columns)
+	s.writeProtoScanner(file, names, model, columns)
+
+	if err := writeInsert(file, names, columns); err != nil {
+		return err
+	}
+
+	writeRowOf(file, names, model, columns)
 
 	return nil
 }
@@ -246,29 +282,37 @@ func writeInsert(file *unit, names identifiers, columns []column) error {
 		names.insert, names.table, names.insert)
 
 	for _, value := range columns {
-		switch value.insert {
-		case insertRequired:
+		if value.insert == insertRequired {
 			required = append(required, value)
-			file.printf("\t%s %s\n", value.param, file.use(value.goType))
-		case insertNullable:
-			file.printf("\t%s ratel.Null[%s]\n", value.param, file.use(value.goType))
-		case insertOptional:
-			file.printf("\t%s ratel.Opt[%s]\n", value.param, value.modelType(file))
-		case insertOmitted:
+		}
+
+		if value.insert != insertOmitted {
+			file.printf("\t%s %s\n", value.param, value.insertType(file))
 		}
 	}
 
 	file.printf("\tvalid bool\n}\n\n")
 
 	for _, value := range columns {
+		if !value.setter() {
+			continue
+		}
+
+		extra := ""
+		if value.proto != nil {
+			extra = value.proto.extra
+		}
+
 		switch value.insert {
 		case insertNullable:
-			file.printf("// %s sets the column %s.\nfunc (r %s) %s(v ratel.Null[%s]) %s {\n\tr.%s = v\n\n\treturn r\n}\n\n",
-				value.field, value.name, names.insert, value.field, file.use(value.goType), names.insert, value.param)
+			file.printf("// %s sets the column %s.\nfunc (r %s) %s(v %s) %s {\n\tr.%s = %s\n%s\n\treturn r\n}\n\n",
+				value.field, value.name, names.insert, value.field, value.setterType(file), names.insert, value.param,
+				value.stored("v"), extra)
 		case insertOptional:
 			file.printf("// %s sets the column %s; unset, its default applies.\n"+
-				"func (r %s) %s(v %s) %s {\n\tr.%s = ratel.OptFrom(v)\n\n\treturn r\n}\n\n",
-				value.field, value.name, names.insert, value.field, value.modelType(file), names.insert, value.param)
+				"func (r %s) %s(v %s) %s {\n\tr.%s = ratel.OptFrom(%s)\n%s\n\treturn r\n}\n\n",
+				value.field, value.name, names.insert, value.field, value.setterType(file), names.insert, value.param,
+				value.stored("v"), extra)
 		case insertRequired, insertOmitted:
 		}
 	}
@@ -305,8 +349,9 @@ func writeRow(file *unit, names identifiers, required []column) error {
 			result = names.insert
 		}
 
-		file.printf("// %s sets the column %s.\nfunc (s %s) %s(v %s) %s {\n\ts.insert.%s = v\n",
-			value.field, value.name, steps[index], value.field, file.use(value.goType), result, value.param)
+		file.printf("// %s sets the column %s.\nfunc (s %s) %s(v %s) %s {\n\ts.insert.%s = %s\n",
+			value.field, value.name, steps[index], value.field, value.setterType(file), result, value.param,
+			value.stored("v"))
 
 		switch {
 		case last:

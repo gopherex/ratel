@@ -75,7 +75,7 @@ func (r registry) buildTable(msg *protogen.Message) (table, error) {
 
 	return table{
 		origin:   origin,
-		message:  "-- @go.message " + goIdent(msg.GoIdent),
+		message:  "-- @go.message " + r.goIdent(msg.GoIdent),
 		embeds:   goEmbeds,
 		name:     qualifiedTable(desc),
 		elements: append(elements, keys...),
@@ -229,7 +229,7 @@ func (r registry) embedColumns(
 		return nil, fmt.Errorf("%w: %s embeds itself through %s", ErrEmbedCycle, name, origin)
 	}
 
-	*ctx.goEmbeds = append(*ctx.goEmbeds, goEmbed(field, ctx.goPath+field.GoName))
+	*ctx.goEmbeds = append(*ctx.goEmbeds, r.goEmbed(field, ctx.goPath+field.GoName))
 
 	inner := fieldCtx{
 		path:     origin,
@@ -282,7 +282,7 @@ func (r registry) valueColumn(
 	}
 
 	return element{
-		name: name, origin: origin, goField: goField(field, opt, goPath), body: body, trailer: clauses.trailer,
+		name: name, origin: origin, goField: r.goField(field, opt, goPath), body: body, trailer: clauses.trailer,
 	}, nil
 }
 

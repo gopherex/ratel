@@ -139,7 +139,23 @@ type Customer struct {
   value (proto3 cannot tell an unset field from a zero one); any other column
   takes the field's value, zero included.
 - A `Duration` scans only an interval without months: a month has no fixed
-  length. Days count as 24 hours.
+  length. Days count as 24 hours. A `Duration` finer than a microsecond fails
+  when the write is sent.
+- An empty repeated field, `bytes` field or map is written as an empty array,
+  value or `{}` to its NOT NULL column, never as NULL: proto3 does not tell
+  empty from absent.
+- Conversions that can fail on the way to the database (protojson, `Duration`)
+  fail when pgx encodes the statement, so building a write returns no error.
+  Rows with such a column insert through `VALUES`; the others through
+  `unnest`.
+- A relation key must be a column with a typed database value (`value`,
+  `uint32`, `enum`, `optional`); another conversion on a key column is a
+  generation error.
+- A static query returning a proto table's columns gets a `<Query>Row` of
+  database values: only the table's own scanner reads into the message.
+- The generated code imports `github.com/gopherex/ratel/ratelpb` for the
+  conversions. `examples/proto` is the tested quick start; `make
+  proto-example` regenerates its messages, schema and code.
 
 ## Rules
 

@@ -30,8 +30,8 @@ func quotedList(values []string) string {
 // writeDescriptor writes the table's base WriteTable and its descriptor.
 // Relations reference the base of their target, so mutually related tables
 // form no initialization cycle.
-func writeDescriptor(file *unit, schema, table string, names identifiers, columns []column, source *ir.Table,
-	relations []relationDecl,
+func (s *state) writeDescriptor(file *unit, schema, table string, names identifiers, columns []column,
+	source *ir.Table, relations []relationDecl,
 ) {
 	outputs := make([]string, 0, len(columns))
 	for _, value := range columns {
@@ -61,9 +61,13 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 	file.printf(")%s\n\n// %s describes %s.%s.\nvar %s = &%s{\n\t%s: %s,\n", unwrap, names.descriptor,
 		schema, table, names.descriptor, names.descriptorType, embedded, names.base)
 
-	for _, value := range columns {
-		file.printf("\t%s: ratel.%s[%s, %s](%s),\n", value.field, columnKind(value), names.model,
-			file.use(value.goType), strconv.Quote(value.name))
+	fieldTypes := make([]string, len(columns))
+
+	for index, value := range columns {
+		constructor, fieldType := s.descriptorColumn(file, names.model, value)
+		fieldTypes[index] = fieldType
+
+		file.printf("\t%s: %s,\n", value.field, constructor)
 	}
 
 	for _, value := range relations {
@@ -73,8 +77,8 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 	file.printf("}\n\ntype %s struct {\n\tratel.%s[%s, %s]\n", names.descriptorType, embedded, names.model,
 		names.insert)
 
-	for _, value := range columns {
-		file.printf("\t%s ratel.%s[%s, %s]\n", value.field, columnKind(value)[3:], names.model, file.use(value.goType))
+	for index, value := range columns {
+		file.printf("\t%s %s\n", value.field, fieldTypes[index])
 	}
 
 	for _, value := range relations {
@@ -110,7 +114,7 @@ func tableOptions(names identifiers, columns []column, table *ir.Table) string {
 		for _, name := range key {
 			for _, value := range columns {
 				if value.name == name {
-					fields = append(fields, "model."+value.field)
+					fields = append(fields, value.read("model"))
 				}
 			}
 		}
@@ -126,11 +130,7 @@ func tableOptions(names identifiers, columns []column, table *ir.Table) string {
 	values := make([]string, 0, len(columns))
 
 	for _, value := range columns {
-		if value.nullable {
-			values = append(values, "model."+value.field+".Arg()")
-		} else {
-			values = append(values, "model."+value.field)
-		}
+		values = append(values, value.arg("model"))
 	}
 
 	options.WriteString(",\n\t\t\tratel.ModelValues(func(model " + names.model + ") []any { return []any{" +
@@ -164,20 +164,21 @@ func writeInsertField(file *unit, names identifiers, value column) {
 		pgTypeName(value.typ), baseField(value))
 
 	argument := access
-	if value.nullable {
+	if value.storedNull() {
 		argument += ".Arg()"
 	}
 
 	file.printf("\t\t\tValue: func(insert %s) (any, bool) { return %s, %s },\n", names.insert, argument, set)
 	file.printf("\t\t\tSet: func(%s) bool { return %s },\n", setParameter(names.insert, set), set)
 
-	if value.array {
+	elementType, projected, typed := value.arrayElement(file)
+	if !typed {
 		file.printf("\t\t},\n")
 
 		return
 	}
 
-	element, statement := projection(value, file.use(value.goType), access)
+	element, statement := projection(projected, elementType, access)
 
 	file.printf("\t\t\tValues: func(rows []%s) any {\n\t\t\t\tout := make([]%s, len(rows))\n"+
 		"\t\t\t\tfor index, insert := range rows {\n\t\t\t\t\t%s\n\t\t\t\t}\n\n"+

@@ -58,8 +58,10 @@ func (s *state) groups(value *ir.Query) grouping {
 			continue
 		}
 
+		// A proto model's columns are read into its message by the table's
+		// scanner only; a query returns them in a Row of database values.
 		table := s.table(&ir.QualifiedName{Parts: source[:2]})
-		if table == nil {
+		if table == nil || s.protoModelOf(table) != nil {
 			continue
 		}
 

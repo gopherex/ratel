@@ -268,7 +268,12 @@ func (s *state) relationField(file *unit, names identifiers, columns []column, v
 
 // relKey projects one local key column into a native array.
 func relKey(model string, local column, remote string) string {
-	element, statement := projection(local, local.goType.expr, "model."+local.field)
+	elementType, projected := local.goType.expr, local
+	if local.proto != nil {
+		elementType, projected = local.proto.base, column{nullable: local.proto.null}
+	}
+
+	element, statement := projection(projected, elementType, local.read("model"))
 
 	return "{\n\t\t\tColumn: " + strconv.Quote(remote) + ", Parent: " + strconv.Quote(local.name) +
 		", Type: " + pgTypeName(local.typ) + baseField(local) + ",\n" +

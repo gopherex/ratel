@@ -2,8 +2,8 @@
 -- source: shop.proto
 
 -- @ratel.origin shop.v1.Customer
--- @go.message example.com/shop/v1.Customer
--- @go.embed Address example.com/shop/v1.Address
+-- @go.message example.com/shop/v1;shopv1.Customer
+-- @go.embed Address example.com/shop/v1;shopv1.Address
 CREATE TABLE "shop"."customers" (
 	-- @ratel.origin shop.v1.Customer.id
 	-- @go.field Id value
@@ -15,10 +15,10 @@ CREATE TABLE "shop"."customers" (
 	-- @go.field Email value
 	"email" text NOT NULL,
 	-- @ratel.origin shop.v1.Customer.nickname
-	-- @go.field Nickname optional
+	-- @go.field Nickname value optional
 	"nickname" text,
 	-- @ratel.origin shop.v1.Customer.status
-	-- @go.field Status enum type=example.com/shop/v1.Status
+	-- @go.field Status enum type=example.com/shop/v1;shopv1.Status
 	"status" text NOT NULL DEFAULT 'STATUS_ACTIVE' CHECK ("status" IN ('STATUS_UNSPECIFIED', 'STATUS_ACTIVE', 'STATUS_CLOSED')),
 	-- @ratel.origin shop.v1.Customer.created_at
 	-- @go.field CreatedAt timestamp
@@ -51,7 +51,7 @@ CREATE TABLE "shop"."customers" (
 	-- @go.field Meta message type=google.golang.org/protobuf/types/known/structpb.Struct
 	"meta" jsonb,
 	-- @ratel.origin shop.v1.Customer.previous
-	-- @go.field Previous messages type=example.com/shop/v1.Address
+	-- @go.field Previous messages type=example.com/shop/v1;shopv1.Address
 	"previous" jsonb NOT NULL,
 	-- @ratel.origin shop.v1.Customer.subtotal
 	-- @go.field Subtotal value
@@ -60,10 +60,10 @@ CREATE TABLE "shop"."customers" (
 	-- @go.field Total value
 	"total" int8 NOT NULL GENERATED ALWAYS AS (subtotal + subtotal / 5) STORED,
 	-- @ratel.origin shop.v1.Customer.phone
-	-- @go.field Contact.Phone value oneof=example.com/shop/v1.Customer_Phone case=phone
+	-- @go.field Contact.Phone value oneof=example.com/shop/v1;shopv1.Customer_Phone case=phone
 	"phone" text,
 	-- @ratel.origin shop.v1.Customer.fax
-	-- @go.field Contact.Fax value oneof=example.com/shop/v1.Customer_Fax case=fax
+	-- @go.field Contact.Fax value oneof=example.com/shop/v1;shopv1.Customer_Fax case=fax
 	"fax" text,
 	-- @ratel.origin shop.v1.Customer.contact
 	-- @go.case Contact

@@ -1,0 +1,7 @@
+version: v1
+linters:
+  default: STANDARD
+linters-settings:
+  ENUM_ZERO_VALUE_SUFFIX:
+    suffix: UNSPECIFIED
+issues: {}

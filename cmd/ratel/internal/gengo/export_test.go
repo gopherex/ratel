@@ -49,6 +49,40 @@ func Projection(text, nullable bool, elementType, access string) (string, string
 	return projection(value, elementType, access)
 }
 
+// ProtoSegments splits the Go path of a proto column: a field (member marks
+// a oneof member) or, with isCase, a oneof of a case column.
+func ProtoSegments(path string, isCase, member bool) ([]string, string, string) {
+	column := &protoColumn{field: protoField{path: path}}
+	if isCase {
+		column.oneof = path
+	}
+
+	if member {
+		column.field.oneof = goType{expr: "pb.Member"}
+	}
+
+	return segments(column)
+}
+
+// ProtoConversion renders the database value of a field value.
+func ProtoConversion(conversionName, wrapper, fieldType, value string) string {
+	column := &protoColumn{
+		field: protoField{conversion: conversion(conversionName), typ: goType{expr: wrapper}}, fieldType: fieldType,
+	}
+
+	return column.conversion(value)
+}
+
+// ProtoPresent renders whether a stored column value holds a non-zero field.
+func ProtoPresent(base string, null, lazy bool, read string) string {
+	column := &protoColumn{base: base, null: null, lazy: lazy}
+
+	return column.present(read, &unit{names: map[string]string{}})
+}
+
+// Indent shifts generated statements one tab right.
+func Indent(code string) string { return indent(code) }
+
 // Override parses an override value.
 func Override(value string) Mapped {
 	mapped := override(value)

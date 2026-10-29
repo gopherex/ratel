@@ -167,10 +167,16 @@ verifies it in a unit test. Hand-written steps start with
 cloned from a template migrated with your migrations.
 → [testing](docs/testing.md)
 
+**Proto messages as models.** Annotate `.proto` messages and
+`protoc-gen-ratel` derives the SQL schema; the generated code then reads rows
+into the messages themselves and writes them back (`Customers.RowOf(msg)`),
+with enums, timestamps, wrappers, embeds and oneofs converted, and conditions
+typed by the proto fields (`Customers.Status.Eq(shopv1.Status_STATUS_ACTIVE)`).
+→ [proto frontend](docs/proto-frontend.md#go-models), [examples/proto](examples/proto)
+
 **Plugins in any language.** The generator is a plugin over a protobuf
-contract and runs as an executable or WebAssembly. A `.proto` frontend
-produces the same SQL schema.
-→ [plugins](docs/plugins.md), [proto frontend](docs/proto-frontend.md)
+contract and runs as an executable or WebAssembly.
+→ [plugins](docs/plugins.md)
 
 **No telemetry of its own.** ratel only builds SQL and scans rows: trace
 queries at the driver (a pgx tracer such as otelpgx).
@@ -265,6 +271,7 @@ proto/, ir/, plugin/    the protobuf contracts, their generated Go, the plugin S
 tests/                  runtime integration suite (own module)
 bench/                  the comparison with other libraries (own module)
 examples/shop/          the quick start (own module)
+examples/proto/         the quick start with proto messages as models (own module)
 tools/                  the generator of the README banner and benchmark chart
 docs/                   the specification
 ```

@@ -190,6 +190,10 @@ func TestScalarMap(t *testing.T) {
 		t.Fatalf("round trip = %v, %v", back, err)
 	}
 
+	if string(encoded(t, ratelpb.ScalarMap[string, int32](nil))) != "{}" {
+		t.Fatal("nil map is not {}")
+	}
+
 	if _, err := ratelpb.FromScalarMap[string, int32]([]byte(`[]`)); err == nil {
 		t.Fatal("array accepted")
 	}

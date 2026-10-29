@@ -31,14 +31,20 @@ var (
 // can name a table declared in any file of the request.
 type registry struct {
 	messages map[protoreflect.FullName]*protogen.Message
+	packages map[protogen.GoImportPath]protogen.GoPackageName // Go package of each file's import path
 }
 
 // Generate writes one .sql file for every .proto file the plugin is asked to
 // generate. The output depends only on the input descriptors.
 func Generate(plugin *protogen.Plugin) error {
-	reg := registry{messages: make(map[protoreflect.FullName]*protogen.Message)}
+	reg := registry{
+		messages: make(map[protoreflect.FullName]*protogen.Message),
+		packages: make(map[protogen.GoImportPath]protogen.GoPackageName),
+	}
 
 	for _, file := range plugin.Files {
+		reg.packages[file.GoImportPath] = file.GoPackageName
+
 		for _, msg := range allMessages(file.Messages) {
 			reg.messages[msg.Desc.FullName()] = msg
 		}
