@@ -81,6 +81,65 @@ Every emitted table and column carries `@ratel.origin` with the full proto name
 of the element it came from, so output plugins can generate conversions between
 proto messages and models.
 
+## Go models
+
+`ratel-gen-go` uses the proto messages themselves as models, so a row is read
+into and written from the message the service already returns. The frontend
+passes what only protogen knows as annotations:
+
+- `@go.message <import path>.<Type>` on a table: the message's Go type
+  (`example.com/shop/v1.Customer`).
+- `@go.embed <path> <import path>.<Type>` on a table, once per embedded
+  message: its Go field path and type, so the model can allocate it.
+- `@go.field <path> <conversion> [type=<Go type>] [oneof=<Go type>]` on a
+  column: the Go field path from the message root through embeds and oneofs
+  (`Address.Street`, `Contact.Phone`), how the field's value becomes the
+  column's, the Go type the conversion needs, and for a oneof member its
+  wrapper type (`oneof=example.com/shop/v1.Customer_Phone`).
+- `@go.case <path>` on a `<oneof>_case` column: the Go path of the oneof.
+
+Go types are written as `<import path>.<Name>`, as `@go.type` is.
+
+| Conversion | Proto field | Column | `type=` |
+|---|---|---|---|
+| `value` | scalar, repeated scalar, `bytes` | its own type | |
+| `optional` | `optional` scalar (`*T`) | nullable | |
+| `uint32` | `uint32`, `fixed32` | `int8` | |
+| `uint64` | `uint64`, `fixed64` with `Column.type` numeric | `numeric` | |
+| `enum` | enum, repeated enum | text or PostgreSQL enum (array), by value name | the enum |
+| `timestamp` | `google.protobuf.Timestamp` | `timestamptz` | |
+| `duration` | `google.protobuf.Duration` | `interval` | |
+| `wrapper` | `google.protobuf.*Value` | nullable scalar | the wrapper |
+| `message` | `Struct`, `Value`, `ListValue`, `Any`, a `serialize` message | `jsonb` through protojson | the message |
+| `messages` | repeated message | `jsonb` array of protojson objects | the element message |
+| `map` | map with scalar values | `jsonb` object | |
+| `messagemap` | map with message values | `jsonb` object of protojson values | the value message |
+
+The generated model embeds the message and holds loaded relations:
+
+```go
+type Customer struct {
+	*shopv1.Customer
+	R CustomerRelations
+}
+```
+
+- Fields are promoted (`row.Email`), and `row.Customer` is the message to
+  return. Selected rows always carry a non-nil message.
+- An embedded message is allocated only when one of its columns is not NULL;
+  a nil one writes NULL to all of them. A oneof is set from its case column;
+  writing an unset oneof writes NULL to the case and every member.
+- Descriptor columns are typed by the proto field: `Status` compares
+  `shopv1.Status` values, `CreatedAt` `*timestamppb.Timestamp` values; the
+  conversion encodes each argument (`ratel.NewCol` with an encoder).
+- Insert rows: `Row()` steps for required columns, as for SQL tables, and
+  `RowOf(message)`, which sets every insertable column from the message. A
+  column with a default or identity keeps it while its field holds the zero
+  value (proto3 cannot tell an unset field from a zero one); any other column
+  takes the field's value, zero included.
+- A `Duration` scans only an interval without months: a month has no fixed
+  length. Days count as 24 hours.
+
 ## Rules
 
 - A flattened column name that collides with another is a generation error

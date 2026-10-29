@@ -2,10 +2,13 @@
 -- source: customers.proto
 
 -- @ratel.origin shop.v1.Customer
+-- @go.message example.com/shop/v1.Customer
 CREATE TABLE "shop"."customer" (
 	-- @ratel.origin shop.v1.Customer.id
+	-- @go.field Id value
 	"id" int8 NOT NULL,
 	-- @ratel.origin shop.v1.Customer.email
+	-- @go.field Email value
 	"email" text NOT NULL,
 	PRIMARY KEY ("id")
 );

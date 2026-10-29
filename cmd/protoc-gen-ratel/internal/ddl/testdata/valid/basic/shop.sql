@@ -2,48 +2,71 @@
 -- source: shop.proto
 
 -- @ratel.origin shop.v1.Customer
+-- @go.message example.com/shop/v1.Customer
+-- @go.embed Address example.com/shop/v1.Address
 CREATE TABLE "shop"."customers" (
 	-- @ratel.origin shop.v1.Customer.id
+	-- @go.field Id value
 	"id" int8 NOT NULL,
 	-- @ratel.origin shop.v1.Customer.tenant_no
+	-- @go.field TenantNo uint32
 	"tenant_no" int8 NOT NULL,
 	-- @ratel.origin shop.v1.Customer.email
+	-- @go.field Email value
 	"email" text NOT NULL,
 	-- @ratel.origin shop.v1.Customer.nickname
+	-- @go.field Nickname optional
 	"nickname" text,
 	-- @ratel.origin shop.v1.Customer.status
+	-- @go.field Status enum type=example.com/shop/v1.Status
 	"status" text NOT NULL DEFAULT 'STATUS_ACTIVE' CHECK ("status" IN ('STATUS_UNSPECIFIED', 'STATUS_ACTIVE', 'STATUS_CLOSED')),
 	-- @ratel.origin shop.v1.Customer.created_at
+	-- @go.field CreatedAt timestamp
 	"created_at" timestamptz DEFAULT now(),
 	-- @ratel.origin shop.v1.Customer.ttl
+	-- @go.field Ttl duration
 	"ttl" interval,
 	-- @ratel.origin shop.v1.Customer.score
+	-- @go.field Score wrapper type=google.golang.org/protobuf/types/known/wrapperspb.Int32Value
 	"score" int4,
 	-- @ratel.origin shop.v1.Customer.tags
+	-- @go.field Tags value
 	"tags" text[] NOT NULL,
 	-- @ratel.origin shop.v1.Customer.counters
+	-- @go.field Counters map
 	"counters" jsonb NOT NULL,
 	-- @ratel.origin shop.v1.Customer.address.street
+	-- @go.field Address.Street value
 	"home_street" text,
 	-- @ratel.origin shop.v1.Customer.address.city
+	-- @go.field Address.City value
 	"home_city" text,
 	-- @ratel.origin shop.v1.Customer.avatar
+	-- @go.field Avatar value
 	"avatar_blob" bytea NOT NULL,
 	-- @ratel.origin shop.v1.Customer.big
+	-- @go.field Big uint64
 	"big" numeric(20) NOT NULL,
 	-- @ratel.origin shop.v1.Customer.meta
+	-- @go.field Meta message type=google.golang.org/protobuf/types/known/structpb.Struct
 	"meta" jsonb,
 	-- @ratel.origin shop.v1.Customer.previous
+	-- @go.field Previous messages type=example.com/shop/v1.Address
 	"previous" jsonb NOT NULL,
 	-- @ratel.origin shop.v1.Customer.subtotal
+	-- @go.field Subtotal value
 	"subtotal" int8 NOT NULL,
 	-- @ratel.origin shop.v1.Customer.total
+	-- @go.field Total value
 	"total" int8 NOT NULL GENERATED ALWAYS AS (subtotal + subtotal / 5) STORED,
 	-- @ratel.origin shop.v1.Customer.phone
+	-- @go.field Contact.Phone value oneof=example.com/shop/v1.Customer_Phone
 	"phone" text,
 	-- @ratel.origin shop.v1.Customer.fax
+	-- @go.field Contact.Fax value oneof=example.com/shop/v1.Customer_Fax
 	"fax" text,
 	-- @ratel.origin shop.v1.Customer.contact
+	-- @go.case Contact
 	"contact_case" text CHECK ("contact_case" IN ('phone', 'fax')),
 	PRIMARY KEY ("id"),
 	CONSTRAINT "customers_tenant_no_email_key" UNIQUE ("tenant_no", "email"),

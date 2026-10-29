@@ -25,10 +25,11 @@ const codeAnnotation = "RTL-G03"
 type state struct {
 	options  Options
 	catalog  *ir.Catalog
-	types    map[string]userType // by "schema.name"
-	columns  map[string]string   // @go.type by "schema.table.column"
-	packages map[string]string   // query name -> Go package of its group
-	shapes   map[string]string   // row type body -> first query declaring it
+	types    map[string]userType    // by "schema.name"
+	columns  map[string]string      // @go.type by "schema.table.column"
+	packages map[string]string      // query name -> Go package of its group
+	shapes   map[string]string      // row type body -> first query declaring it
+	protos   map[string]*protoModel // tables modeled by proto messages, by "schema.table"
 	warnings []*ir.Diagnostic
 }
 
@@ -36,7 +37,7 @@ func newState(options Options, request *pluginpb.GenerateRequest) (*state, error
 	result := &state{
 		options: options, catalog: request.GetCatalog(),
 		types: make(map[string]userType), columns: make(map[string]string), packages: make(map[string]string),
-		shapes: make(map[string]string),
+		shapes: make(map[string]string), protos: make(map[string]*protoModel),
 	}
 
 	for _, schema := range result.catalog.GetSchemas() {
@@ -47,6 +48,10 @@ func newState(options Options, request *pluginpb.GenerateRequest) (*state, error
 		if err := result.annotate(annotation); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := result.checkProtos(); err != nil {
+		return nil, err
 	}
 
 	return result, nil
@@ -121,6 +126,10 @@ func (s *state) annotate(annotation *ir.AnnotationValue) error {
 
 		return nil
 	default:
+		if handled, err := s.annotateProto(annotation); handled {
+			return err
+		}
+
 		return &plugin.Error{
 			Code: codeAnnotation, Message: "unknown annotation @go." + annotation.GetName(),
 			Source: annotation.GetSource(),

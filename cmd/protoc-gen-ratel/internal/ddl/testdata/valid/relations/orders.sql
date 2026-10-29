@@ -4,14 +4,19 @@
 CREATE TYPE "shop"."order_kind" AS ENUM ('ORDER_KIND_UNSPECIFIED', 'ORDER_KIND_WEB', 'ORDER_KIND_PHONE');
 
 -- @ratel.origin shop.v1.Order
+-- @go.message example.com/shop/v1.Order
 CREATE TABLE "shop"."order" (
 	-- @ratel.origin shop.v1.Order.id
+	-- @go.field Id value
 	"id" int8 NOT NULL,
 	-- @ratel.origin shop.v1.Order.customer_id
+	-- @go.field CustomerId value
 	"customer_id" int8 NOT NULL REFERENCES "shop"."customer" ("id"), -- @ratel.rel name=Customer inverse=Orders
 	-- @ratel.origin shop.v1.Order.kind
+	-- @go.field Kind enum type=example.com/shop/v1.OrderKind
 	"kind" "shop"."order_kind" NOT NULL,
 	-- @ratel.origin shop.v1.Order.history
+	-- @go.field History enum type=example.com/shop/v1.OrderKind
 	"history" "shop"."order_kind"[] NOT NULL,
 	PRIMARY KEY ("id")
 );

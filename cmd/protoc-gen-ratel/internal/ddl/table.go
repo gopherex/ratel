@@ -14,6 +14,8 @@ import (
 // table is one CREATE TABLE statement and the CREATE INDEX statements after it.
 type table struct {
 	origin   string // proto full name of the message
+	message  string // @go.message annotation
+	embeds   []string
 	name     string // schema-qualified SQL name
 	elements []element
 	indexes  []string
@@ -23,6 +25,7 @@ type table struct {
 type element struct {
 	name    string // column name; empty for a table constraint
 	origin  string // proto path of a column; empty for a table constraint
+	goField string // @go.field or @go.case annotation of a column
 	body    string
 	trailer string // annotation written on the same line, if any
 }
@@ -30,9 +33,11 @@ type element struct {
 // fieldCtx is what a field inherits from the message or embed field holding it.
 type fieldCtx struct {
 	path     string                  // proto path of the holder
+	goPath   string                  // Go field path of the holder, with a trailing dot
 	prefix   string                  // column-name prefix from enclosing embeds
 	nullable bool                    // an enclosing field has presence, so its columns may be NULL
 	embeds   []protoreflect.FullName // messages on the embed chain, for cycle detection
+	goEmbeds *[]string               // @go.embed annotations of the table
 }
 
 // buildTable maps one table message to its statement.
@@ -41,7 +46,11 @@ func (r registry) buildTable(msg *protogen.Message) (table, error) {
 	opt := option[*options.Table](desc.Options(), options.E_Table)
 	origin := string(desc.FullName())
 
-	elements, err := r.messageColumns(msg, fieldCtx{path: origin, embeds: []protoreflect.FullName{desc.FullName()}})
+	var goEmbeds []string
+
+	elements, err := r.messageColumns(msg, fieldCtx{
+		path: origin, embeds: []protoreflect.FullName{desc.FullName()}, goEmbeds: &goEmbeds,
+	})
 	if err != nil {
 		return table{}, err
 	}
@@ -66,6 +75,8 @@ func (r registry) buildTable(msg *protogen.Message) (table, error) {
 
 	return table{
 		origin:   origin,
+		message:  "-- @go.message " + goIdent(msg.GoIdent),
+		embeds:   goEmbeds,
 		name:     qualifiedTable(desc),
 		elements: append(elements, keys...),
 		indexes:  indexes,
@@ -75,11 +86,21 @@ func (r registry) buildTable(msg *protogen.Message) (table, error) {
 // render writes the statements of the table: its comment-annotated CREATE
 // TABLE followed by the indexes.
 func (t table) render(out *strings.Builder) {
-	fmt.Fprintf(out, "\n-- @ratel.origin %s\nCREATE TABLE %s (\n", t.origin, t.name)
+	fmt.Fprintf(out, "\n-- @ratel.origin %s\n%s\n", t.origin, t.message)
+
+	for _, embed := range t.embeds {
+		out.WriteString(embed + "\n")
+	}
+
+	fmt.Fprintf(out, "CREATE TABLE %s (\n", t.name)
 
 	for index, elem := range t.elements {
 		if elem.origin != "" {
 			fmt.Fprintf(out, "\t-- @ratel.origin %s\n", elem.origin)
+		}
+
+		if elem.goField != "" {
+			out.WriteString("\t" + elem.goField + "\n")
 		}
 
 		out.WriteString("\t" + elem.body)
@@ -145,9 +166,10 @@ func caseElement(field *protogen.Field, ctx fieldCtx) (element, bool) {
 	col := quoteIdent(name)
 
 	return element{
-		name:   name,
-		origin: ctx.path + "." + string(oneof.Desc.Name()),
-		body:   col + " text CHECK (" + col + " IN (" + strings.Join(labels, ", ") + "))",
+		name:    name,
+		origin:  ctx.path + "." + string(oneof.Desc.Name()),
+		goField: goCase(ctx.goPath + oneof.GoName),
+		body:    col + " text CHECK (" + col + " IN (" + strings.Join(labels, ", ") + "))",
 	}, true
 }
 
@@ -207,11 +229,15 @@ func (r registry) embedColumns(
 		return nil, fmt.Errorf("%w: %s embeds itself through %s", ErrEmbedCycle, name, origin)
 	}
 
+	*ctx.goEmbeds = append(*ctx.goEmbeds, goEmbed(field, ctx.goPath+field.GoName))
+
 	inner := fieldCtx{
 		path:     origin,
+		goPath:   ctx.goPath + field.GoName + ".",
 		prefix:   ctx.prefix + opt.GetEmbed().GetPrefix(),
 		nullable: ctx.nullable || field.Desc.HasPresence(),
 		embeds:   append(slices.Clip(ctx.embeds), name),
+		goEmbeds: ctx.goEmbeds,
 	}
 
 	return r.messageColumns(field.Message, inner)
@@ -250,7 +276,14 @@ func (r registry) valueColumn(
 		body += " CHECK (" + spec.check + ")"
 	}
 
-	return element{name: name, origin: origin, body: body, trailer: clauses.trailer}, nil
+	goPath := ctx.goPath + field.GoName
+	if oneof := field.Oneof; oneof != nil && !oneof.Desc.IsSynthetic() {
+		goPath = ctx.goPath + oneof.GoName + "." + field.GoName
+	}
+
+	return element{
+		name: name, origin: origin, goField: goField(field, opt, goPath), body: body, trailer: clauses.trailer,
+	}, nil
 }
 
 // clauses are the optional column clauses and the annotation they carry.
