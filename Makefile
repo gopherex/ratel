@@ -66,6 +66,7 @@ test-integration: ## Run integration suites (needs Docker; RATEL_PG_IMAGE overri
 	( cd rateltest && $(GO) test -tags integration ./... )
 	( cd tests && $(GO) test -tags integration ./... )
 	( cd bench && $(GO) test -tags integration ./... )
+	( cd examples/shop && $(GO) test -tags integration ./... )
 
 bench: ## Run every benchmark in every module
 	for m in $(MODULES); do

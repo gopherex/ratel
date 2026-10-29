@@ -1,0 +1,20 @@
+version: 1
+
+postgres:
+  version: 18                 # production major version: inference and recipes target it
+
+schema: [schema/**/*.sql]     # CREATE statements, in any order and any number of files
+queries:                      # query files grouped into Go packages
+  - files: [queries/users/*.sql]
+    package: users
+migrations: migrations        # planned and hand-written migration files, and ratel.sum
+
+dev:
+  image: postgres:18-alpine   # disposable server for plans and probes; or: url: postgres://...
+
+plugins:
+  - name: go
+    builtin: true
+    out: internal/db
+    options:
+      import_path: github.com/gopherex/ratel/examples/shop/internal/db

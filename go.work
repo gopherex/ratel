@@ -5,6 +5,7 @@ use (
 	./bench
 	./cmd/protoc-gen-ratel
 	./cmd/ratel
+	./examples/shop
 	./rateltest
 	./tests
 )
