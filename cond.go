@@ -7,15 +7,17 @@ type Cond2[M, N any] struct {
 }
 
 // SQL renders a join predicate with independently quoted source aliases.
-func (c Cond2[M, N]) SQL(leftAlias, rightAlias string) (Statement, error) {
+func (c Cond2[M, N]) SQL(leftAlias, rightAlias string) (string, []any, error) {
 	writer := newSQLWriter()
 	c.appendSQL(writer, leftAlias, rightAlias)
 
 	if writer.invalid {
-		return Statement{}, ErrInvalidQuery
+		return "", nil, ErrInvalidQuery
 	}
 
-	return writer.statement(), nil
+	rendered := writer.result()
+
+	return rendered.SQL, rendered.Args, nil
 }
 
 func (c Cond2[M, N]) appendSQL(writer *sqlWriter, leftAlias, rightAlias string) {

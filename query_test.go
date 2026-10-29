@@ -10,6 +10,30 @@ import (
 	"github.com/gopherex/ratel"
 )
 
+// built is a built statement, for assertions.
+type built struct {
+	SQL  string
+	Args []any
+}
+
+// buildable is any built value.
+type buildable interface {
+	Build() (string, []any, error)
+}
+
+// renderCond renders a join predicate with its two aliases.
+func renderCond[M, N any](cond ratel.Cond2[M, N], left, right string) (built, error) {
+	sql, args, err := cond.SQL(left, right)
+
+	return built{SQL: sql, Args: args}, err
+}
+
+func build(query buildable) (built, error) {
+	sql, args, err := query.Build()
+
+	return built{SQL: sql, Args: args}, err
+}
+
 type readUser struct {
 	ID        int64
 	Email     string
@@ -49,8 +73,7 @@ func TestSelectSQL(t *testing.T) {
 	const table = projection + `"app"."users" AS "q"`
 
 	users := userDescriptor()
-	database := ratel.New(&pgx.Conn{})
-	base := database.From(users)
+	base := ratel.From(users)
 
 	for _, tc := range []struct {
 		name  string
@@ -69,18 +92,18 @@ func TestSelectSQL(t *testing.T) {
 		{"empty in", base.Where(users.ID.In()), table + ` WHERE FALSE`, nil},
 		{"in", base.Where(users.ID.In(1, 2)), table + ` WHERE "q"."id" IN ($1, $2)`, []any{int64(1), int64(2)}},
 		{
-			"subquery", database.From(base.Where(users.ID.Gt(3)).Limit(5)).Where(users.Email.Eq("a")),
+			"subquery", ratel.From(base.Where(users.ID.Gt(3)).Limit(5)).Where(users.Email.Eq("a")),
 			projection + `(` + table + ` WHERE "q"."id" > $1 LIMIT $2) AS "q" WHERE "q"."email" = $3`,
 			[]any{int64(3), 5, "a"},
 		},
 		{
-			"static source", database.From(ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser,
+			"static source", ratel.From(ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser,
 				`SELECT id, email, manager_id FROM app.users WHERE id > $1`, int64(4))).Where(users.ID.Lt(8)),
 			projection + `(SELECT id, email, manager_id FROM app.users WHERE id > $1) AS "q" WHERE "q"."id" < $2`,
 			[]any{int64(4), int64(8)},
 		},
 		{
-			"verbatim static source", database.From(ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser,
+			"verbatim static source", ratel.From(ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser,
 				`INSERT INTO app.users (email) VALUES ($1) RETURNING id, email, manager_id`, "a")),
 			`INSERT INTO app.users (email) VALUES ($1) RETURNING id, email, manager_id`,
 			[]any{"a"},
@@ -89,7 +112,7 @@ func TestSelectSQL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := tc.query.SQL()
+			statement, err := build(tc.query)
 			if err != nil || statement.SQL != tc.sql || !reflect.DeepEqual(statement.Args, tc.args) {
 				t.Fatalf("got %+v, %v; want %s, %#v", statement, err, tc.sql, tc.args)
 			}
@@ -107,17 +130,17 @@ func TestSelectInvalid(t *testing.T) {
 		query ratel.Select[readUser]
 	}{
 		{"zero", ratel.Select[readUser]{}},
-		{"negative limit", ratel.New(&pgx.Conn{}).From(users).Limit(-1)},
-		{"negative offset", ratel.New(&pgx.Conn{}).From(users).Offset(-1)},
-		{"zero column", ratel.New(&pgx.Conn{}).From(users).Where(ratel.Col[readUser, int64]{}.Eq(1))},
-		{"zero order", ratel.New(&pgx.Conn{}).From(users).OrderBy(ratel.Order[readUser]{})},
-		{"invalid nested source", ratel.New(&pgx.Conn{}).From(ratel.Select[readUser]{})},
-		{"empty static source", ratel.New(&pgx.Conn{}).From(ratel.NewQuery([]string{"id"}, scanReadUser, ""))},
+		{"negative limit", ratel.From(users).Limit(-1)},
+		{"negative offset", ratel.From(users).Offset(-1)},
+		{"zero column", ratel.From(users).Where(ratel.Col[readUser, int64]{}.Eq(1))},
+		{"zero order", ratel.From(users).OrderBy(ratel.Order[readUser]{})},
+		{"invalid nested source", ratel.From(ratel.Select[readUser]{})},
+		{"empty static source", ratel.From(ratel.NewQuery([]string{"id"}, scanReadUser, ""))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := tc.query.SQL()
+			_, err := build(tc.query)
 			if !errors.Is(err, ratel.ErrInvalidQuery) {
 				t.Fatalf("got %v", err)
 			}
@@ -129,7 +152,7 @@ func TestSelectImmutable(t *testing.T) {
 	t.Parallel()
 
 	users := userDescriptor()
-	base := ratel.New(&pgx.Conn{}).From(users).Where(users.ID.Gt(0)).OrderBy(users.ID.Asc())
+	base := ratel.From(users).Where(users.ID.Gt(0)).OrderBy(users.ID.Asc())
 
 	for index := range 32 {
 		t.Run(string(rune('A'+index)), func(t *testing.T) {
@@ -137,7 +160,7 @@ func TestSelectImmutable(t *testing.T) {
 
 			branch := base.Where(users.ID.Lt(int64(index))).OrderBy(users.Email.Desc())
 
-			statement, err := branch.SQL()
+			statement, err := build(branch)
 			if err != nil || !reflect.DeepEqual(statement.Args, []any{int64(0), int64(index)}) {
 				t.Fatalf("%v: %v", statement.Args, err)
 			}
@@ -168,12 +191,11 @@ func TestReadErrors(t *testing.T) {
 
 func BenchmarkSelect(b *testing.B) {
 	users := userDescriptor()
-	database := ratel.New(&pgx.Conn{})
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, err := database.From(users).Where(users.ID.Gt(10)).OrderBy(users.ID.Desc()).Limit(20).SQL()
+		_, err := build(ratel.From(users).Where(users.ID.Gt(10)).OrderBy(users.ID.Desc()).Limit(20))
 		if err != nil {
 			b.Fatal(err)
 		}

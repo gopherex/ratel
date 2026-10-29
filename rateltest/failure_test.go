@@ -179,7 +179,7 @@ func TestFailWithRefusal(t *testing.T) {
 				return value, err
 			})
 			writable := ratel.NewWriteTable(table, func(int64) bool { return true })
-			_, err := ratel.New(executor).Delete(writable).All().Exec(t.Context())
+			_, err := ratel.New(executor).Run(writable.Delete().All()).Exec(t.Context())
 
 			var refusal *ratel.ConstraintError
 			if !errors.As(err, &refusal) || refusal.Kind != tc.kind {

@@ -10,14 +10,10 @@ import (
 	"github.com/gopherex/ratel/plugin/pluginpb"
 )
 
-// maxPositional is the most parameters a query function takes positionally;
-// more become a <Query>Params struct.
-const maxPositional = 3
-
 // parameter is a query parameter as a Go argument.
 type parameter struct {
-	name   string // Go parameter name
-	field  string // Params struct field
+	name   string // Go field name in a step
+	method string // step method, Params struct field
 	goType string
 }
 
@@ -100,67 +96,98 @@ func (s *state) parameters(file *unit, value *ir.Query) ([]parameter, error) {
 			goType = "ratel.Null[" + goType + "]"
 		}
 
-		out = append(out, parameter{name: parameterName(name), field: pascal(name), goType: goType})
+		out = append(out, parameter{name: parameterName(name), method: pascal(name), goType: goType})
 	}
 
 	return out, nil
 }
 
-// callArguments passes a query function's own parameters on.
-func callArguments(parameters []parameter) string {
-	if len(parameters) > maxPositional {
-		return "params"
-	}
-
-	names := make([]string, 0, len(parameters))
-	for _, value := range parameters {
-		names = append(names, value.name)
-	}
-
-	return strings.Join(names, ", ")
-}
-
-// declaration is the parameter list a query function takes after db.
-func declaration(name string, parameters []parameter) string {
-	if len(parameters) > maxPositional {
-		return ", params " + name + "Params"
-	}
-
-	declared := make([]string, 0, len(parameters))
-	for _, value := range parameters {
-		declared = append(declared, value.name+" "+value.goType)
-	}
-
-	if len(declared) == 0 {
-		return ""
-	}
-
-	return ", " + strings.Join(declared, ", ")
-}
-
-// arguments are the query's SQL arguments in parameter order.
-func arguments(parameters []parameter) string {
-	passed := make([]string, 0, len(parameters))
-
-	for _, value := range parameters {
-		if len(parameters) > maxPositional {
-			passed = append(passed, "params."+value.field)
-		} else {
-			passed = append(passed, value.name)
-		}
-	}
-
-	return strings.Join(passed, ", ")
-}
-
+// writeParams declares the row type of a :copyfrom query.
 func writeParams(file *unit, name string, parameters []parameter) {
 	file.printf("// %sParams are the parameters of %s.\ntype %sParams struct {\n", name, name, name)
 
 	for _, value := range parameters {
-		file.printf("\t%s %s\n", value.field, value.goType)
+		file.printf("\t%s %s\n", value.method, value.goType)
 	}
 
 	file.printf("}\n\n")
+}
+
+// writeSteps writes the builder of a query: a function starting it and one
+// step type per parameter, in order, each with one method naming its
+// parameter. Only the last step returns the runnable value, built by build
+// from the arguments in parameter order, so a parameter cannot be skipped or
+// swapped. Without parameters the function returns it directly.
+func writeSteps(file *unit, name, result string, parameters []parameter, build func(arguments string) string) error {
+	if len(parameters) == 0 {
+		file.printf("// %s builds the query.\nfunc %s() %s {\n\treturn %s\n}\n\n", name, name, result, build(""))
+
+		return nil
+	}
+
+	steps := make([]string, len(parameters))
+
+	for index, value := range parameters {
+		steps[index] = camel(name) + value.method
+		if err := file.declare(steps[index], "query "+name); err != nil {
+			return err
+		}
+	}
+
+	file.printf("// %s starts the query; each parameter is one step, in order of appearance.\n"+
+		"func %s() %s {\n\treturn %s{}\n}\n\n", name, name, steps[0], steps[0])
+
+	for index, value := range parameters {
+		file.printf("type %s struct{", steps[index])
+
+		carried := make([]string, 0, index+1)
+
+		for _, earlier := range parameters[:index] {
+			file.printf("\n\t%s %s", earlier.name, earlier.goType)
+
+			carried = append(carried, earlier.name)
+		}
+
+		if index > 0 {
+			file.printf("\n")
+		}
+
+		returned, next := result, build(stepArguments(carried))
+
+		if index < len(parameters)-1 {
+			returned = steps[index+1]
+			next = stepLiteral(returned, append(carried, value.name))
+		}
+
+		file.printf("}\n\n// %s sets the parameter %s.\nfunc (s %s) %s(v %s) %s {\n\treturn %s\n}\n\n",
+			value.method, value.name, steps[index], value.method, value.goType, returned, next)
+	}
+
+	return nil
+}
+
+// stepLiteral is the next step carrying the earlier values and the new one
+// (the method argument v).
+func stepLiteral(step string, names []string) string {
+	fields := make([]string, len(names))
+
+	for index, name := range names[:len(names)-1] {
+		fields[index] = name + ": s." + name
+	}
+
+	fields[len(names)-1] = names[len(names)-1] + ": v"
+
+	return step + "{" + strings.Join(fields, ", ") + "}"
+}
+
+// stepArguments are the carried values followed by the method argument v.
+func stepArguments(carried []string) string {
+	arguments := make([]string, 0, len(carried)+1)
+	for _, name := range carried {
+		arguments = append(arguments, "s."+name)
+	}
+
+	return strings.Join(append(arguments, "v"), ", ")
 }
 
 func (s *state) query(file *unit, value *ir.Query) error {
@@ -171,7 +198,7 @@ func (s *state) query(file *unit, value *ir.Query) error {
 		return err
 	}
 
-	if len(parameters) > maxPositional || value.GetCommand() == ir.QueryCommand_QUERY_COMMAND_COPY_FROM {
+	if value.GetCommand() == ir.QueryCommand_QUERY_COMMAND_COPY_FROM {
 		if err := file.declare(name+"Params", "query "+name); err != nil {
 			return err
 		}
@@ -183,13 +210,13 @@ func (s *state) query(file *unit, value *ir.Query) error {
 		return err
 	}
 
-	file.imports = append(file.imports, "context", ratelImport)
+	file.imports = append(file.imports, ratelImport)
 
 	switch value.GetCommand() {
 	case ir.QueryCommand_QUERY_COMMAND_EXEC, ir.QueryCommand_QUERY_COMMAND_EXEC_ROWS:
-		writeExec(file, value, parameters)
-
-		return nil
+		return writeSteps(file, name, "ratel.Command", parameters, func(arguments string) string {
+			return commandCall(value, arguments)
+		})
 	case ir.QueryCommand_QUERY_COMMAND_COPY_FROM:
 		return s.writeCopy(file, value, parameters)
 	default:
@@ -197,21 +224,13 @@ func (s *state) query(file *unit, value *ir.Query) error {
 	}
 }
 
-func writeExec(file *unit, value *ir.Query, parameters []parameter) {
-	name := value.GetName()
-	declared, passed := declaration(name, parameters), arguments(parameters)
-
-	statement := "ratel.Statement{SQL: " + strconv.Quote(value.GetSql()) + ", Args: []any{" + passed + "}}"
-	if value.GetCommand() == ir.QueryCommand_QUERY_COMMAND_EXEC_ROWS {
-		file.printf("// %s runs the query and returns the number of affected rows.\n"+
-			"func %s(ctx context.Context, db *ratel.DB%s) (int64, error) {\n\treturn db.Exec(ctx, %s)\n}\n\n",
-			name, name, declared, statement)
-
-		return
+func commandCall(value *ir.Query, arguments string) string {
+	call := "ratel.NewCommand(" + strconv.Quote(value.GetSql())
+	if arguments != "" {
+		call += ", " + arguments
 	}
 
-	file.printf("// %s runs the query.\nfunc %s(ctx context.Context, db *ratel.DB%s) error {\n"+
-		"\t_, err := db.Exec(ctx, %s)\n\n\treturn err\n}\n\n", name, name, declared, statement)
+	return call + ")"
 }
 
 // writeCopy streams parameter rows into the INSERT target through COPY.
@@ -242,13 +261,13 @@ func (s *state) writeCopy(file *unit, value *ir.Query, parameters []parameter) e
 				": every :copyfrom value must be a parameter", Source: value.GetMeta().GetSource()}
 		}
 
-		values = append(values, "row."+parameters[number-1].field)
+		values = append(values, "row."+parameters[number-1].method)
 	}
 
 	table := insert.GetTableName()
 	name := value.GetName()
 
-	file.imports = append(file.imports, "iter", "github.com/jackc/pgx/v5")
+	file.imports = append(file.imports, "context", "iter", "github.com/jackc/pgx/v5")
 	file.printf("// %s copies rows through COPY and returns the number of copied rows.\n"+
 		"func %s(ctx context.Context, db *ratel.DB, rows iter.Seq[%sParams]) (int64, error) {\n"+
 		"\tnext, stop := iter.Pull(rows)\n\tdefer stop()\n\n"+

@@ -11,9 +11,14 @@ import (
 	"github.com/gopherex/ratel/plugin"
 )
 
-// checkEdges rejects a relation name that collides with a model field, the
-// relations field R or another relation of the same table.
+// checkEdges rejects a column that collides with generated members, and a
+// relation name that collides with a model field, the relations field R or
+// another relation of the same table.
 func checkEdges(names identifiers, columns []column, edges []edge) error {
+	if err := checkColumns(names, columns); err != nil {
+		return err
+	}
+
 	taken := map[string]string{"R": "the relations field R"}
 	for _, value := range columns {
 		taken[value.field] = "column " + value.name
@@ -27,7 +32,7 @@ func checkEdges(names identifiers, columns []column, edges []edge) error {
 
 		for _, identifier := range identifiers {
 			if previous, exists := taken[identifier]; exists {
-				return &plugin.Error{Code: "RTL-G05", Message: "relation " + value.name + " of table " + names.table +
+				return &plugin.Error{Code: codeCollision, Message: "relation " + value.name + " of table " + names.table +
 					" collides with " + previous + "; rename it with @ratel.rel name=..."}
 			}
 

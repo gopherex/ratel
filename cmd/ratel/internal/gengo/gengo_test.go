@@ -74,7 +74,54 @@ func TestOptions(t *testing.T) {
 	}
 }
 
+// TestNameCollisions checks that columns whose Go names clash with generated
+// members are generation errors naming the column.
+func TestNameCollisions(t *testing.T) {
+	parser := newParser(t)
+
+	t.Parallel()
+
+	for _, tc := range []struct{ name, column, failure string }{
+		{name: "Row method", column: "row text NOT NULL", failure: "collides with the generated method Row"},
+		{name: "validity flag", column: "valid boolean NOT NULL", failure: "collides with the validity flag"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "schema.sql")
+			if err := os.WriteFile(path, []byte("CREATE SCHEMA app;\nCREATE TABLE app.items (id bigint, "+
+				tc.column+");\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			response := respond(t, parser, path)
+			if !plugin.HasErrors(response) || !strings.Contains(response.GetDiagnostics()[0].GetMessage(), tc.failure) {
+				t.Fatalf("diagnostics = %v, want %q", response.GetDiagnostics(), tc.failure)
+			}
+		})
+	}
+}
+
 func generate(tb testing.TB, parser parse.Parser, schemaPath string) []*pluginpb.File {
+	tb.Helper()
+
+	response := respond(tb, parser, schemaPath)
+	if plugin.HasErrors(response) {
+		tb.Fatalf("Generate() diagnostics: %v", response.GetDiagnostics())
+	}
+
+	// Warnings are compared as a golden file too.
+	var warnings strings.Builder
+	for _, diagnostic := range response.GetDiagnostics() {
+		warnings.WriteString(diagnostic.GetCode() + ": " + diagnostic.GetMessage() + "\n")
+	}
+
+	return append(response.GetGenerate().GetFiles(),
+		&pluginpb.File{Path: "diagnostics", Contents: []byte(warnings.String())})
+}
+
+// respond runs the generator on a schema, and on the queries.sql next to it.
+func respond(tb testing.TB, parser parse.Parser, schemaPath string) *pluginpb.PluginResponse {
 	tb.Helper()
 
 	ddl, err := os.ReadFile(schemaPath)
@@ -125,18 +172,8 @@ func generate(tb testing.TB, parser parse.Parser, schemaPath string) []*pluginpb
 	response := plugin.Dispatch(context.Background(), gengo.Generator{}, &pluginpb.PluginRequest{
 		ProtocolVersion: 1, Request: &pluginpb.PluginRequest_Generate{Generate: request},
 	})
-	if plugin.HasErrors(response) {
-		tb.Fatalf("Generate() diagnostics: %v", response.GetDiagnostics())
-	}
 
-	// Warnings are compared as a golden file too.
-	var warnings strings.Builder
-	for _, diagnostic := range response.GetDiagnostics() {
-		warnings.WriteString(diagnostic.GetCode() + ": " + diagnostic.GetMessage() + "\n")
-	}
-
-	return append(response.GetGenerate().GetFiles(),
-		&pluginpb.File{Path: "diagnostics", Contents: []byte(warnings.String())})
+	return response
 }
 
 // namespaced collects the catalog's go annotations, as the host does.

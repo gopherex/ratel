@@ -15,11 +15,27 @@ import (
 	"github.com/gopherex/ratel"
 )
 
+// sentStatements runs an insert on a recording executor and returns the
+// statements it sent, in order.
+func sentStatements(t *testing.T, query ratel.Insert[readUser, writeInsert]) ([]built, error) {
+	t.Helper()
+
+	var sent []built
+
+	executor := writeExecutor{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+		sent = append(sent, built{SQL: sql, Args: args})
+
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	}}
+	_, err := ratel.New(executor).Run(query).Exec(t.Context())
+
+	return sent, err
+}
+
 func TestInsertSQL(t *testing.T) {
 	t.Parallel()
 
 	users := writeDescriptor()
-	database := ratel.New(readExecutor{})
 	first := newWriteInsert("a")
 	second := newWriteInsert("b")
 	second.Note = ratel.OptFrom(ratel.Null[int64]{})
@@ -30,49 +46,49 @@ func TestInsertSQL(t *testing.T) {
 		sql       string
 		wantError error
 	}{
-		{name: "insert", query: database.Insert(users, first), sql: `INSERT INTO "app"."users" AS "q" ("email") VALUES ($1)`},
-		{name: "invalid", query: database.Insert(users, writeInsert{}), wantError: ratel.ErrInvalidInsert},
-		{name: "empty", query: database.Insert(users), wantError: ratel.ErrInvalidInsert},
-		{name: "missing conflict", query: database.Upsert(users, first), wantError: ratel.ErrInvalidQuery},
+		{name: "insert", query: users.Insert(first), sql: `INSERT INTO "app"."users" AS "q" ("email") VALUES ($1)`},
+		{name: "invalid", query: users.Insert(writeInsert{}), wantError: ratel.ErrInvalidInsert},
+		{name: "empty", query: users.Insert(), wantError: ratel.ErrInvalidInsert},
+		{name: "missing conflict", query: users.Upsert(first), wantError: ratel.ErrInvalidQuery},
 		{
-			name: "insert action without target", query: database.Insert(users, first).DoNothing(),
+			name: "insert action without target", query: users.Insert(first).DoNothing(),
 			wantError: ratel.ErrInvalidQuery,
 		},
 		{
-			name: "insert update without target", query: database.Insert(users, first).Update(users.Email),
+			name: "insert update without target", query: users.Insert(first).Update(users.Email),
 			wantError: ratel.ErrInvalidQuery,
 		},
 		{
-			name: "insert target without action", query: database.Insert(users, first).OnConflict(users.Email),
+			name: "insert target without action", query: users.Insert(first).OnConflict(users.Email),
 			wantError: ratel.ErrInvalidQuery,
 		},
 		{
-			name: "missing action", query: database.Upsert(users, first).OnConflict(users.Email),
+			name: "missing action", query: users.Upsert(first).OnConflict(users.Email),
 			wantError: ratel.ErrInvalidQuery,
 		},
 		{
-			name: "duplicate target", query: database.Upsert(users, first).OnConflict(users.Email, users.Email).DoNothing(),
+			name: "duplicate target", query: users.Upsert(first).OnConflict(users.Email, users.Email).DoNothing(),
 			wantError: ratel.ErrInvalidQuery,
 		},
-		{name: "unknown target", query: database.Upsert(users, first).
+		{name: "unknown target", query: users.Upsert(first).
 			OnConflict(ratel.NewCol[readUser, string]("unknown")).DoNothing(), wantError: ratel.ErrInvalidQuery},
 		{
-			name: "upsert", query: database.Upsert(users, first, newWriteInsert("b")).
+			name: "upsert", query: users.Upsert(first, newWriteInsert("b")).
 				OnConflict(users.Email).Update(users.Email),
 			sql: `INSERT INTO "app"."users" AS "q" ("email") SELECT * FROM unnest($1::"pg_catalog"."text"[])` +
 				` ON CONFLICT ("email") DO UPDATE SET "email" = EXCLUDED."email"`,
 		},
 		{
-			name: "do nothing", query: database.Upsert(users, first).OnConflict(users.Email).DoNothing(),
+			name: "do nothing", query: users.Upsert(first).OnConflict(users.Email).DoNothing(),
 			sql: `INSERT INTO "app"."users" AS "q" ("email") VALUES ($1) ON CONFLICT ("email") DO NOTHING`,
 		},
 		{
-			name: "nullable default", query: database.Insert(users, second),
+			name: "nullable default", query: users.Insert(second),
 			sql: `INSERT INTO "app"."users" AS "q" ("email", "manager_id") VALUES ($1, $2)`,
 		},
-		{name: "heterogeneous", query: database.Insert(users, first, second), wantError: ratel.ErrInvalidQuery},
+		{name: "heterogeneous", query: users.Insert(first, second), wantError: ratel.ErrInvalidQuery},
 		{
-			name: "invalid batch", query: ratel.New(readExecutor{}, ratel.WithBatchRows(0)).Insert(users, first),
+			name: "invalid chunk", query: users.Insert(first).Chunk(0),
 			wantError: ratel.ErrInvalidQuery,
 		},
 		{name: "zero", wantError: ratel.ErrInvalidInsert},
@@ -80,7 +96,7 @@ func TestInsertSQL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := tc.query.SQL()
+			statement, err := build(tc.query)
 			if !errors.Is(err, tc.wantError) || (err == nil && statement.SQL != tc.sql) {
 				t.Fatalf("%+v %v", statement, err)
 			}
@@ -119,11 +135,9 @@ func TestInsertGroupsBySet(t *testing.T) {
 	withID := newWriteInsert("b")
 	withID.ID = ratel.OptFrom(int64(7))
 
-	database := ratel.New(&pgx.Conn{})
-
-	statements, err := database.Insert(users, newWriteInsert("a"), newWriteInsert("c"), withID, withID).Statements()
+	statements, err := sentStatements(t, users.Insert(newWriteInsert("a"), newWriteInsert("c"), withID, withID))
 	if err != nil || len(statements) != 2 {
-		t.Fatalf("Statements() = %v, %v", statements, err)
+		t.Fatalf("sent = %v, %v", statements, err)
 	}
 
 	for _, statement := range statements {
@@ -136,7 +150,7 @@ func TestInsertGroupsBySet(t *testing.T) {
 		t.Fatalf("Value ran %d times for unnest statements", boxed.Load())
 	}
 
-	if _, err := database.Insert(users, newWriteInsert("a")).Statements(); err != nil || boxed.Load() != 1 {
+	if _, err := sentStatements(t, users.Insert(newWriteInsert("a"))); err != nil || boxed.Load() != 1 {
 		t.Fatalf("single row: %v, Value ran %d times", err, boxed.Load())
 	}
 }
@@ -162,9 +176,9 @@ func TestInsertBatches(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			query := ratel.New(readExecutor{}, ratel.WithBatchRows(tc.batch)).Insert(users, tc.rows...)
+			query := users.Insert(tc.rows...).Chunk(tc.batch)
 
-			statements, err := query.Statements()
+			statements, err := sentStatements(t, query)
 			if err != nil || len(statements) != tc.count {
 				t.Fatalf("%+v %v", statements, err)
 			}
@@ -192,8 +206,9 @@ func TestInvalidInsertNeverExecutes(t *testing.T) {
 		return nil, ratel.ErrInvalidQuery
 	}}
 
-	_, err := ratel.New(executor, ratel.WithBatchRows(1)).Insert(writeDescriptor(), newWriteInsert("a"), writeInsert{}).
-		Returning(t.Context())
+	query := writeDescriptor().Insert(newWriteInsert("a"), writeInsert{}).Chunk(1).Returning()
+
+	_, err := ratel.New(executor).Run(query).List(t.Context())
 	if !errors.Is(err, ratel.ErrInvalidInsert) {
 		t.Fatal(err)
 	}
@@ -203,9 +218,9 @@ func TestInsertDefaultValues(t *testing.T) {
 	t.Parallel()
 
 	table := ratel.NewWriteTable(userDescriptor().Table, func(row writeInsert) bool { return row.valid })
-	query := ratel.New(readExecutor{}).Insert(table, newWriteInsert("a"), newWriteInsert("b"))
+	query := table.Insert(newWriteInsert("a"), newWriteInsert("b"))
 
-	statements, err := query.Statements()
+	statements, err := sentStatements(t, query)
 	if err != nil || len(statements) != 2 || !strings.HasSuffix(statements[0].SQL, "DEFAULT VALUES") {
 		t.Fatalf("%+v %v", statements, err)
 	}
@@ -243,7 +258,6 @@ func TestBwInsertRendering(t *testing.T) {
 
 	users := writeDescriptor()
 	arrays := bwTable("app", bwEmailField(), bwArrayField())
-	database := ratel.New(readExecutor{})
 	first, second := withID("a", 1), withID("b", 2)
 
 	for _, tc := range []struct {
@@ -255,20 +269,20 @@ func TestBwInsertRendering(t *testing.T) {
 	}{
 		{
 			name:  "unnest of several columns",
-			query: database.Insert(users, first, second),
+			query: users.Insert(first, second),
 			sql: `INSERT INTO "app"."users" AS "q" ("email", "id") SELECT * FROM unnest(` +
 				`$1::"pg_catalog"."text"[], $2::"pg_catalog"."int8"[])`,
 			args: []any{[]string{"a", "b"}, []int64{1, 2}},
 		},
 		{
 			name:  "array column falls back to VALUES",
-			query: database.Insert(arrays, newWriteInsert("a"), newWriteInsert("b")),
+			query: arrays.Insert(newWriteInsert("a"), newWriteInsert("b")),
 			sql:   `INSERT INTO "app"."users" AS "q" ("email", "manager_id") VALUES ($1, $2), ($3, $4)`,
 			args:  []any{"a", []int64{7}, "b", []int64{7}},
 		},
 		{
 			name: "composite conflict target and update",
-			query: database.Upsert(users, newWriteInsert("a")).
+			query: users.Upsert(newWriteInsert("a")).
 				OnConflict(users.Email, users.ID).Update(users.Email, users.ID),
 			sql: `INSERT INTO "app"."users" AS "q" ("email") VALUES ($1) ON CONFLICT ("email", "id") ` +
 				`DO UPDATE SET "email" = EXCLUDED."email", "id" = EXCLUDED."id"`,
@@ -276,47 +290,47 @@ func TestBwInsertRendering(t *testing.T) {
 		},
 		{
 			name:  "update after do nothing replaces it",
-			query: database.Upsert(users, newWriteInsert("a")).OnConflict(users.Email).DoNothing().Update(users.ID),
+			query: users.Upsert(newWriteInsert("a")).OnConflict(users.Email).DoNothing().Update(users.ID),
 			sql: `INSERT INTO "app"."users" AS "q" ("email") VALUES ($1) ON CONFLICT ("email") ` +
 				`DO UPDATE SET "id" = EXCLUDED."id"`,
 			args: []any{"a"},
 		},
 		{
 			name:  "schema is required",
-			query: database.Insert(bwTable("", bwEmailField()), newWriteInsert("a")),
+			query: bwTable("", bwEmailField()).Insert(newWriteInsert("a")),
 			want:  ratel.ErrInvalidQuery,
 		},
 		{
 			name: "invalid type identifier",
-			query: database.Insert(bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
+			query: bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
 				f.Type = pgx.Identifier{""}
-			})), newWriteInsert("a")),
+			})).Insert(newWriteInsert("a")),
 			want: ratel.ErrInvalidQuery,
 		},
 		{
 			name: "field outside the table columns",
-			query: database.Insert(bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
+			query: bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
 				f.Name = "unknown"
-			})), newWriteInsert("a")),
+			})).Insert(newWriteInsert("a")),
 			want: ratel.ErrInvalidQuery,
 		},
 		{
 			name:  "duplicate field",
-			query: database.Insert(bwTable("app", bwEmailField(), bwEmailField()), newWriteInsert("a")),
+			query: bwTable("app", bwEmailField(), bwEmailField()).Insert(newWriteInsert("a")),
 			want:  ratel.ErrInvalidQuery,
 		},
 		{
 			name: "scalar field without Values",
-			query: database.Insert(bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
+			query: bwTable("app", bwEmailWith(func(f *ratel.InsertField[writeInsert]) {
 				f.Values = nil
-			})), newWriteInsert("a")),
+			})).Insert(newWriteInsert("a")),
 			want: ratel.ErrInvalidQuery,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := tc.query.SQL()
+			statement, err := build(tc.query)
 			if !errors.Is(err, tc.want) || statement.SQL != tc.sql || !reflect.DeepEqual(statement.Args, tc.args) {
 				t.Fatalf("SQL() = %+v, %v; want %q, %#v, %v", statement, err, tc.sql, tc.args, tc.want)
 			}
@@ -334,7 +348,7 @@ func TestBwInsertParameterLimit(t *testing.T) {
 	arrays := bwTable("app", bwEmailField(), bwArrayField())
 	rows := slices.Repeat([]writeInsert{newWriteInsert("a")}, perStatement+1)
 
-	statements, err := ratel.New(readExecutor{}, ratel.WithBatchRows(1_000_000)).Insert(arrays, rows...).Statements()
+	statements, err := sentStatements(t, arrays.Insert(rows...).Chunk(1_000_000))
 	if err != nil || len(statements) != 2 {
 		t.Fatalf("statements = %d, %v", len(statements), err)
 	}
@@ -353,7 +367,7 @@ func TestBwInsertExecInvalid(t *testing.T) {
 		return pgconn.CommandTag{}, nil
 	}}
 
-	count, err := ratel.New(executor).Insert(writeDescriptor()).Exec(t.Context())
+	count, err := ratel.New(executor).Run(writeDescriptor().Insert()).Exec(t.Context())
 	if count != 0 || !errors.Is(err, ratel.ErrInvalidInsert) {
 		t.Fatalf("Exec() = %d, %v", count, err)
 	}
@@ -361,12 +375,13 @@ func TestBwInsertExecInvalid(t *testing.T) {
 
 func BenchmarkBwInsertArrays(b *testing.B) {
 	arrays := bwTable("app", bwEmailField(), bwArrayField())
-	query := ratel.New(readExecutor{}).Insert(arrays, slices.Repeat([]writeInsert{newWriteInsert("a")}, 100)...)
+	query := arrays.Insert(slices.Repeat([]writeInsert{newWriteInsert("a")}, 100)...)
+	database := ratel.New(benchWriteExecutor())
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := query.Statements(); err != nil {
+		if _, err := database.Run(query).Exec(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -382,23 +397,22 @@ func BenchmarkInsertTerminals(b *testing.B) {
 		run  func(ctx context.Context) error
 	}{
 		{"exec", func(ctx context.Context) error {
-			_, err := database.Insert(users, rows...).Exec(ctx)
+			_, err := database.Run(users.Insert(rows...)).Exec(ctx)
 
 			return err
 		}},
 		{"returning", func(ctx context.Context) error {
-			_, err := database.Insert(users, rows...).Returning(ctx)
+			_, err := database.Run(users.Insert(rows...).Returning()).List(ctx)
 
 			return err
 		}},
 		{"do nothing", func(ctx context.Context) error {
-			_, err := database.Upsert(users, rows...).OnConflict(users.Email).DoNothing().Exec(ctx)
+			_, err := database.Run(users.Upsert(rows...).OnConflict(users.Email).DoNothing()).Exec(ctx)
 
 			return err
 		}},
 		{"batch rows", func(ctx context.Context) error {
-			_, err := ratel.New(benchWriteExecutor(), ratel.WithBatchRows(1)).
-				Insert(users, newWriteInsert("a"), newWriteInsert("b")).Exec(ctx)
+			_, err := database.Run(users.Insert(newWriteInsert("a"), newWriteInsert("b")).Chunk(1)).Exec(ctx)
 
 			return err
 		}},
@@ -430,13 +444,13 @@ func benchWriteExecutor() benchWriteExec { return benchWriteExec{} }
 
 func BenchmarkInsertSQL(b *testing.B) {
 	users := writeDescriptor()
-	query := ratel.New(readExecutor{}).Upsert(users, newWriteInsert("a"), newWriteInsert("b")).
+	query := users.Upsert(newWriteInsert("a"), newWriteInsert("b")).
 		OnConflict(users.Email).Update(users.Email)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := query.SQL(); err != nil {
+		if _, err := build(query); err != nil {
 			b.Fatal(err)
 		}
 	}

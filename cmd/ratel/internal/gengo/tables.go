@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/plugin"
 )
 
 // insertKind is how a column appears in the insert type.
@@ -21,7 +22,7 @@ type column struct {
 	typ      *ir.TypeRef
 	name     string // PostgreSQL name
 	field    string // Go field name
-	param    string // constructor parameter name
+	param    string // unexported field of the insert type
 	goType   goType
 	pgType   string // qualified element type, for InsertField.Type
 	nullable bool
@@ -138,7 +139,11 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 		}
 
 		writeScanner(file, names, columns)
-		writeInsert(file, names, columns)
+
+		if err := writeInsert(file, names, columns); err != nil {
+			return err
+		}
+
 		writeDescriptor(file, schema.GetName(), object, names, columns, table, relations)
 
 		if err := writeConstraints(file, schema.GetName(), object, names, table); err != nil {
@@ -149,9 +154,26 @@ func (s *state) tables(file *unit, schema *ir.Schema) error {
 	return nil
 }
 
+// checkColumns rejects columns whose Go names would clash with the generated
+// Row method of the descriptor or the flag of the insert type.
+func checkColumns(names identifiers, columns []column) error {
+	for _, value := range columns {
+		switch {
+		case value.field == "Row":
+			return &plugin.Error{Code: codeCollision, Message: "column " + value.name + " of table " + names.table +
+				" collides with the generated method Row of " + names.descriptor}
+		case value.param == "valid" && value.insert != insertOmitted:
+			return &plugin.Error{Code: codeCollision, Message: "column " + value.name + " of table " + names.table +
+				" collides with the validity flag of " + names.insert}
+		}
+	}
+
+	return nil
+}
+
 // identifiers are a table's generated Go names.
 type identifiers struct {
-	table, model, insert, descriptor, descriptorType, base, scanner, constructor string
+	table, model, insert, descriptor, descriptorType, base, scanner string
 }
 
 // relationDecl is a descriptor relation field: its name, target model and
@@ -164,7 +186,7 @@ func tableNames(table string) identifiers {
 	return identifiers{
 		table: table, model: model, insert: model + "Insert", descriptor: plural(table),
 		descriptorType: camel(plural(table)) + "Table", base: camel(plural(table)) + "Base",
-		scanner: "scan" + model, constructor: "New" + model + "Insert",
+		scanner: "scan" + model,
 	}
 }
 
@@ -173,7 +195,7 @@ func (n identifiers) all() map[string]string {
 
 	return map[string]string{
 		n.model: source, n.insert: source, n.descriptor: source, n.descriptorType: source,
-		n.base: source, n.scanner: source, n.constructor: source,
+		n.base: source, n.scanner: source,
 	}
 }
 
@@ -202,28 +224,86 @@ func writeScanner(file *unit, names identifiers, columns []column) {
 		names.scanner, names.model, names.model, strings.Join(targets, ", "))
 }
 
-func writeInsert(file *unit, names identifiers, columns []column) {
-	var parameters, assignments []string
+// writeInsert writes the insert type, its setters for optional columns, and
+// Row: one step type per required column, in column order, each with one
+// method naming its column. Only the last step returns the insert type, which
+// carries the flag the writes check.
+func writeInsert(file *unit, names identifiers, columns []column) error {
+	var required []column
 
-	file.printf("// %s is the input of an insert into %s. Construct it with %s.\ntype %s struct {\n",
-		names.insert, names.table, names.constructor, names.insert)
+	file.printf("// %s is the input of an insert into %s. Start it with Row.\ntype %s struct {\n",
+		names.insert, names.table, names.insert)
 
 	for _, value := range columns {
 		switch value.insert {
 		case insertRequired:
+			required = append(required, value)
 			file.printf("\t%s %s\n", value.param, file.use(value.goType))
-			parameters = append(parameters, value.param+" "+file.use(value.goType))
-			assignments = append(assignments, value.param+": "+value.param)
 		case insertNullable:
-			file.printf("\t%s ratel.Null[%s]\n", value.field, file.use(value.goType))
+			file.printf("\t%s ratel.Null[%s]\n", value.param, file.use(value.goType))
 		case insertOptional:
-			file.printf("\t%s ratel.Opt[%s]\n", value.field, value.modelType(file))
+			file.printf("\t%s ratel.Opt[%s]\n", value.param, value.modelType(file))
 		case insertOmitted:
 		}
 	}
 
 	file.printf("\tvalid bool\n}\n\n")
-	file.printf("// %s sets the columns without a default.\nfunc %s(%s) %s {\n\treturn %s{%s}\n}\n\n",
-		names.constructor, names.constructor, strings.Join(parameters, ", "), names.insert, names.insert,
-		strings.Join(append(assignments, "valid: true"), ", "))
+
+	for _, value := range columns {
+		switch value.insert {
+		case insertNullable:
+			file.printf("// %s sets the column %s.\nfunc (r %s) %s(v ratel.Null[%s]) %s {\n\tr.%s = v\n\n\treturn r\n}\n\n",
+				value.field, value.name, names.insert, value.field, file.use(value.goType), names.insert, value.param)
+		case insertOptional:
+			file.printf("// %s sets the column %s; unset, its default applies.\n"+
+				"func (r %s) %s(v %s) %s {\n\tr.%s = ratel.OptFrom(v)\n\n\treturn r\n}\n\n",
+				value.field, value.name, names.insert, value.field, value.modelType(file), names.insert, value.param)
+		case insertRequired, insertOmitted:
+		}
+	}
+
+	return writeRow(file, names, required)
+}
+
+func writeRow(file *unit, names identifiers, required []column) error {
+	if len(required) == 0 {
+		file.printf("// Row starts an insert row of %s; it has no required column.\n"+
+			"func (t *%s) Row() %s {\n\treturn %s{valid: true}\n}\n\n",
+			names.table, names.descriptorType, names.insert, names.insert)
+
+		return nil
+	}
+
+	steps := make([]string, len(required))
+
+	for index, value := range required {
+		steps[index] = camel(names.model) + "Row" + value.field
+		if err := file.declare(steps[index], "insert step of table "+names.table); err != nil {
+			return err
+		}
+	}
+
+	file.printf("// Row starts an insert row of %s: one step per required column, in column order.\n"+
+		"func (t *%s) Row() %s {\n\treturn %s{}\n}\n\n", names.table, names.descriptorType, steps[0], steps[0])
+
+	for index, value := range required {
+		file.printf("type %s struct{ insert %s }\n\n", steps[index], names.insert)
+
+		result, last := steps[min(index+1, len(steps)-1)], index == len(required)-1
+		if last {
+			result = names.insert
+		}
+
+		file.printf("// %s sets the column %s.\nfunc (s %s) %s(v %s) %s {\n\ts.insert.%s = v\n",
+			value.field, value.name, steps[index], value.field, file.use(value.goType), result, value.param)
+
+		switch {
+		case last:
+			file.printf("\ts.insert.valid = true\n\n\treturn s.insert\n}\n\n")
+		default:
+			file.printf("\n\treturn %s{s.insert}\n}\n\n", result)
+		}
+	}
+
+	return nil
 }

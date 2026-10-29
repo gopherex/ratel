@@ -37,13 +37,19 @@ const (
 	writerParameters = 4
 )
 
-// statement is the written statement; one without parameters has nil Args.
-func (w *sqlWriter) statement() Statement {
+// stmt is rendered SQL with its ordered arguments.
+type stmt struct {
+	SQL  string
+	Args []any
+}
+
+// result is the written statement; one without parameters has nil Args.
+func (w *sqlWriter) result() stmt {
 	if len(w.args) == 0 {
-		return Statement{SQL: w.String()}
+		return stmt{SQL: w.String()}
 	}
 
-	return Statement{SQL: w.String(), Args: w.args}
+	return stmt{SQL: w.String(), Args: w.args}
 }
 
 // newSQLWriter is a writer with room for a typical statement.
@@ -104,22 +110,67 @@ func (w *sqlWriter) identifier(name string) {
 
 // Select is an immutable typed SELECT. Branches can be used concurrently.
 type Select[M any] struct {
-	db       *DB
 	source   source[M]
 	where    Cond[M]
 	hasWhere bool
+	lock     lockMode // FOR UPDATE / FOR SHARE clause
+	wait     waitMode // SKIP LOCKED / NOWAIT; requires a lock
 	orders   []Order[M]
 	limit    Opt[int]
 	offset   Opt[int]
-	after    []any  // keyset values matching orders
-	lock     string // FOR UPDATE / FOR SHARE clause
-	wait     string // SKIP LOCKED / NOWAIT; requires a lock
+	after    []any // keyset values matching orders
 	joins    []func(writer *sqlWriter, alias string) error
 }
 
-// From starts a SELECT over a generated descriptor, static query, or another SELECT.
-func (db *DB) From[M any](from Source[M]) Select[M] {
-	return Select[M]{db: db, source: from.ratelSource()}
+// lockMode is a row-locking clause. It is a byte, not its SQL text, to keep
+// Select small: db.Run copies the SELECT into its runner.
+type lockMode uint8
+
+const (
+	lockNone lockMode = iota
+	lockUpdate
+	lockShare
+)
+
+func (m lockMode) sql() string {
+	switch m {
+	case lockUpdate:
+		return " FOR UPDATE"
+	case lockShare:
+		return " FOR SHARE"
+	case lockNone:
+		return ""
+	default:
+		return ""
+	}
+}
+
+// waitMode is the wait policy of a row lock.
+type waitMode uint8
+
+const (
+	waitDefault waitMode = iota
+	waitSkipLocked
+	waitNoWait
+)
+
+func (m waitMode) sql() string {
+	switch m {
+	case waitSkipLocked:
+		return " SKIP LOCKED"
+	case waitNoWait:
+		return " NOWAIT"
+	case waitDefault:
+		return ""
+	default:
+		return ""
+	}
+}
+
+// From starts a SELECT over any source: a generated descriptor, a static
+// query, or another SELECT. The SELECT is a value; db.Run executes it.
+func From[M any](from Source[M]) Select[M] {
+	return Select[M]{source: from.ratelSource()}
 }
 
 // Where adds a predicate, conjoined with earlier predicates.
@@ -155,65 +206,68 @@ func (q Select[M]) Offset(count int) Select[M] {
 	return q
 }
 
-// Statement contains rendered SQL and its ordered PostgreSQL arguments.
-type Statement struct {
-	SQL  string
-	Args []any
-}
-
-// SQL renders the query and numbered PostgreSQL arguments without executing it.
-func (q Select[M]) SQL() (Statement, error) {
-	statement, err := q.statement()
-	if err == nil && q.verbatim() {
-		// The caller owns the returned arguments; a static query keeps its own.
-		statement.Args = slices.Clone(statement.Args)
+// Build renders the query and its numbered PostgreSQL arguments without
+// executing it or contacting a database.
+func (q Select[M]) Build() (string, []any, error) {
+	rendered, err := q.render()
+	if err != nil {
+		return "", nil, err
 	}
 
-	return statement, err
+	if q.verbatim() {
+		// The caller owns the returned arguments; a static query keeps its own.
+		rendered.Args = slices.Clone(rendered.Args)
+	}
+
+	return rendered.SQL, rendered.Args, nil
 }
 
-// statement renders the query; a static query's arguments are shared, for
+// render renders the query; a static query's arguments are shared, for
 // execution, which does not modify them.
-func (q Select[M]) statement() (Statement, error) {
+func (q *Select[M]) render() (stmt, error) {
 	if q.verbatim() {
 		if q.source.static.SQL == "" {
-			return Statement{}, ErrInvalidQuery
+			return stmt{}, ErrInvalidQuery
 		}
 
 		return *q.source.static, nil
 	}
 
+	if q.source.table.tableMeta == nil {
+		return stmt{}, ErrInvalidQuery
+	}
+
 	if q.source.render == nil && q.source.table.selectSQL != "" && q.plain() {
-		return Statement{SQL: q.source.table.selectSQL}, nil
+		return stmt{SQL: q.source.table.selectSQL}, nil
 	}
 
 	writer := newSQLWriter()
 	writer.Grow(len(q.source.table.selectSQL))
 
 	if err := q.appendSQL(writer); err != nil {
-		return Statement{}, err
+		return stmt{}, err
 	}
 
 	if writer.invalid {
-		return Statement{}, ErrInvalidQuery
+		return stmt{}, ErrInvalidQuery
 	}
 
-	return writer.statement(), nil
+	return writer.result(), nil
 }
 
 // plain reports a SELECT without added clauses.
-func (q Select[M]) plain() bool {
+func (q *Select[M]) plain() bool {
 	return !q.hasWhere && len(q.orders) == 0 && !q.limit.Set && !q.offset.Set && q.after == nil &&
-		q.lock == "" && q.wait == "" && len(q.joins) == 0
+		q.lock == lockNone && q.wait == waitDefault && len(q.joins) == 0
 }
 
 // verbatim reports a plain SELECT over a static query, which runs the
 // query's own statement.
-func (q Select[M]) verbatim() bool { return q.source.static != nil && q.plain() }
+func (q *Select[M]) verbatim() bool { return q.source.static != nil && q.plain() }
 
-func (q Select[M]) appendSQL(writer *sqlWriter) error {
+func (q *Select[M]) appendSQL(writer *sqlWriter) error {
 	if !q.source.table.valid() || q.limit.V < 0 || q.offset.V < 0 ||
-		(q.after != nil && len(q.after) != len(q.orders)) || (q.wait != "" && q.lock == "") {
+		(q.after != nil && len(q.after) != len(q.orders)) || (q.wait != waitDefault && q.lock == lockNone) {
 		return ErrInvalidQuery
 	}
 
@@ -224,14 +278,14 @@ func (q Select[M]) appendSQL(writer *sqlWriter) error {
 	q.appendWhere(writer)
 	q.appendOrder(writer)
 	q.appendPagination(writer)
-	writer.WriteString(q.lock)
-	writer.WriteString(q.wait)
+	writer.WriteString(q.lock.sql())
+	writer.WriteString(q.wait.sql())
 
 	return nil
 }
 
 // appendFrom renders the projection, the source as "q" and the joins.
-func (q Select[M]) appendFrom(writer *sqlWriter) error {
+func (q *Select[M]) appendFrom(writer *sqlWriter) error {
 	if q.source.render == nil {
 		if q.source.table.selectSQL == "" {
 			return ErrInvalidQuery
@@ -260,7 +314,7 @@ func (q Select[M]) appendFrom(writer *sqlWriter) error {
 }
 
 // appendWhere conjoins the predicates and the keyset condition.
-func (q Select[M]) appendWhere(writer *sqlWriter) {
+func (q *Select[M]) appendWhere(writer *sqlWriter) {
 	switch {
 	case q.hasWhere && q.after != nil:
 		writer.WriteString(" WHERE ")
@@ -275,7 +329,7 @@ func (q Select[M]) appendWhere(writer *sqlWriter) {
 	}
 }
 
-func (q Select[M]) appendOrder(writer *sqlWriter) {
+func (q *Select[M]) appendOrder(writer *sqlWriter) {
 	if len(q.orders) == 0 {
 		return
 	}
@@ -297,7 +351,7 @@ func (q Select[M]) appendOrder(writer *sqlWriter) {
 	}
 }
 
-func (q Select[M]) appendPagination(writer *sqlWriter) {
+func (q *Select[M]) appendPagination(writer *sqlWriter) {
 	if q.limit.Set {
 		writer.WriteString(" LIMIT ")
 		writer.param(q.limit.V)

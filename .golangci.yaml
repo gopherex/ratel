@@ -124,6 +124,9 @@ linters:
       disabled-checks:
         - dupImport
         - octalLiteral
+        # Contradicts nonamedreturns: a function with three or more results
+        # cannot satisfy both. Results stay unnamed.
+        - unnamedResult
         - whyNoLint
       enabled-tags:
         - diagnostic

@@ -35,33 +35,37 @@ func TestExec(t *testing.T) {
 	unique := &pgconn.PgError{Code: "23505", SchemaName: "app", TableName: "users", ConstraintName: "users_email_key"}
 
 	for _, tc := range []struct {
-		name      string
-		statement ratel.Statement
-		failure   error
-		want      int64
-		check     func(error) bool
+		name    string
+		command ratel.Command
+		sql     string
+		failure error
+		want    int64
+		check   func(error) bool
 	}{
 		{
-			name: "rows", statement: ratel.Statement{SQL: "DELETE FROM app.users", Args: []any{1}}, want: 3,
+			name: "rows", sql: "DELETE FROM app.users", command: ratel.NewCommand("DELETE FROM app.users", 1), want: 3,
 			check: func(err error) bool { return err == nil },
 		},
 		{
-			name: "constraint", statement: ratel.Statement{SQL: "INSERT"}, failure: unique,
+			name: "constraint", sql: "INSERT", command: ratel.NewCommand("INSERT"), failure: unique,
 			check: func(err error) bool {
 				return errors.Is(err, &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Constraint: "users_email_key"})
 			},
 		},
 		{
-			name: "technical", statement: ratel.Statement{SQL: "INSERT"}, failure: offline,
+			name: "technical", sql: "INSERT", command: ratel.NewCommand("INSERT"), failure: offline,
 			check: func(err error) bool { return errors.Is(err, offline) },
 		},
-		{name: "empty", check: func(err error) bool { return errors.Is(err, ratel.ErrInvalidQuery) }},
+		{
+			name: "empty", command: ratel.NewCommand(""),
+			check: func(err error) bool { return errors.Is(err, ratel.ErrInvalidQuery) },
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			executor := staticExecutor{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-				if sql != tc.statement.SQL || len(args) == 0 || args[0] != pgx.QueryExecModeExec {
+				if sql != tc.sql || len(args) == 0 || args[0] != pgx.QueryExecModeExec {
 					t.Fatalf("exec(%q, %v)", sql, args)
 				}
 
@@ -69,7 +73,7 @@ func TestExec(t *testing.T) {
 			}}
 			database := ratel.New(executor, ratel.WithExecMode(pgx.QueryExecModeExec))
 
-			got, err := database.Exec(t.Context(), tc.statement)
+			got, err := database.Run(tc.command).Exec(t.Context())
 			if !tc.check(err) || (err == nil && got != tc.want) {
 				t.Fatalf("Exec() = %d, %v", got, err)
 			}
@@ -165,7 +169,7 @@ func TestBwStaticInvalid(t *testing.T) {
 
 	for name, run := range map[string]func() error{
 		"exec without a database": func() error {
-			_, err := missing.Exec(t.Context(), ratel.Statement{SQL: "DELETE FROM app.users"})
+			_, err := missing.Run(ratel.NewCommand("DELETE FROM app.users")).Exec(t.Context())
 
 			return err
 		},
@@ -303,10 +307,10 @@ func BenchmarkExec(b *testing.B) {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}}
 	database := ratel.New(executor)
-	statement := ratel.Statement{SQL: "UPDATE app.users SET email = $1", Args: []any{"a"}}
+	command := ratel.NewCommand("UPDATE app.users SET email = $1", "a")
 
 	for b.Loop() {
-		if _, err := database.Exec(b.Context(), statement); err != nil {
+		if _, err := database.Run(command).Exec(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -65,7 +65,24 @@ func Constraints[M any](constraints ...ConstraintError) TableOption[M] {
 	}
 }
 
-func mapWriteError[M any](err error, table Table[M]) error {
+// writeTarget is what write-error mapping needs of a table: its identity and
+// constraint column metadata. The zero value is a static statement's target.
+type writeTarget struct {
+	schema      string
+	name        string
+	constraints []ConstraintError
+}
+
+func (t Table[M]) target() writeTarget {
+	target := writeTarget{schema: t.schema, name: t.name}
+	if t.tableMeta != nil {
+		target.constraints = t.constraints
+	}
+
+	return target
+}
+
+func mapWriteError(err error, table writeTarget) error {
 	if err == nil {
 		return nil
 	}

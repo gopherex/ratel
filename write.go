@@ -1,7 +1,6 @@
 package ratel
 
 import (
-	"context"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
@@ -9,9 +8,10 @@ import (
 
 const deleteOperation = "DELETE"
 
-// Write is an immutable UPDATE or DELETE builder. WHERE or All is mandatory.
+// Write is an immutable UPDATE or DELETE statement. WHERE or All is mandatory.
+// It is a value: Build renders it, db.Run(write).Exec executes it, and
+// Returning turns it into a row query.
 type Write[M any] struct {
-	db          *DB
 	table       Table[M]
 	operation   string
 	assignments []Assignment[M]
@@ -23,13 +23,13 @@ type Write[M any] struct {
 }
 
 // Update starts an UPDATE, including for a table without a primary key.
-func (db *DB) Update[M, I any](table Writable[M, I]) Write[M] {
-	return Write[M]{db: db, table: table.ratelWrite().Table, operation: "UPDATE"}
+func (t WriteTable[M, I]) Update() Write[M] {
+	return Write[M]{table: t.Table, operation: "UPDATE"}
 }
 
 // Delete starts a DELETE, including for a table without a primary key.
-func (db *DB) Delete[M, I any](table Writable[M, I]) Write[M] {
-	return Write[M]{db: db, table: table.ratelWrite().Table, operation: deleteOperation}
+func (t WriteTable[M, I]) Delete() Write[M] {
+	return Write[M]{table: t.Table, operation: deleteOperation}
 }
 
 // Set appends model-typed assignments. Duplicate and unknown columns are invalid.
@@ -58,11 +58,17 @@ func (q Write[M]) All() Write[M] {
 	return q
 }
 
-// SQL renders one parameterized statement, rejecting unsafe writes.
-func (q Write[M]) SQL() (Statement, error) {
+// Build renders the one parameterized statement, rejecting unsafe writes.
+func (q Write[M]) Build() (string, []any, error) {
+	rendered, err := q.render()
+
+	return rendered.SQL, rendered.Args, err
+}
+
+func (q Write[M]) render() (stmt, error) {
 	if q.invalid || !q.table.valid() || (!q.hasWhere && !q.all) ||
 		(q.operation == deleteOperation && len(q.assignments) > 0) {
-		return Statement{}, ErrInvalidQuery
+		return stmt{}, ErrInvalidQuery
 	}
 
 	writer := newSQLWriter()
@@ -75,14 +81,14 @@ func (q Write[M]) SQL() (Statement, error) {
 	writer.WriteByte(' ')
 
 	if err := q.table.render(writer); err != nil {
-		return Statement{}, err
+		return stmt{}, err
 	}
 
 	writer.WriteString(` AS "q"`)
 
 	if q.operation == "UPDATE" {
 		if err := q.appendAssignments(writer); err != nil {
-			return Statement{}, err
+			return stmt{}, err
 		}
 	}
 
@@ -92,10 +98,10 @@ func (q Write[M]) SQL() (Statement, error) {
 	}
 
 	if writer.invalid {
-		return Statement{}, ErrInvalidQuery
+		return stmt{}, ErrInvalidQuery
 	}
 
-	return writer.statement(), nil
+	return writer.result(), nil
 }
 
 func (q Write[M]) appendAssignments(writer *sqlWriter) error {
@@ -126,32 +132,55 @@ func (q Write[M]) appendAssignments(writer *sqlWriter) error {
 	return nil
 }
 
-// Exec executes the write and returns affected rows.
-func (q Write[M]) Exec(ctx context.Context, options ...CallOption) (int64, error) {
-	statement, err := q.SQL()
-	if err != nil {
-		return 0, err
-	}
+// Returning adds RETURNING of every model column and turns the write into a
+// row query: db.Run gives it One, First, List and All, scanned by the
+// descriptor, including defaults and BEFORE trigger values.
+func (q Write[M]) Returning() WriteReturning[M] { return WriteReturning[M]{write: q} }
 
-	result, err := executeWrite(ctx, q.db, q.table, []Statement{statement}, false, options)
-	if err == nil && result.count == 0 && q.missing != "" {
-		return 0, q.missing
-	}
+// WriteReturning is an UPDATE or DELETE with RETURNING, a row query.
+type WriteReturning[M any] struct{ write Write[M] }
 
-	return result.count, err
+// Build renders the one parameterized statement with its RETURNING clause.
+func (q WriteReturning[M]) Build() (string, []any, error) {
+	rendered, err := q.render()
+
+	return rendered.SQL, rendered.Args, err
 }
 
-// Returning executes the write and scans every returned row into the model.
-func (q Write[M]) Returning(ctx context.Context, options ...CallOption) ([]M, error) {
-	statement, err := q.SQL()
+func (q WriteReturning[M]) render() (stmt, error) {
+	rendered, err := q.write.render()
 	if err != nil {
-		return nil, err
+		return stmt{}, err
 	}
 
-	result, err := executeWrite(ctx, q.db, q.table, []Statement{statement}, true, options)
-	if err == nil && len(result.models) == 0 && q.missing != "" {
-		return nil, q.missing
-	}
-
-	return result.models, err
+	return returning(rendered, q.write.table), nil
 }
+
+// returning appends RETURNING of every column of the table to a statement.
+func returning[M any](rendered stmt, table Table[M]) stmt {
+	rendered.SQL += " RETURNING " + table.projection
+
+	return rendered
+}
+
+func (q Write[M]) execPlan() execPlan {
+	rendered, err := q.render()
+
+	return execPlan{
+		plan:   plan{head: rendered, err: err, missing: q.missing},
+		target: q.table.target(),
+	}
+}
+
+func (q Write[M]) bind(db *DB) ExecRunner { return ExecRunner{db: db, plan: q.execPlan()} }
+
+func (q WriteReturning[M]) rowsPlan() rowsPlan[M] {
+	rendered, err := q.render()
+
+	return rowsPlan[M]{
+		plan:  plan{head: rendered, err: err, missing: q.write.missing},
+		table: q.write.table, write: true,
+	}
+}
+
+func (q WriteReturning[M]) bind(db *DB) RowRunner[M] { return RowRunner[M]{db: db, plan: q.rowsPlan()} }

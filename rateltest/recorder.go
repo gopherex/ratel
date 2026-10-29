@@ -7,8 +7,6 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/gopherex/ratel"
 )
 
 // Recorder is a concurrency-safe pgx QueryTracer, BatchTracer and CopyFromTracer.
@@ -17,36 +15,42 @@ import (
 // copies: mutable argument values retain pgx's caller-owned lifetime contract.
 // SQL and arguments may contain secrets; the recorder never logs either.
 type Recorder struct {
-	mutex      sync.Mutex
-	statements []ratel.Statement
+	mutex   sync.Mutex
+	queries []Query
 }
 
-// Statements returns an independent snapshot in trace-start order.
-func (recorder *Recorder) Statements() []ratel.Statement {
+// Query is one statement the recorder saw: its SQL text and ordered arguments.
+type Query struct {
+	SQL  string
+	Args []any
+}
+
+// Queries returns an independent snapshot in trace-start order.
+func (recorder *Recorder) Queries() []Query {
 	recorder.mutex.Lock()
 	defer recorder.mutex.Unlock()
 
-	statements := slices.Clone(recorder.statements)
-	for index := range statements {
-		statements[index].Args = slices.Clone(statements[index].Args)
+	queries := slices.Clone(recorder.queries)
+	for index := range queries {
+		queries[index].Args = slices.Clone(queries[index].Args)
 	}
 
-	return statements
+	return queries
 }
 
-// Reset clears recorded statements without changing the tracer configuration.
+// Reset clears recorded queries without changing the tracer configuration.
 func (recorder *Recorder) Reset() {
 	recorder.mutex.Lock()
 	defer recorder.mutex.Unlock()
 
-	recorder.statements = nil
+	recorder.queries = nil
 }
 
 func (recorder *Recorder) record(sql string, args []any) {
 	recorder.mutex.Lock()
 	defer recorder.mutex.Unlock()
 
-	recorder.statements = append(recorder.statements, ratel.Statement{SQL: sql, Args: slices.Clone(args)})
+	recorder.queries = append(recorder.queries, Query{SQL: sql, Args: slices.Clone(args)})
 }
 
 // TraceQueryStart records one attempted query.

@@ -18,13 +18,13 @@ func ratelLibrary(conn connections) library {
 	return library{
 		name: "ratel",
 		one: func(ctx context.Context, id int64) (string, error) {
-			user, err := database.From(public.Users).Where(public.Users.ID.Eq(id)).One(ctx)
+			user, err := database.Run(public.Users.Select().Where(public.Users.ID.Eq(id))).One(ctx)
 
 			return user.Email, err
 		},
 		list: func(ctx context.Context, after int64) ([]string, error) {
-			users, err := database.From(public.Users).Where(public.Users.ID.Gt(after)).
-				OrderBy(public.Users.ID.Asc()).Limit(pageSize).List(ctx)
+			users, err := database.Run(public.Users.Select().Where(public.Users.ID.Gt(after)).
+				OrderBy(public.Users.ID.Asc()).Limit(pageSize)).List(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("list: %w", err)
 			}
@@ -37,23 +37,23 @@ func ratelLibrary(conn connections) library {
 			return emails, nil
 		},
 		insert: func(ctx context.Context, user newUser) error {
-			_, err := database.Insert(public.Users, public.NewUserInsert(user.email, user.name)).Exec(ctx)
+			_, err := database.Run(public.Users.Insert(public.Users.Row().Email(user.email).Name(user.name))).Exec(ctx)
 
 			return err
 		},
 		insertBatch: func(ctx context.Context, users []newUser) error {
 			rows := make([]public.UserInsert, len(users))
 			for index, user := range users {
-				rows[index] = public.NewUserInsert(user.email, user.name)
+				rows[index] = public.Users.Row().Email(user.email).Name(user.name)
 			}
 
-			_, err := database.Insert(public.Users, rows...).Exec(ctx)
+			_, err := database.Run(public.Users.Insert(rows...)).Exec(ctx)
 
 			return err
 		},
 		relations: func(ctx context.Context) (int, error) {
-			users, err := database.From(public.Users).Where(public.Users.ID.Gt(0)).OrderBy(public.Users.ID.Asc()).
-				Limit(pageSize).With(public.Users.Orders).List(ctx)
+			users, err := database.Run(public.Users.Select().Where(public.Users.ID.Gt(0)).OrderBy(public.Users.ID.Asc()).
+				Limit(pageSize).With(public.Users.Orders)).List(ctx)
 			if err != nil {
 				return 0, fmt.Errorf("relations: %w", err)
 			}
@@ -72,7 +72,8 @@ func ratelLibrary(conn connections) library {
 			return count, nil
 		},
 		update: func(ctx context.Context, id int64, name string) error {
-			_, err := database.Update(public.Users).Set(public.Users.Name.To(name)).Where(public.Users.ID.Eq(id)).Exec(ctx)
+			_, err := database.Run(public.Users.Update().Set(public.Users.Name.To(name)).
+				Where(public.Users.ID.Eq(id))).Exec(ctx)
 
 			return err
 		},

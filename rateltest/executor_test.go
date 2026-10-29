@@ -25,7 +25,7 @@ func TestExecutorRuntime(t *testing.T) {
 		return value, err
 	})
 
-	values, err := ratel.New(executor).From(table).List(t.Context())
+	values, err := ratel.New(executor).Run(table.Select()).List(t.Context())
 	if err != nil || len(values) != 1 || values[0] != 7 {
 		t.Fatalf("runtime list = %v, %v", values, err)
 	}

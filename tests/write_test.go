@@ -185,7 +185,7 @@ func writeInsertModes(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 
 	records := recordDescriptor()
-	database := ratel.New(pool, ratel.WithBatchRows(2))
+	database := ratel.New(pool)
 
 	for _, mode := range []pgx.QueryExecMode{
 		pgx.QueryExecModeCacheStatement, pgx.QueryExecModeCacheDescribe,
@@ -198,7 +198,8 @@ func writeInsertModes(t *testing.T, pool *pgxpool.Pool) {
 		third := newRecordInsert(prefix + "-c")
 		third.Note = ratel.OptFrom(ratel.NullFrom("custom"))
 
-		rows, err := database.Insert(records, first, second, third).Returning(t.Context(), ratel.ExecMode(mode))
+		rows, err := database.Run(records.Insert(first, second, third).Chunk(2).Returning()).
+			List(t.Context(), ratel.ExecMode(mode))
 		if err != nil || len(rows) != 3 {
 			t.Fatalf("%v: %+v %v", mode, rows, err)
 		}
@@ -213,7 +214,7 @@ func writeInsertModes(t *testing.T, pool *pgxpool.Pool) {
 		second = newRecordInsert(prefix + "-array-b")
 		second.Labels = ratel.OptFrom([]int64(nil))
 
-		rows, err = database.Insert(records, first, second).Returning(t.Context(), ratel.ExecMode(mode))
+		rows, err = database.Run(records.Insert(first, second).Chunk(2).Returning()).List(t.Context(), ratel.ExecMode(mode))
 		if err != nil || len(rows) != 2 || len(rows[0].Labels) != 2 || rows[1].Labels != nil {
 			t.Fatalf("%+v %v", rows, err)
 		}
@@ -235,26 +236,26 @@ func writeUpsertModes(t *testing.T, pool *pgxpool.Pool) {
 		first.Note = ratel.OptFrom(ratel.NullFrom("old"))
 		second.Note = first.Note
 
-		initial, err := database.Insert(records, first, second).Returning(t.Context(), ratel.ExecMode(mode))
+		initial, err := database.Run(records.Insert(first, second).Returning()).List(t.Context(), ratel.ExecMode(mode))
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		first.Note = ratel.OptFrom(ratel.NullFrom("new"))
 		second.Note = first.Note
-		query := database.Upsert(records, first, second).OnConflict(records.Email).Update(records.Note)
+		query := records.Upsert(first, second).OnConflict(records.Email).Update(records.Note)
 
-		statement, err := query.SQL()
-		if err != nil || !strings.Contains(statement.SQL, "unnest(") {
+		statement, _, err := query.Build()
+		if err != nil || !strings.Contains(statement, "unnest(") {
 			t.Fatalf("%+v %v", statement, err)
 		}
 
-		rows, err := query.Returning(t.Context(), ratel.ExecMode(mode))
+		rows, err := database.Run(query.Returning()).List(t.Context(), ratel.ExecMode(mode))
 		if err != nil || len(rows) != 2 || rows[0].ID != initial[0].ID || rows[0].Note.V != "new" {
 			t.Fatalf("%+v %v", rows, err)
 		}
 
-		count, err := database.Upsert(records, first, second).OnConflict(records.Email).DoNothing().
+		count, err := database.Run(records.Upsert(first, second).OnConflict(records.Email).DoNothing()).
 			Exec(t.Context(), ratel.ExecMode(mode))
 		if err != nil || count != 0 {
 			t.Fatalf("%d %v", count, err)
@@ -268,25 +269,26 @@ func writeMutations(t *testing.T, pool *pgxpool.Pool) {
 	records := recordDescriptor()
 	database := ratel.New(pool)
 
-	rows, err := database.Insert(records, newRecordInsert("mutate")).Returning(t.Context())
+	rows, err := database.Run(records.Insert(newRecordInsert("mutate")).Returning()).List(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	identity := rows[0].ID
 
-	rows, err = database.Update(records).Set(records.Note.To(ratel.NullFrom("changed"))).Where(records.ID.Eq(identity)).
-		Where(records.Email.Eq("mutate")).Returning(t.Context())
+	rows, err = database.Run(records.Update().Set(records.Note.To(ratel.NullFrom("changed"))).
+		Where(records.ID.Eq(identity)).
+		Where(records.Email.Eq("mutate")).Returning()).List(t.Context())
 	if err != nil || len(rows) != 1 || rows[0].Note.V != "changed" {
 		t.Fatalf("%+v %v", rows, err)
 	}
 
-	rows, err = database.Delete(records).Where(records.ID.Eq(identity)).Returning(t.Context())
+	rows, err = database.Run(records.Delete().Where(records.ID.Eq(identity)).Returning()).List(t.Context())
 	if err != nil || len(rows) != 1 || rows[0].ID != identity {
 		t.Fatalf("%+v %v", rows, err)
 	}
 
-	count, err := database.Delete(records).Where(records.ID.Eq(identity)).Exec(t.Context())
+	count, err := database.Run(records.Delete().Where(records.ID.Eq(identity))).Exec(t.Context())
 	if err != nil || count != 0 {
 		t.Fatalf("%d %v", count, err)
 	}
@@ -302,7 +304,7 @@ func writeConstraints(t *testing.T, pool *pgxpool.Pool) {
 		Lower: 1, Upper: 5, LowerType: pgtype.Inclusive, UpperType: pgtype.Exclusive, Valid: true,
 	})
 
-	if _, err := database.Insert(records, seed).Exec(t.Context()); err != nil {
+	if _, err := database.Run(records.Insert(seed)).Exec(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -336,7 +338,7 @@ func writeConstraints(t *testing.T, pool *pgxpool.Pool) {
 		tc := &cases[index]
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := database.Insert(records, tc.row).Returning(t.Context())
+			_, err := database.Run(records.Insert(tc.row).Returning()).List(t.Context())
 
 			var constraint *ratel.ConstraintError
 
@@ -358,8 +360,8 @@ func writeConstraints(t *testing.T, pool *pgxpool.Pool) {
 		})
 	}
 	// A nullable assignment can still reach a NOT NULL column through generated metadata.
-	_, err := database.Update(records).Set(ratel.NewNullCol[writeRecord, string]("email").To(ratel.Null[string]{})).
-		Where(records.Email.Eq(seed.email)).Exec(t.Context())
+	_, err := database.Run(records.Update().Set(ratel.NewNullCol[writeRecord, string]("email").To(ratel.Null[string]{})).
+		Where(records.Email.Eq(seed.email))).Exec(t.Context())
 
 	var constraint *ratel.ConstraintError
 
@@ -372,7 +374,7 @@ func writeChunkAtomicity(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 
 	records := recordDescriptor()
-	if _, err := ratel.New(pool).Insert(records, newRecordInsert("chunk-existing")).Exec(t.Context()); err != nil {
+	if _, err := ratel.New(pool).Run(records.Insert(newRecordInsert("chunk-existing"))).Exec(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -397,9 +399,8 @@ func writeChunkAtomicity(t *testing.T, pool *pgxpool.Pool) {
 			defer rollback()
 
 			email := fmt.Sprintf("chunk-%v", transactional)
-			query := ratel.New(executor, ratel.WithBatchRows(1)).Insert(records,
-				newRecordInsert(email), newRecordInsert("chunk-existing"))
-			rows, err := query.Returning(t.Context())
+			query := records.Insert(newRecordInsert(email), newRecordInsert("chunk-existing")).Chunk(1)
+			rows, err := ratel.New(executor).Run(query.Returning()).List(t.Context())
 
 			var constraint *ratel.ConstraintError
 			if !errors.As(err, &constraint) || constraint.Kind != ratel.ConstraintUnique || rows != nil {
@@ -408,7 +409,7 @@ func writeChunkAtomicity(t *testing.T, pool *pgxpool.Pool) {
 
 			rollback()
 
-			models, err := ratel.New(pool).From(records).Where(records.Email.Eq(email)).List(t.Context())
+			models, err := ratel.New(pool).Run(records.Select().Where(records.Email.Eq(email))).List(t.Context())
 			want := 1
 
 			if transactional {
@@ -461,7 +462,7 @@ func writeConnectionKill(t *testing.T, pool *pgxpool.Pool) {
 	go func() {
 		defer close(done)
 
-		_, failure := ratel.New(victim.Conn()).Insert(recordDescriptor(), newRecordInsert("hang")).Exec(ctx)
+		_, failure := ratel.New(victim.Conn()).Run(recordDescriptor().Insert(newRecordInsert("hang"))).Exec(ctx)
 		result <- failure
 	}()
 
@@ -492,8 +493,8 @@ func writeConnectionKill(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatalf("partial write: %d %v", count, err)
 	}
 
-	query := ratel.New(pool).Insert(recordDescriptor(), newRecordInsert(fmt.Sprintf("recovered-%d", pid)))
-	if _, err = query.Exec(ctx); err != nil {
+	query := recordDescriptor().Insert(newRecordInsert(fmt.Sprintf("recovered-%d", pid)))
+	if _, err = ratel.New(pool).Run(query).Exec(ctx); err != nil {
 		t.Fatal(err)
 	}
 }

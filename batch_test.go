@@ -94,10 +94,10 @@ func TestBatch(t *testing.T) {
 			)
 
 			err := database.Batch(t.Context(),
-				database.From(users).Batch(&all),
-				database.From(users).Where(users.ID.Eq(3)).BatchOne(&one),
-				database.Update(writes).Set(writes.Email.To("a")).All().Batch(&updated),
-				database.Insert(writes, newWriteInsert("b")).Batch(&added),
+				ratel.List(ratel.From(users), &all),
+				ratel.One(ratel.From(users).Where(users.ID.Eq(3)), &one),
+				ratel.Exec(writes.Update().Set(writes.Email.To("a")).All(), &updated),
+				ratel.Exec(writes.Insert(newWriteInsert("b")), &added),
 			)
 
 			if !errors.Is(err, tc.want) || queued != tc.queued || !tc.results.closed {
@@ -119,7 +119,7 @@ func TestBatchInvalid(t *testing.T) {
 
 	var count int64
 
-	err := db.Batch(t.Context(), ratel.ExecItem(ratel.Statement{}, &count))
+	err := db.Batch(t.Context(), ratel.Exec(ratel.NewCommand(""), &count))
 	if !errors.Is(err, ratel.ErrInvalidQuery) || queued != -1 {
 		t.Fatalf("Batch() = %v, sent = %v", err, queued != -1)
 	}
@@ -205,15 +205,15 @@ func TestBwBatchOutcomes(t *testing.T) {
 			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var all []readUser
 
-				return []ratel.BatchItem{ratel.Select[readUser]{}.Batch(&all)}, nil
+				return []ratel.BatchItem{ratel.List(ratel.Select[readUser]{}, &all)}, nil
 			},
 			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidQuery, queued: -1,
 		},
 		"invalid item after a valid one": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var all, none []readUser
 
-				return []ratel.BatchItem{db.From(users).Batch(&all), ratel.Select[readUser]{}.Batch(&none)}, nil
+				return []ratel.BatchItem{ratel.List(ratel.From(users), &all), ratel.List(ratel.Select[readUser]{}, &none)}, nil
 			},
 			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidQuery, queued: -1,
 		},
@@ -221,39 +221,39 @@ func TestBwBatchOutcomes(t *testing.T) {
 			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var one readUser
 
-				return []ratel.BatchItem{ratel.Select[readUser]{}.BatchOne(&one)}, nil
+				return []ratel.BatchItem{ratel.One(ratel.Select[readUser]{}, &one)}, nil
 			},
 			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidQuery, queued: -1,
 		},
 		"invalid write": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var count int64
 
-				return []ratel.BatchItem{db.Update(writes).Set(writes.Email.To("a")).Batch(&count)}, nil
+				return []ratel.BatchItem{ratel.Exec(writes.Update().Set(writes.Email.To("a")), &count)}, nil
 			},
 			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidQuery, queued: -1,
 		},
 		"invalid insert": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var count int64
 
-				return []ratel.BatchItem{db.Insert(writes).Batch(&count)}, nil
+				return []ratel.BatchItem{ratel.Exec(writes.Insert(), &count)}, nil
 			},
 			res: func() *bwResults { return &bwResults{} }, want: ratel.ErrInvalidInsert, queued: -1,
 		},
 		"query failure": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var all []readUser
 
-				return []ratel.BatchItem{db.From(users).Batch(&all)}, nil
+				return []ratel.BatchItem{ratel.List(ratel.From(users), &all)}, nil
 			},
 			res: func() *bwResults { return &bwResults{queryErr: offline} }, want: offline, queued: 1,
 		},
 		"scan failure": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var all []readUser
 
-				return []ratel.BatchItem{db.From(users).Batch(&all)}, func() bool { return all == nil }
+				return []ratel.BatchItem{ratel.List(ratel.From(users), &all)}, func() bool { return all == nil }
 			},
 			res: func() *bwResults {
 				return &bwResults{rows: []*readRows{{ids: []int64{1}, scanFailure: scanFailure}}}
@@ -261,37 +261,37 @@ func TestBwBatchOutcomes(t *testing.T) {
 			want: scanFailure, queued: 1,
 		},
 		"iteration failure": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var all []readUser
 
-				return []ratel.BatchItem{db.From(users).Batch(&all)}, func() bool { return all == nil }
+				return []ratel.BatchItem{ratel.List(ratel.From(users), &all)}, func() bool { return all == nil }
 			},
 			res:  func() *bwResults { return &bwResults{rows: []*readRows{{failure: iterFailure}}} },
 			want: iterFailure, queued: 1,
 		},
 		"one without rows": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var one readUser
 
-				return []ratel.BatchItem{db.From(users).BatchOne(&one)}, func() bool { return one == readUser{} }
+				return []ratel.BatchItem{ratel.One(ratel.From(users), &one)}, func() bool { return one == readUser{} }
 			},
 			res:  func() *bwResults { return &bwResults{rows: []*readRows{{}}} },
 			want: ratel.ErrNotFound, queued: 1,
 		},
 		"one with many rows": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var one readUser
 
-				return []ratel.BatchItem{db.From(users).BatchOne(&one)}, func() bool { return one == readUser{} }
+				return []ratel.BatchItem{ratel.One(ratel.From(users), &one)}, func() bool { return one == readUser{} }
 			},
 			res:  func() *bwResults { return &bwResults{rows: []*readRows{{ids: []int64{1, 2}}}} },
 			want: ratel.ErrMultipleRows, queued: 1,
 		},
 		"one query failure": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var one readUser
 
-				return []ratel.BatchItem{db.From(users).BatchOne(&one)}, nil
+				return []ratel.BatchItem{ratel.One(ratel.From(users), &one)}, nil
 			},
 			res: func() *bwResults { return &bwResults{queryErr: offline} }, want: offline, queued: 1,
 		},
@@ -299,7 +299,7 @@ func TestBwBatchOutcomes(t *testing.T) {
 			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var count int64
 
-				item := ratel.ExecItem(ratel.Statement{SQL: "DELETE FROM app.users WHERE id = $1", Args: []any{1}}, &count)
+				item := ratel.Exec(ratel.NewCommand("DELETE FROM app.users WHERE id = $1", 1), &count)
 
 				return []ratel.BatchItem{item}, func() bool { return count == 3 }
 			},
@@ -309,7 +309,7 @@ func TestBwBatchOutcomes(t *testing.T) {
 			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var count int64
 
-				return []ratel.BatchItem{ratel.ExecItem(ratel.Statement{SQL: "INSERT INTO app.users"}, &count)},
+				return []ratel.BatchItem{ratel.Exec(ratel.NewCommand("INSERT INTO app.users"), &count)},
 					func() bool { return count == 0 }
 			},
 			res:  func() *bwResults { return &bwResults{execErr: unique} },
@@ -319,24 +319,24 @@ func TestBwBatchOutcomes(t *testing.T) {
 			items: func(*ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var count int64
 
-				return []ratel.BatchItem{ratel.ExecItem(ratel.Statement{SQL: "DELETE FROM app.users"}, &count)}, nil
+				return []ratel.BatchItem{ratel.Exec(ratel.NewCommand("DELETE FROM app.users"), &count)}, nil
 			},
 			res: func() *bwResults { return &bwResults{execErr: offline} }, want: offline, queued: 1,
 		},
 		"close failure": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var all []readUser
 
-				return []ratel.BatchItem{db.From(users).Batch(&all)}, nil
+				return []ratel.BatchItem{ratel.List(ratel.From(users), &all)}, nil
 			},
 			res:  func() *bwResults { return &bwResults{rows: []*readRows{{ids: []int64{1}}}, closeErr: closeFailure} },
 			want: closeFailure, queued: 1,
 		},
 		"item failure wins over close failure": {
-			items: func(db *ratel.DB) ([]ratel.BatchItem, func() bool) {
+			items: func(_ *ratel.DB) ([]ratel.BatchItem, func() bool) {
 				var all []readUser
 
-				return []ratel.BatchItem{db.From(users).Batch(&all)}, nil
+				return []ratel.BatchItem{ratel.List(ratel.From(users), &all)}, nil
 			},
 			res:  func() *bwResults { return &bwResults{queryErr: offline, closeErr: closeFailure} },
 			want: offline, queued: 1,
@@ -386,13 +386,13 @@ func TestBatchRowWrites(t *testing.T) {
 		count int64
 	}{
 		{
-			"delete missing", func(db *ratel.DB) ratel.Write[readUser] { return db.DeleteRow(users, user) }, "DELETE 0",
+			"delete missing", func(_ *ratel.DB) ratel.Write[readUser] { return users.DeleteRow(user) }, "DELETE 0",
 			ratel.ErrNotFound, 0,
 		},
-		{"stale version", func(db *ratel.DB) ratel.Write[readUser] {
-			return db.Save(users, user).ExpectVersion(users.Email, "old")
+		{"stale version", func(_ *ratel.DB) ratel.Write[readUser] {
+			return users.Save(user).ExpectVersion(users.Email, "old")
 		}, "UPDATE 0", ratel.ErrStaleVersion, 0},
-		{"saved", func(db *ratel.DB) ratel.Write[readUser] { return db.Save(users, user) }, "UPDATE 1", nil, 1},
+		{"saved", func(_ *ratel.DB) ratel.Write[readUser] { return users.Save(user) }, "UPDATE 1", nil, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -402,7 +402,7 @@ func TestBatchRowWrites(t *testing.T) {
 
 			var count int64
 
-			if err := db.Batch(t.Context(), tc.write(db).Batch(&count)); !errors.Is(err, tc.want) || count != tc.count {
+			if err := db.Batch(t.Context(), ratel.Exec(tc.write(db), &count)); !errors.Is(err, tc.want) || count != tc.count {
 				t.Fatalf("Batch() = %v, count %d; want %v, %d", err, count, tc.want, tc.count)
 			}
 		})
@@ -426,7 +426,7 @@ func TestBwBatchEmptyRowsKeepEmptySlice(t *testing.T) {
 	db := ratel.New(bwBatchExecutor{results: &bwResults{rows: []*readRows{{}}}, queued: &queued})
 	all := []readUser{{ID: 9}}
 
-	if err := db.Batch(t.Context(), db.From(userDescriptor()).Batch(&all)); err != nil {
+	if err := db.Batch(t.Context(), ratel.List(ratel.From(userDescriptor()), &all)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -443,21 +443,21 @@ func BenchmarkBwBatchOne(b *testing.B) {
 		db := ratel.New(bwBatchExecutor{results: &bwResults{rows: []*readRows{{ids: []int64{1}}}}, queued: &queued})
 
 		var one readUser
-		if err := db.Batch(b.Context(), db.From(users).BatchOne(&one)); err != nil {
+		if err := db.Batch(b.Context(), ratel.One(ratel.From(users), &one)); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkBwExecItem(b *testing.B) {
-	statement := ratel.Statement{SQL: "DELETE FROM app.users WHERE id = $1", Args: []any{1}}
+func BenchmarkBwExecCommand(b *testing.B) {
+	command := ratel.NewCommand("DELETE FROM app.users WHERE id = $1", 1)
 
 	for b.Loop() {
 		queued := 0
 		db := ratel.New(bwBatchExecutor{results: &bwResults{tags: []string{"DELETE 1"}}, queued: &queued})
 
 		var count int64
-		if err := db.Batch(b.Context(), ratel.ExecItem(statement, &count)); err != nil {
+		if err := db.Batch(b.Context(), ratel.Exec(command, &count)); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -471,7 +471,7 @@ func BenchmarkBatch(b *testing.B) {
 		db := ratel.New(batchExecutor{results: &batchResults{queries: [][]int64{{1}}}, queued: &queued})
 
 		var all []readUser
-		if err := db.Batch(b.Context(), db.From(users).Batch(&all)); err != nil {
+		if err := db.Batch(b.Context(), ratel.List(ratel.From(users), &all)); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -485,11 +485,11 @@ func BenchmarkBatchWrites(b *testing.B) {
 		tag  string
 		item func(db *ratel.DB, count *int64) ratel.BatchItem
 	}{
-		{"update", "UPDATE 1", func(db *ratel.DB, count *int64) ratel.BatchItem {
-			return db.Update(users).Set(users.Email.To("b")).Where(users.ID.Eq(1)).Batch(count)
+		{"update", "UPDATE 1", func(_ *ratel.DB, count *int64) ratel.BatchItem {
+			return ratel.Exec(users.Update().Set(users.Email.To("b")).Where(users.ID.Eq(1)), count)
 		}},
-		{"insert", "INSERT 0 1", func(db *ratel.DB, count *int64) ratel.BatchItem {
-			return db.Insert(users, newWriteInsert("a")).Batch(count)
+		{"insert", "INSERT 0 1", func(_ *ratel.DB, count *int64) ratel.BatchItem {
+			return ratel.Exec(users.Insert(newWriteInsert("a")), count)
 		}},
 	} {
 		b.Run(tc.name, func(b *testing.B) {

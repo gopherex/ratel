@@ -10,6 +10,10 @@ import (
 	"github.com/gopherex/ratel/plugin/pluginpb"
 )
 
+// codeCollision is the diagnostic code of two generated Go identifiers that
+// are the same.
+const codeCollision = "RTL-G05"
+
 // unit accumulates a generated file's body and imports.
 type unit struct {
 	schema   string // PostgreSQL schema of the package
@@ -31,7 +35,7 @@ func (u *unit) use(t goType) string {
 // identifier is a generation error naming both.
 func (u *unit) declare(identifier, source string) error {
 	if previous, exists := u.names[identifier]; exists {
-		return &plugin.Error{Code: "RTL-G05", Message: "Go identifier " + identifier + " of " + source +
+		return &plugin.Error{Code: codeCollision, Message: "Go identifier " + identifier + " of " + source +
 			" collides with " + previous}
 	}
 

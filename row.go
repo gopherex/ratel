@@ -6,15 +6,9 @@ import "slices"
 // writer changed the version, or the row is gone.
 const ErrStaleVersion refusal = "ratel: stale version"
 
-// Keyed is implemented only by generated descriptors of tables with a primary
-// key; Save and DeleteRow take it, so a table without one cannot address a row
-// by identity.
-type Keyed[M, I any] interface {
-	Writable[M, I]
-	ratelKeyed() KeyedTable[M, I]
-}
-
-// KeyedTable is the write metadata of a table with a primary key.
+// KeyedTable is the write metadata of a table with a primary key. It is the
+// only table type with Save and DeleteRow, so a table without a key cannot
+// address a row by identity.
 type KeyedTable[M, I any] struct {
 	WriteTable[M, I]
 }
@@ -31,26 +25,23 @@ func (t KeyedTable[M, I]) InSchema(schema string) KeyedTable[M, I] {
 	return t
 }
 
-func (t KeyedTable[M, I]) ratelKeyed() KeyedTable[M, I] { return t }
-
 // Save updates the model's row by primary key: every insertable column that is
 // not part of the key takes the model's value. No matching row is
 // ErrNotFound; with ExpectVersion it is ErrStaleVersion.
-func (db *DB) Save[M, I any](table Keyed[M, I], model M) Write[M] {
-	keyed := table.ratelKeyed()
-	query := db.Update(keyed).byKey(model)
+func (t KeyedTable[M, I]) Save(model M) Write[M] {
+	query := t.Update().byKey(model)
 
-	if keyed.values == nil {
+	if t.values == nil {
 		query.invalid = true
 
 		return query
 	}
 
-	values := keyed.values(model)
+	values := t.values(model)
 
-	for index, column := range keyed.columns {
-		insertable := slices.ContainsFunc(keyed.fields, func(field InsertField[I]) bool { return field.Name == column })
-		if insertable && !slices.Contains(keyed.keys, column) && index < len(values) {
+	for index, column := range t.columns {
+		insertable := slices.ContainsFunc(t.fields, func(field InsertField[I]) bool { return field.Name == column })
+		if insertable && !slices.Contains(t.keys, column) && index < len(values) {
 			query.assignments = append(query.assignments, Assignment[M]{name: column, value: values[index]})
 		}
 	}
@@ -60,8 +51,8 @@ func (db *DB) Save[M, I any](table Keyed[M, I], model M) Write[M] {
 
 // DeleteRow deletes the model's row by primary key; no matching row is
 // ErrNotFound.
-func (db *DB) DeleteRow[M, I any](table Keyed[M, I], model M) Write[M] {
-	return db.Delete(table.ratelKeyed()).byKey(model)
+func (t KeyedTable[M, I]) DeleteRow(model M) Write[M] {
+	return t.Delete().byKey(model)
 }
 
 // byKey addresses one row by the model's primary key.

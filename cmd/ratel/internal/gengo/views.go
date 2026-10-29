@@ -29,7 +29,7 @@ func (s *state) view(file *unit, schema string, name *ir.QualifiedName, output [
 	names := tableNames(object)
 
 	for identifier := range names.all() {
-		if identifier == names.insert || identifier == names.constructor || identifier == names.base {
+		if identifier == names.insert || identifier == names.base {
 			continue
 		}
 

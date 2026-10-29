@@ -11,27 +11,27 @@ import (
 // Missing primary-key metadata, nonpositive sizes, or incompatible ordering
 // yield ErrInvalidQuery before executing SQL. Page reads do not share a snapshot
 // unless the caller's executor supplies a transaction.
-func (q Select[M]) Chunks(ctx context.Context, size int, options ...CallOption) iter.Seq2[[]M, error] {
+func (r SelectRunner[M]) Chunks(ctx context.Context, size int, options ...CallOption) iter.Seq2[[]M, error] {
 	return func(yield func([]M, error) bool) {
-		if !q.chunkable(size) {
+		if r.db == nil || !r.query.chunkable(size) {
 			yield(nil, ErrInvalidQuery)
 
 			return
 		}
 
-		if _, err := q.SQL(); err != nil {
+		if _, _, err := r.query.Build(); err != nil {
 			yield(nil, err)
 
 			return
 		}
 
-		q.pages(ctx, size, options, yield)
+		r.pages(ctx, size, options, yield)
 	}
 }
 
-func (q Select[M]) chunkable(size int) bool {
+func (q *Select[M]) chunkable(size int) bool {
 	table := q.source.table
-	if q.db == nil || size <= 0 || !table.valid() || len(table.keys) == 0 || table.keyValues == nil {
+	if size <= 0 || !table.valid() || len(table.keys) == 0 || table.keyValues == nil {
 		return false
 	}
 
@@ -62,12 +62,13 @@ func (q Select[M]) chunkable(size int) bool {
 	return true
 }
 
-func (q Select[M]) pages(ctx context.Context, size int, options []CallOption, yield func([]M, error) bool) {
-	remaining := q.limit
+func (r *SelectRunner[M]) pages(ctx context.Context, size int, options []CallOption, yield func([]M, error) bool) {
+	query := r.query
+	remaining := query.limit
 
-	q.orders = make([]Order[M], len(q.source.table.keys))
-	for index, key := range q.source.table.keys {
-		q.orders[index] = Order[M]{name: key}
+	query.orders = make([]Order[M], len(query.source.table.keys))
+	for index, key := range query.source.table.keys {
+		query.orders[index] = Order[M]{name: key}
 	}
 
 	var cursor []any
@@ -78,12 +79,12 @@ func (q Select[M]) pages(ctx context.Context, size int, options []CallOption, yi
 			count = remaining.V
 		}
 
-		pageQuery := q.Limit(count)
+		pageQuery := query.Limit(count)
 		if cursor != nil {
-			pageQuery = pageQuery.Where(q.afterKey(cursor))
+			pageQuery = pageQuery.Where(query.afterKey(cursor))
 		}
 
-		page, err := pageQuery.List(ctx, options...)
+		page, err := SelectRunner[M]{db: r.db, query: pageQuery}.List(ctx, options...)
 		if err != nil {
 			yield(nil, err)
 
@@ -94,8 +95,8 @@ func (q Select[M]) pages(ctx context.Context, size int, options []CallOption, yi
 			return
 		}
 
-		cursor = slices.Clone(q.source.table.keyValues(page[len(page)-1]))
-		if len(cursor) != len(q.source.table.keys) {
+		cursor = slices.Clone(query.source.table.keyValues(page[len(page)-1]))
+		if len(cursor) != len(query.source.table.keys) {
 			yield(nil, ErrInvalidQuery)
 
 			return
@@ -109,7 +110,7 @@ func (q Select[M]) pages(ctx context.Context, size int, options []CallOption, yi
 			remaining.V -= len(page)
 		}
 
-		q.offset = Opt[int]{}
+		query.offset = Opt[int]{}
 	}
 }
 

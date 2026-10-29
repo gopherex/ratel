@@ -95,7 +95,7 @@ func benchSeed(b *testing.B, pool *pgxpool.Pool, emails []string) []int64 {
 	b.Helper()
 	b.StopTimer()
 
-	records, err := ratel.New(pool).Insert(recordDescriptor(), benchInserts(emails)...).Returning(b.Context())
+	records, err := ratel.New(pool).Run(recordDescriptor().Insert(benchInserts(emails)...).Returning()).List(b.Context())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func BenchmarkWrite(b *testing.B) {
 			for b.Loop() {
 				benchReset(b, pool)
 
-				_, err := database.Insert(records, one...).Exec(b.Context())
+				_, err := database.Run(records.Insert(one...)).Exec(b.Context())
 				benchCheck(b, err)
 			}
 		}},
@@ -146,7 +146,7 @@ func BenchmarkWrite(b *testing.B) {
 			for b.Loop() {
 				benchReset(b, pool)
 
-				_, err := database.Insert(records, many...).Exec(b.Context())
+				_, err := database.Run(records.Insert(many...)).Exec(b.Context())
 				benchCheck(b, err)
 			}
 		}},
@@ -156,7 +156,7 @@ func BenchmarkWrite(b *testing.B) {
 			for b.Loop() {
 				benchReset(b, pool)
 
-				_, err := database.Insert(records, many...).Returning(b.Context())
+				_, err := database.Run(records.Insert(many...).Returning()).List(b.Context())
 				benchCheck(b, err)
 			}
 		}},
@@ -171,7 +171,7 @@ func BenchmarkWrite(b *testing.B) {
 
 			for b.Loop() {
 				score++
-				_, err := database.Update(records).Set(records.Score.To(score)).Where(records.ID.Eq(row)).Exec(b.Context())
+				_, err := database.Run(records.Update().Set(records.Score.To(score)).Where(records.ID.Eq(row))).Exec(b.Context())
 				benchCheck(b, err)
 			}
 		}},
@@ -182,7 +182,7 @@ func BenchmarkWrite(b *testing.B) {
 			benchSeed(b, pool, benchEmails("many", benchManyRows))
 
 			for b.Loop() {
-				_, err := database.Upsert(records, many...).OnConflict(records.Email).Update(records.Score).
+				_, err := database.Run(records.Upsert(many...).OnConflict(records.Email).Update(records.Score)).
 					Exec(b.Context())
 				benchCheck(b, err)
 			}
@@ -194,7 +194,7 @@ func BenchmarkWrite(b *testing.B) {
 			benchSeed(b, pool, benchEmails("many", benchManyRows))
 
 			for b.Loop() {
-				_, err := database.Upsert(records, many...).OnConflict(records.Email).DoNothing().Exec(b.Context())
+				_, err := database.Run(records.Upsert(many...).OnConflict(records.Email).DoNothing()).Exec(b.Context())
 				benchCheck(b, err)
 			}
 		}},
@@ -205,7 +205,7 @@ func BenchmarkWrite(b *testing.B) {
 
 			for b.Loop() {
 				id := benchSeed(b, pool, []string{"delete"})[0]
-				_, err := database.Delete(records).Where(records.ID.Eq(id)).Exec(b.Context())
+				_, err := database.Run(records.Delete().Where(records.ID.Eq(id))).Exec(b.Context())
 				benchCheck(b, err)
 			}
 		}},
@@ -220,7 +220,7 @@ func BenchmarkWrite(b *testing.B) {
 
 			for b.Loop() {
 				model.Score++
-				_, err := database.Save(keyed, model).Exec(b.Context())
+				_, err := database.Run(keyed.Save(model)).Exec(b.Context())
 				benchCheck(b, err)
 			}
 		}},
@@ -234,9 +234,9 @@ func BenchmarkWrite(b *testing.B) {
 
 				id := benchSeed(b, pool, []string{"batch-seed"})[0]
 				err := database.Batch(b.Context(),
-					database.Insert(records, many[:benchBatchRow]...).Batch(&inserted),
-					database.Update(records).Set(records.Score.To(int64(2))).Where(records.ID.Eq(id)).Batch(&updated),
-					database.Delete(records).Where(records.ID.Eq(id)).Batch(&deleted))
+					ratel.Exec(records.Insert(many[:benchBatchRow]...), &inserted),
+					ratel.Exec(records.Update().Set(records.Score.To(int64(2))).Where(records.ID.Eq(id)), &updated),
+					ratel.Exec(records.Delete().Where(records.ID.Eq(id)), &deleted))
 				benchCheck(b, err)
 			}
 		}},
@@ -259,7 +259,7 @@ func BenchmarkWrite(b *testing.B) {
 				transaction, err := pool.Begin(b.Context())
 				benchCheck(b, err)
 
-				_, err = ratel.New(transaction).Insert(records, many...).Exec(b.Context())
+				_, err = ratel.New(transaction).Run(records.Insert(many...)).Exec(b.Context())
 				benchCheck(b, err)
 				benchCheck(b, transaction.Commit(b.Context()))
 			}

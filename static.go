@@ -23,22 +23,6 @@ func (db *DB) arguments(options []CallOption, args []any) []any {
 	return args
 }
 
-// Exec runs a static statement, as generated for :exec and :execrows queries,
-// and returns the number of affected rows. An integrity violation is a
-// *ConstraintError.
-func (db *DB) Exec(ctx context.Context, statement Statement, options ...CallOption) (int64, error) {
-	if db == nil || statement.SQL == "" {
-		return 0, ErrInvalidQuery
-	}
-
-	tag, err := db.executor.Exec(ctx, statement.SQL, db.arguments(options, statement.Args)...)
-	if err != nil {
-		return 0, mapWriteError(err, Table[struct{}]{})
-	}
-
-	return tag.RowsAffected(), nil
-}
-
 // Copy streams rows into columns of a schema-qualified table through COPY, as
 // generated for :copyfrom queries, and returns the number of copied rows.
 func (db *DB) Copy(
@@ -50,7 +34,7 @@ func (db *DB) Copy(
 
 	count, err := db.executor.CopyFrom(ctx, table, columns, rows)
 	if err != nil {
-		return 0, mapWriteError(err, Table[struct{}]{schema: table[0], name: table[1]})
+		return 0, mapWriteError(err, writeTarget{schema: table[0], name: table[1]})
 	}
 
 	return count, nil

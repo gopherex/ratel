@@ -86,7 +86,7 @@ func TestReadTerminals(t *testing.T) {
 
 			rows := &readRows{ids: tc.ids, failure: tc.failure, scanFailure: tc.scanFailure}
 			executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) { return rows, nil }}
-			query := ratel.New(executor).From(userDescriptor())
+			query := ratel.From(userDescriptor())
 
 			var count int
 
@@ -94,18 +94,18 @@ func TestReadTerminals(t *testing.T) {
 
 			switch tc.terminal {
 			case "one":
-				_, err = query.One(t.Context())
+				_, err = ratel.New(executor).Run(query).One(t.Context())
 				if err == nil {
 					count = 1
 				}
 			case "first":
-				_, err = query.First(t.Context())
+				_, err = ratel.New(executor).Run(query).First(t.Context())
 				if err == nil {
 					count = 1
 				}
 			default:
 				var users []readUser
-				users, err = query.List(t.Context())
+				users, err = ratel.New(executor).Run(query).List(t.Context())
 				count = len(users)
 			}
 
@@ -146,11 +146,13 @@ func TestStaticTerminals(t *testing.T) {
 
 				return rows, nil
 			}}
-			query := ratel.New(executor).From(ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser, sql, "a"))
+			query := ratel.From(ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser, sql, "a"))
 
-			terminal := query.One
+			runner := ratel.New(executor).Run(query)
+
+			terminal := runner.One
 			if tc.first {
-				terminal = query.First
+				terminal = runner.First
 			}
 
 			if _, err := terminal(t.Context()); !errors.Is(err, tc.wantError) || rows.index != tc.read || !rows.closed {
@@ -166,7 +168,7 @@ func TestAllStopsAndReleases(t *testing.T) {
 	rows := &readRows{ids: []int64{1, 2}}
 
 	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) { return rows, nil }}
-	for user, err := range ratel.New(executor).From(userDescriptor()).All(t.Context()) {
+	for user, err := range ratel.New(executor).Run(ratel.From(userDescriptor())).All(t.Context()) {
 		if err != nil || user.ID != 1 {
 			t.Fatalf("%+v: %v", user, err)
 		}
@@ -228,7 +230,7 @@ func TestAllErrors(t *testing.T) {
 				return rows, nil
 			}}
 
-			query := ratel.New(executor).From(userDescriptor())
+			query := ratel.From(userDescriptor())
 			if tc.nilDB {
 				query = ratel.Select[readUser]{}
 			}
@@ -237,7 +239,7 @@ func TestAllErrors(t *testing.T) {
 				query = query.SkipLocked()
 			}
 
-			users, errs := selXDrain(query.All(t.Context()), 0)
+			users, errs := selXDrain(ratel.New(executor).Run(query).All(t.Context()), 0)
 
 			gotIDs := make([]int64, 0, len(users))
 			for _, user := range users {
@@ -263,7 +265,7 @@ func TestAllNoErrorWhenEmpty(t *testing.T) {
 	rows := &readRows{}
 	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) { return rows, nil }}
 
-	for user, err := range ratel.New(executor).From(userDescriptor()).All(t.Context()) {
+	for user, err := range ratel.New(executor).Run(ratel.From(userDescriptor())).All(t.Context()) {
 		t.Fatalf("unexpected yield %+v, %v", user, err)
 	}
 
@@ -275,13 +277,16 @@ func TestAllNoErrorWhenEmpty(t *testing.T) {
 func TestReadNoDatabase(t *testing.T) {
 	t.Parallel()
 
-	var query ratel.Select[readUser]
+	var (
+		database *ratel.DB
+		query    ratel.Select[readUser]
+	)
 
-	if _, err := query.List(t.Context()); !errors.Is(err, ratel.ErrInvalidQuery) {
+	if _, err := database.Run(query).List(t.Context()); !errors.Is(err, ratel.ErrInvalidQuery) {
 		t.Fatalf("List() error = %v", err)
 	}
 
-	if _, err := query.One(t.Context()); !errors.Is(err, ratel.ErrInvalidQuery) {
+	if _, err := database.Run(query).One(t.Context()); !errors.Is(err, ratel.ErrInvalidQuery) {
 		t.Fatalf("One() error = %v", err)
 	}
 }
@@ -292,7 +297,7 @@ func TestReadQueryFailure(t *testing.T) {
 	failure := errors.New("offline")
 	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) { return nil, failure }}
 
-	_, err := ratel.New(executor).From(userDescriptor()).List(t.Context())
+	_, err := ratel.New(executor).Run(ratel.From(userDescriptor())).List(t.Context())
 	if !errors.Is(err, failure) {
 		t.Fatalf("lost cause: %v", err)
 	}
@@ -315,8 +320,8 @@ func TestReadExecMode(t *testing.T) {
 			}}
 			users := userDescriptor()
 
-			_, err := ratel.New(executor, ratel.WithExecMode(pgx.QueryExecModeCacheDescribe)).From(users).
-				Where(users.ID.Eq(42)).List(t.Context(), ratel.ExecMode(mode))
+			_, err := ratel.New(executor, ratel.WithExecMode(pgx.QueryExecModeCacheDescribe)).Run(ratel.From(users).
+				Where(users.ID.Eq(42))).List(t.Context(), ratel.ExecMode(mode))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -356,7 +361,7 @@ func TestChunks(t *testing.T) {
 
 	var ids []int64
 
-	for page, err := range ratel.New(executor).From(userDescriptor()).Chunks(t.Context(), 2) {
+	for page, err := range ratel.New(executor).Run(ratel.From(userDescriptor())).Chunks(t.Context(), 2) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -394,7 +399,9 @@ func benchmarkReadTerminal(b *testing.B, name string) {
 
 		return &readRows{ids: []int64{1}}, nil
 	}}
-	query := ratel.New(executor, ratel.WithExecMode(pgx.QueryExecModeExec)).From(userDescriptor())
+	query := ratel.From(userDescriptor())
+
+	database := ratel.New(executor, ratel.WithExecMode(pgx.QueryExecModeExec))
 
 	b.ReportAllocs()
 
@@ -403,11 +410,11 @@ func benchmarkReadTerminal(b *testing.B, name string) {
 
 		switch name {
 		case "list", "failure":
-			_, err = query.List(b.Context())
+			_, err = database.Run(query).List(b.Context())
 		case "first":
-			_, err = query.First(b.Context())
+			_, err = database.Run(query).First(b.Context())
 		default:
-			for _, rowError := range query.All(b.Context()) {
+			for _, rowError := range database.Run(query).All(b.Context()) {
 				err = rowError
 			}
 		}
@@ -422,12 +429,14 @@ func BenchmarkRead(b *testing.B) {
 	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
 		return &readRows{ids: []int64{1}}, nil
 	}}
-	query := ratel.New(executor).From(userDescriptor())
+	query := ratel.From(userDescriptor())
+
+	database := ratel.New(executor)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := query.One(b.Context()); err != nil {
+		if _, err := database.Run(query).One(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}

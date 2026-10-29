@@ -27,8 +27,8 @@ func scanUserByEmail(row pgx.Row) (app.User, error) {
 	return model, nil
 }
 
-// UserByEmailQ is the query UserByEmail as a builder source: db.From(UserByEmailQ.Args(...)). Clauses added
-// outside apply to the query's result.
+// UserByEmailQ describes the columns of the query UserByEmail: UserByEmail().Select().Where(UserByEmailQ.Column...).
+// Clauses added outside apply to the query's result.
 var UserByEmailQ = userByEmailQuery{
 	ID:        ratel.NewCol[app.User, int64]("id"),
 	Email:     ratel.NewCol[app.User, app.Email]("email"),
@@ -57,14 +57,16 @@ type userByEmailQuery struct {
 	Doubled   ratel.NullCol[app.User, int64]
 }
 
-// Args binds the query's parameters.
-func (userByEmailQuery) Args(email string) ratel.Query[app.User] {
-	return ratel.NewQuery([]string{"id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanUserByEmail, "SELECT * FROM app.users WHERE email = $1", email)
+// UserByEmail starts the query; each parameter is one step, in order of appearance.
+func UserByEmail() userByEmailEmail {
+	return userByEmailEmail{}
 }
 
-// UserByEmail returns the query's row; ratel.ErrNotFound when there is none.
-func UserByEmail(ctx context.Context, db *ratel.DB, email string) (app.User, error) {
-	return db.From(UserByEmailQ.Args(email)).One(ctx)
+type userByEmailEmail struct{}
+
+// Email sets the parameter email.
+func (s userByEmailEmail) Email(v string) ratel.Query[app.User] {
+	return ratel.NewQuery([]string{"id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanUserByEmail, "SELECT * FROM app.users WHERE email = $1", v)
 }
 
 // UsersWithOrderCountRow is a row of UsersWithOrderCount.
@@ -83,8 +85,8 @@ func scanUsersWithOrderCount(row pgx.Row) (UsersWithOrderCountRow, error) {
 	return model, nil
 }
 
-// UsersWithOrderCountQ is the query UsersWithOrderCount as a builder source: db.From(UsersWithOrderCountQ.Args(...)). Clauses added
-// outside apply to the query's result.
+// UsersWithOrderCountQ describes the columns of the query UsersWithOrderCount: UsersWithOrderCount().Select().Where(UsersWithOrderCountQ.Column...).
+// Clauses added outside apply to the query's result.
 var UsersWithOrderCountQ = usersWithOrderCountQuery{
 	ID:         ratel.NewCol[UsersWithOrderCountRow, int64]("id"),
 	Email:      ratel.NewCol[UsersWithOrderCountRow, app.Email]("email"),
@@ -115,19 +117,9 @@ type usersWithOrderCountQuery struct {
 	OrderCount ratel.Col[UsersWithOrderCountRow, int64]
 }
 
-// Args binds the query's parameters.
-func (usersWithOrderCountQuery) Args() ratel.Query[UsersWithOrderCountRow] {
+// UsersWithOrderCount builds the query.
+func UsersWithOrderCount() ratel.Query[UsersWithOrderCountRow] {
 	return ratel.NewQuery([]string{"id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled", "order_count"}, scanUsersWithOrderCount, "SELECT u.*, count(o.id) AS order_count\nFROM app.users u LEFT JOIN app.orders o ON o.user_id = u.id\nGROUP BY u.id")
-}
-
-// UsersWithOrderCount returns every row of the query.
-func UsersWithOrderCount(ctx context.Context, db *ratel.DB) ([]UsersWithOrderCountRow, error) {
-	return db.From(UsersWithOrderCountQ.Args()).List(ctx)
-}
-
-// UsersWithOrderCountAll streams the rows of the query.
-func UsersWithOrderCountAll(ctx context.Context, db *ratel.DB) iter.Seq2[UsersWithOrderCountRow, error] {
-	return db.From(UsersWithOrderCountQ.Args()).All(ctx)
 }
 
 // OrdersWithUsersRow is a row of OrdersWithUsers.
@@ -161,14 +153,9 @@ func scanOrdersWithUsers(row pgx.Row) (OrdersWithUsersRow, error) {
 	return model, nil
 }
 
-// OrdersWithUsers returns every row of the query.
-func OrdersWithUsers(ctx context.Context, db *ratel.DB) ([]OrdersWithUsersRow, error) {
-	return db.From(ratel.NewQuery([]string{"id", "user_id", "total", "id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanOrdersWithUsers, "SELECT o.*, u.*\nFROM app.orders o LEFT JOIN app.users u ON u.id = o.user_id")).List(ctx)
-}
-
-// OrdersWithUsersAll streams the rows of the query.
-func OrdersWithUsersAll(ctx context.Context, db *ratel.DB) iter.Seq2[OrdersWithUsersRow, error] {
-	return db.From(ratel.NewQuery([]string{"id", "user_id", "total", "id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanOrdersWithUsers, "SELECT o.*, u.*\nFROM app.orders o LEFT JOIN app.users u ON u.id = o.user_id")).All(ctx)
+// OrdersWithUsers builds the query.
+func OrdersWithUsers() ratel.Query[OrdersWithUsersRow] {
+	return ratel.NewQuery([]string{"id", "user_id", "total", "id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanOrdersWithUsers, "SELECT o.*, u.*\nFROM app.orders o LEFT JOIN app.users u ON u.id = o.user_id")
 }
 
 // Total is the shared row type of the queries annotated @ratel.row Total.
@@ -187,8 +174,8 @@ func scanOrderTotals(row pgx.Row) (Total, error) {
 	return model, nil
 }
 
-// OrderTotalsQ is the query OrderTotals as a builder source: db.From(OrderTotalsQ.Args(...)). Clauses added
-// outside apply to the query's result.
+// OrderTotalsQ describes the columns of the query OrderTotals: OrderTotals().Select().Where(OrderTotalsQ.Column...).
+// Clauses added outside apply to the query's result.
 var OrderTotalsQ = orderTotalsQuery{
 	UserID: ratel.NewCol[Total, int64]("user_id"),
 	Amount: ratel.NewNullCol[Total, decimal.Decimal]("amount"),
@@ -199,19 +186,9 @@ type orderTotalsQuery struct {
 	Amount ratel.NullCol[Total, decimal.Decimal]
 }
 
-// Args binds the query's parameters.
-func (orderTotalsQuery) Args() ratel.Query[Total] {
+// OrderTotals builds the query.
+func OrderTotals() ratel.Query[Total] {
 	return ratel.NewQuery([]string{"user_id", "amount"}, scanOrderTotals, "SELECT user_id, sum(total) AS amount FROM app.orders GROUP BY user_id")
-}
-
-// OrderTotals returns every row of the query.
-func OrderTotals(ctx context.Context, db *ratel.DB) ([]Total, error) {
-	return db.From(OrderTotalsQ.Args()).List(ctx)
-}
-
-// OrderTotalsAll streams the rows of the query.
-func OrderTotalsAll(ctx context.Context, db *ratel.DB) iter.Seq2[Total, error] {
-	return db.From(OrderTotalsQ.Args()).All(ctx)
 }
 
 func scanTopTotals(row pgx.Row) (Total, error) {
@@ -224,8 +201,8 @@ func scanTopTotals(row pgx.Row) (Total, error) {
 	return model, nil
 }
 
-// TopTotalsQ is the query TopTotals as a builder source: db.From(TopTotalsQ.Args(...)). Clauses added
-// outside apply to the query's result.
+// TopTotalsQ describes the columns of the query TopTotals: TopTotals().Select().Where(TopTotalsQ.Column...).
+// Clauses added outside apply to the query's result.
 var TopTotalsQ = topTotalsQuery{
 	UserID: ratel.NewCol[Total, int64]("user_id"),
 	Amount: ratel.NewNullCol[Total, decimal.Decimal]("amount"),
@@ -236,27 +213,9 @@ type topTotalsQuery struct {
 	Amount ratel.NullCol[Total, decimal.Decimal]
 }
 
-// Args binds the query's parameters.
-func (topTotalsQuery) Args() ratel.Query[Total] {
+// TopTotals builds the query.
+func TopTotals() ratel.Query[Total] {
 	return ratel.NewQuery([]string{"user_id", "amount"}, scanTopTotals, "SELECT user_id, max(total) AS amount FROM app.orders GROUP BY user_id")
-}
-
-// TopTotals returns every row of the query.
-func TopTotals(ctx context.Context, db *ratel.DB) ([]Total, error) {
-	return db.From(TopTotalsQ.Args()).List(ctx)
-}
-
-// TopTotalsAll streams the rows of the query.
-func TopTotalsAll(ctx context.Context, db *ratel.DB) iter.Seq2[Total, error] {
-	return db.From(TopTotalsQ.Args()).All(ctx)
-}
-
-// EmailsLikeParams are the parameters of EmailsLike.
-type EmailsLikeParams struct {
-	Pattern string
-	Status  app.UserStatus
-	Manager ratel.Null[int64]
-	Minimum decimal.Decimal
 }
 
 // EmailsLikeRow is a row of EmailsLike.
@@ -275,8 +234,8 @@ func scanEmailsLike(row pgx.Row) (EmailsLikeRow, error) {
 	return model, nil
 }
 
-// EmailsLikeQ is the query EmailsLike as a builder source: db.From(EmailsLikeQ.Args(...)). Clauses added
-// outside apply to the query's result.
+// EmailsLikeQ describes the columns of the query EmailsLike: EmailsLike().Select().Where(EmailsLikeQ.Column...).
+// Clauses added outside apply to the query's result.
 var EmailsLikeQ = emailsLikeQuery{
 	ID:    ratel.NewCol[EmailsLikeRow, int64]("id"),
 	Email: ratel.NewCol[EmailsLikeRow, app.Email]("email"),
@@ -287,19 +246,46 @@ type emailsLikeQuery struct {
 	Email ratel.Col[EmailsLikeRow, app.Email]
 }
 
-// Args binds the query's parameters.
-func (emailsLikeQuery) Args(params EmailsLikeParams) ratel.Query[EmailsLikeRow] {
-	return ratel.NewQuery([]string{"id", "email"}, scanEmailsLike, "SELECT id, email FROM app.users WHERE email LIKE $1 AND status = $2 AND manager_id = $3 AND balance > $4", params.Pattern, params.Status, params.Manager, params.Minimum)
+// EmailsLike starts the query; each parameter is one step, in order of appearance.
+func EmailsLike() emailsLikePattern {
+	return emailsLikePattern{}
 }
 
-// EmailsLike returns every row of the query.
-func EmailsLike(ctx context.Context, db *ratel.DB, params EmailsLikeParams) ([]EmailsLikeRow, error) {
-	return db.From(EmailsLikeQ.Args(params)).List(ctx)
+type emailsLikePattern struct{}
+
+// Pattern sets the parameter pattern.
+func (s emailsLikePattern) Pattern(v string) emailsLikeStatus {
+	return emailsLikeStatus{pattern: v}
 }
 
-// EmailsLikeAll streams the rows of the query.
-func EmailsLikeAll(ctx context.Context, db *ratel.DB, params EmailsLikeParams) iter.Seq2[EmailsLikeRow, error] {
-	return db.From(EmailsLikeQ.Args(params)).All(ctx)
+type emailsLikeStatus struct {
+	pattern string
+}
+
+// Status sets the parameter status.
+func (s emailsLikeStatus) Status(v app.UserStatus) emailsLikeManager {
+	return emailsLikeManager{pattern: s.pattern, status: v}
+}
+
+type emailsLikeManager struct {
+	pattern string
+	status  app.UserStatus
+}
+
+// Manager sets the parameter manager.
+func (s emailsLikeManager) Manager(v ratel.Null[int64]) emailsLikeMinimum {
+	return emailsLikeMinimum{pattern: s.pattern, status: s.status, manager: v}
+}
+
+type emailsLikeMinimum struct {
+	pattern string
+	status  app.UserStatus
+	manager ratel.Null[int64]
+}
+
+// Minimum sets the parameter minimum.
+func (s emailsLikeMinimum) Minimum(v decimal.Decimal) ratel.Query[EmailsLikeRow] {
+	return ratel.NewQuery([]string{"id", "email"}, scanEmailsLike, "SELECT id, email FROM app.users WHERE email LIKE $1 AND status = $2 AND manager_id = $3 AND balance > $4", s.pattern, s.status, s.manager, v)
 }
 
 // EmailsOfManagersRow is a row of EmailsOfManagers.
@@ -318,8 +304,8 @@ func scanEmailsOfManagers(row pgx.Row) (EmailsOfManagersRow, error) {
 	return model, nil
 }
 
-// EmailsOfManagersQ is the query EmailsOfManagers as a builder source: db.From(EmailsOfManagersQ.Args(...)). Clauses added
-// outside apply to the query's result.
+// EmailsOfManagersQ describes the columns of the query EmailsOfManagers: EmailsOfManagers().Select().Where(EmailsOfManagersQ.Column...).
+// Clauses added outside apply to the query's result.
 var EmailsOfManagersQ = emailsOfManagersQuery{
 	ID:    ratel.NewCol[EmailsOfManagersRow, int64]("id"),
 	Email: ratel.NewCol[EmailsOfManagersRow, app.Email]("email"),
@@ -330,19 +316,9 @@ type emailsOfManagersQuery struct {
 	Email ratel.Col[EmailsOfManagersRow, app.Email]
 }
 
-// Args binds the query's parameters.
-func (emailsOfManagersQuery) Args() ratel.Query[EmailsOfManagersRow] {
+// EmailsOfManagers builds the query.
+func EmailsOfManagers() ratel.Query[EmailsOfManagersRow] {
 	return ratel.NewQuery([]string{"id", "email"}, scanEmailsOfManagers, "SELECT id, email FROM app.users WHERE manager_id IS NULL")
-}
-
-// EmailsOfManagers returns every row of the query.
-func EmailsOfManagers(ctx context.Context, db *ratel.DB) ([]EmailsOfManagersRow, error) {
-	return db.From(EmailsOfManagersQ.Args()).List(ctx)
-}
-
-// EmailsOfManagersAll streams the rows of the query.
-func EmailsOfManagersAll(ctx context.Context, db *ratel.DB) iter.Seq2[EmailsOfManagersRow, error] {
-	return db.From(EmailsOfManagersQ.Args()).All(ctx)
 }
 
 func scanCreateTag(row pgx.Row) (app.Tag, error) {
@@ -355,21 +331,49 @@ func scanCreateTag(row pgx.Row) (app.Tag, error) {
 	return model, nil
 }
 
-// CreateTag returns the query's row; ratel.ErrNotFound when there is none.
-func CreateTag(ctx context.Context, db *ratel.DB, id int32, label string) (app.Tag, error) {
-	return db.From(ratel.NewQuery([]string{"id", "label", "kind"}, scanCreateTag, "INSERT INTO app.tags (id, label) VALUES ($1, $2) RETURNING *", id, label)).One(ctx)
+// CreateTag starts the query; each parameter is one step, in order of appearance.
+func CreateTag() createTagID {
+	return createTagID{}
 }
 
-// DeleteTag runs the query.
-func DeleteTag(ctx context.Context, db *ratel.DB, id int32) error {
-	_, err := db.Exec(ctx, ratel.Statement{SQL: "DELETE FROM app.tags WHERE id = $1", Args: []any{id}})
+type createTagID struct{}
 
-	return err
+// ID sets the parameter id.
+func (s createTagID) ID(v int32) createTagLabel {
+	return createTagLabel{id: v}
 }
 
-// DeleteOrders runs the query and returns the number of affected rows.
-func DeleteOrders(ctx context.Context, db *ratel.DB, userID int64) (int64, error) {
-	return db.Exec(ctx, ratel.Statement{SQL: "DELETE FROM app.orders WHERE user_id = $1", Args: []any{userID}})
+type createTagLabel struct {
+	id int32
+}
+
+// Label sets the parameter label.
+func (s createTagLabel) Label(v string) ratel.Query[app.Tag] {
+	return ratel.NewQuery([]string{"id", "label", "kind"}, scanCreateTag, "INSERT INTO app.tags (id, label) VALUES ($1, $2) RETURNING *", s.id, v)
+}
+
+// DeleteTag starts the query; each parameter is one step, in order of appearance.
+func DeleteTag() deleteTagID {
+	return deleteTagID{}
+}
+
+type deleteTagID struct{}
+
+// ID sets the parameter id.
+func (s deleteTagID) ID(v int32) ratel.Command {
+	return ratel.NewCommand("DELETE FROM app.tags WHERE id = $1", v)
+}
+
+// DeleteOrders starts the query; each parameter is one step, in order of appearance.
+func DeleteOrders() deleteOrdersUserID {
+	return deleteOrdersUserID{}
+}
+
+type deleteOrdersUserID struct{}
+
+// UserID sets the parameter userID.
+func (s deleteOrdersUserID) UserID(v int64) ratel.Command {
+	return ratel.NewCommand("DELETE FROM app.orders WHERE user_id = $1", v)
 }
 
 // CopyTagsParams are the parameters of CopyTags.

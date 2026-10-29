@@ -1,17 +1,21 @@
 package ratel
 
 import (
-	"context"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// Insert is an immutable INSERT or ON CONFLICT builder.
+// defaultChunk is the default number of rows per insert statement.
+const defaultChunk = 1000
+
+// Insert is an immutable INSERT or ON CONFLICT statement. It is a value:
+// Build renders the one statement it needs, db.Run(insert).Exec sends all of
+// them, and Returning turns it into a row query.
 type Insert[M, I any] struct {
-	db        *DB
 	table     WriteTable[M, I]
 	rows      []I
+	chunk     Opt[int]
 	upsert    bool
 	conflict  []string
 	updates   []string
@@ -19,16 +23,25 @@ type Insert[M, I any] struct {
 }
 
 // Insert inserts values built by the generated constructor.
-func (db *DB) Insert[M, I any](table Writable[M, I], rows ...I) Insert[M, I] {
-	return Insert[M, I]{db: db, table: table.ratelWrite(), rows: slices.Clone(rows)}
+func (t WriteTable[M, I]) Insert(rows ...I) Insert[M, I] {
+	return Insert[M, I]{table: t, rows: slices.Clone(rows)}
 }
 
 // Upsert starts an INSERT requiring an explicit conflict target and action.
-func (db *DB) Upsert[M, I any](table Writable[M, I], rows ...I) Insert[M, I] {
-	query := db.Insert(table, rows...)
+func (t WriteTable[M, I]) Upsert(rows ...I) Insert[M, I] {
+	query := t.Insert(rows...)
 	query.upsert = true
 
 	return query
+}
+
+// Chunk caps the rows per statement. Default: 1000. Nonpositive values are
+// ErrInvalidQuery. The size belongs to the value, so Build and Run agree on it;
+// chunk atomicity belongs to the executor.
+func (q Insert[M, I]) Chunk(rows int) Insert[M, I] {
+	q.chunk = OptFrom(rows)
+
+	return q
 }
 
 // OnConflict selects the ordered columns of a unique conflict target.
@@ -66,29 +79,30 @@ func writeColumnNames[M any](columns []WriteColumn[M]) []string {
 	return names
 }
 
-// SQL renders a single statement. Use Statements for heterogeneous defaults or
-// batches larger than WithBatchRows, which require several statements.
-func (q Insert[M, I]) SQL() (Statement, error) {
-	statements, err := q.Statements()
+// Build renders the one statement the insert needs. An insert that needs
+// several (more rows than its chunk size, or rows with different sets of
+// optional columns) is ErrInvalidQuery; db.Run sends all of them.
+func (q Insert[M, I]) Build() (string, []any, error) {
+	rendered, err := q.statements()
 	if err != nil {
-		return Statement{}, err
+		return "", nil, err
 	}
 
-	if len(statements) != 1 {
-		return Statement{}, ErrInvalidQuery
+	if len(rendered) != 1 {
+		return "", nil, ErrInvalidQuery
 	}
 
-	return statements[0], nil
+	return rendered[0].SQL, rendered[0].Args, nil
 }
 
-// Statements renders every statement before any can be executed. Consecutive
+// statements renders every statement before any can be executed. Consecutive
 // rows with the same set columns share a statement; input order is preserved.
-func (q Insert[M, I]) Statements() ([]Statement, error) {
+func (q Insert[M, I]) statements() ([]stmt, error) {
 	if err := q.validate(); err != nil {
 		return nil, err
 	}
 
-	statements := make([]Statement, 0, 1)
+	rendered := make([]stmt, 0, 1)
 
 	for start := 0; start < len(q.rows); {
 		fields := q.setFields(q.rows[start])
@@ -99,16 +113,16 @@ func (q Insert[M, I]) Statements() ([]Statement, error) {
 			end++
 		}
 
-		statement, err := q.render(fields, q.rows[start:end])
+		next, err := q.render(fields, q.rows[start:end])
 		if err != nil {
 			return nil, err
 		}
 
-		statements = append(statements, statement)
+		rendered = append(rendered, next)
 		start = end
 	}
 
-	return statements, nil
+	return rendered, nil
 }
 
 func (q Insert[M, I]) validate() error {
@@ -122,7 +136,7 @@ func (q Insert[M, I]) validate() error {
 		}
 	}
 
-	if q.db == nil || q.db.batchRows <= 0 || !q.table.valid() {
+	if (q.chunk.Set && q.chunk.V <= 0) || !q.table.valid() {
 		return ErrInvalidQuery
 	}
 
@@ -178,11 +192,16 @@ func (q Insert[M, I]) rowLimit(fields []int) int {
 	// The extended PostgreSQL protocol limits a statement to 65535 parameters.
 	const parameterLimit = 65535
 
-	if len(fields) > 0 && !q.scalarFields(fields) {
-		return min(q.db.batchRows, parameterLimit/len(fields))
+	size := defaultChunk
+	if q.chunk.Set {
+		size = q.chunk.V
 	}
 
-	return q.db.batchRows
+	if len(fields) > 0 && !q.scalarFields(fields) {
+		return min(size, parameterLimit/len(fields))
+	}
+
+	return size
 }
 
 // setFields lists the fields a row sets, by index.
@@ -217,12 +236,12 @@ func (q Insert[M, I]) sets(row I, fields []int) bool {
 	return true
 }
 
-func (q Insert[M, I]) render(fields []int, inputs []I) (Statement, error) {
+func (q Insert[M, I]) render(fields []int, inputs []I) (stmt, error) {
 	writer := newSQLWriter()
 	writer.WriteString("INSERT INTO ")
 
 	if err := q.table.render(writer); err != nil {
-		return Statement{}, err
+		return stmt{}, err
 	}
 
 	writer.WriteString(` AS "q"`)
@@ -243,7 +262,7 @@ func (q Insert[M, I]) render(fields []int, inputs []I) (Statement, error) {
 		q.appendConflict(writer)
 	}
 
-	return writer.statement(), nil
+	return writer.result(), nil
 }
 
 func (q Insert[M, I]) scalarFields(fields []int) bool {
@@ -345,28 +364,48 @@ func appendWriteNames(writer *sqlWriter, names []string) {
 	}
 }
 
-// Exec returns the total affected rows. On failure it returns zero, even if an
-// earlier chunk committed. Use a caller-owned transaction for atomic chunks.
-func (q Insert[M, I]) Exec(ctx context.Context, options ...CallOption) (int64, error) {
-	statements, err := q.Statements()
+// Returning adds RETURNING of every model column, including defaults and
+// BEFORE trigger values, and turns the insert into a row query. Conflicts
+// skipped by DO NOTHING return no row; row order is PostgreSQL's order.
+func (q Insert[M, I]) Returning() InsertReturning[M, I] { return InsertReturning[M, I]{insert: q} }
+
+// InsertReturning is an INSERT with RETURNING, a row query.
+type InsertReturning[M, I any] struct{ insert Insert[M, I] }
+
+// Build renders the one statement the insert needs, with its RETURNING clause;
+// several statements are ErrInvalidQuery as for Insert.
+func (q InsertReturning[M, I]) Build() (string, []any, error) {
+	rendered, err := q.insert.statements()
 	if err != nil {
-		return 0, err
+		return "", nil, err
 	}
 
-	result, err := executeWrite(ctx, q.db, q.table.Table, statements, false, options)
+	if len(rendered) != 1 {
+		return "", nil, ErrInvalidQuery
+	}
 
-	return result.count, err
+	rendered[0] = returning(rendered[0], q.insert.table.Table)
+
+	return rendered[0].SQL, rendered[0].Args, nil
 }
 
-// Returning scans PostgreSQL RETURNING, including defaults and BEFORE triggers.
-// No partial slice is returned on failure. Row order is PostgreSQL's order.
-func (q Insert[M, I]) Returning(ctx context.Context, options ...CallOption) ([]M, error) {
-	statements, err := q.Statements()
-	if err != nil {
-		return nil, err
+func (q Insert[M, I]) execPlan() execPlan {
+	rendered, err := q.statements()
+
+	return execPlan{plan: multiPlan(rendered, err), target: q.table.target()}
+}
+
+func (q Insert[M, I]) bind(db *DB) ExecRunner { return ExecRunner{db: db, plan: q.execPlan()} }
+
+func (q InsertReturning[M, I]) rowsPlan() rowsPlan[M] {
+	rendered, err := q.insert.statements()
+	for index := range rendered {
+		rendered[index] = returning(rendered[index], q.insert.table.Table)
 	}
 
-	result, err := executeWrite(ctx, q.db, q.table.Table, statements, true, options)
+	return rowsPlan[M]{plan: multiPlan(rendered, err), table: q.insert.table.Table, write: true}
+}
 
-	return result.models, err
+func (q InsertReturning[M, I]) bind(db *DB) RowRunner[M] {
+	return RowRunner[M]{db: db, plan: q.rowsPlan()}
 }

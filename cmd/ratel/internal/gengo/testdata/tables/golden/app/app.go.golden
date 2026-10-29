@@ -59,16 +59,35 @@ func scanOrderTag(row pgx.Row) (OrderTag, error) {
 	return model, err
 }
 
-// OrderTagInsert is the input of an insert into order_tags. Construct it with NewOrderTagInsert.
+// OrderTagInsert is the input of an insert into order_tags. Start it with Row.
 type OrderTagInsert struct {
 	orderID int64
 	tagID   int32
 	valid   bool
 }
 
-// NewOrderTagInsert sets the columns without a default.
-func NewOrderTagInsert(orderID int64, tagID int32) OrderTagInsert {
-	return OrderTagInsert{orderID: orderID, tagID: tagID, valid: true}
+// Row starts an insert row of order_tags: one step per required column, in column order.
+func (t *orderTagsTable) Row() orderTagRowOrderID {
+	return orderTagRowOrderID{}
+}
+
+type orderTagRowOrderID struct{ insert OrderTagInsert }
+
+// OrderID sets the column order_id.
+func (s orderTagRowOrderID) OrderID(v int64) orderTagRowTagID {
+	s.insert.orderID = v
+
+	return orderTagRowTagID{s.insert}
+}
+
+type orderTagRowTagID struct{ insert OrderTagInsert }
+
+// TagID sets the column tag_id.
+func (s orderTagRowTagID) TagID(v int32) OrderTagInsert {
+	s.insert.tagID = v
+	s.insert.valid = true
+
+	return s.insert
 }
 
 var orderTagsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
@@ -223,7 +242,7 @@ func scanOrder(row pgx.Row) (Order, error) {
 	return model, err
 }
 
-// OrderInsert is the input of an insert into orders. Construct it with NewOrderInsert.
+// OrderInsert is the input of an insert into orders. Start it with Row.
 type OrderInsert struct {
 	id     int64
 	userID int64
@@ -231,9 +250,37 @@ type OrderInsert struct {
 	valid  bool
 }
 
-// NewOrderInsert sets the columns without a default.
-func NewOrderInsert(id int64, userID int64, total decimal.Decimal) OrderInsert {
-	return OrderInsert{id: id, userID: userID, total: total, valid: true}
+// Row starts an insert row of orders: one step per required column, in column order.
+func (t *ordersTable) Row() orderRowID {
+	return orderRowID{}
+}
+
+type orderRowID struct{ insert OrderInsert }
+
+// ID sets the column id.
+func (s orderRowID) ID(v int64) orderRowUserID {
+	s.insert.id = v
+
+	return orderRowUserID{s.insert}
+}
+
+type orderRowUserID struct{ insert OrderInsert }
+
+// UserID sets the column user_id.
+func (s orderRowUserID) UserID(v int64) orderRowTotal {
+	s.insert.userID = v
+
+	return orderRowTotal{s.insert}
+}
+
+type orderRowTotal struct{ insert OrderInsert }
+
+// Total sets the column total.
+func (s orderRowTotal) Total(v decimal.Decimal) OrderInsert {
+	s.insert.total = v
+	s.insert.valid = true
+
+	return s.insert
 }
 
 var ordersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
@@ -421,17 +468,43 @@ func scanTag(row pgx.Row) (Tag, error) {
 	return model, err
 }
 
-// TagInsert is the input of an insert into tags. Construct it with NewTagInsert.
+// TagInsert is the input of an insert into tags. Start it with Row.
 type TagInsert struct {
 	id    int32
 	label string
-	Kind  ratel.Opt[TagKind]
+	kind  ratel.Opt[TagKind]
 	valid bool
 }
 
-// NewTagInsert sets the columns without a default.
-func NewTagInsert(id int32, label string) TagInsert {
-	return TagInsert{id: id, label: label, valid: true}
+// Kind sets the column kind; unset, its default applies.
+func (r TagInsert) Kind(v TagKind) TagInsert {
+	r.kind = ratel.OptFrom(v)
+
+	return r
+}
+
+// Row starts an insert row of tags: one step per required column, in column order.
+func (t *tagsTable) Row() tagRowID {
+	return tagRowID{}
+}
+
+type tagRowID struct{ insert TagInsert }
+
+// ID sets the column id.
+func (s tagRowID) ID(v int32) tagRowLabel {
+	s.insert.id = v
+
+	return tagRowLabel{s.insert}
+}
+
+type tagRowLabel struct{ insert TagInsert }
+
+// Label sets the column label.
+func (s tagRowLabel) Label(v string) TagInsert {
+	s.insert.label = v
+	s.insert.valid = true
+
+	return s.insert
 }
 
 var tagsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
@@ -474,12 +547,12 @@ var tagsBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[TagInsert]{
 		Name: "kind", Type: pgx.Identifier{"pg_catalog", "text"},
-		Value: func(insert TagInsert) (any, bool) { return insert.Kind.V, insert.Kind.Set },
-		Set:   func(insert TagInsert) bool { return insert.Kind.Set },
+		Value: func(insert TagInsert) (any, bool) { return insert.kind.V, insert.kind.Set },
+		Set:   func(insert TagInsert) bool { return insert.kind.Set },
 		Values: func(rows []TagInsert) any {
 			out := make([]TagKind, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.Kind.V
+				out[index] = insert.kind.V
 			}
 
 			return out
@@ -602,24 +675,99 @@ func scanUser(row pgx.Row) (User, error) {
 	return model, err
 }
 
-// UserInsert is the input of an insert into users. Construct it with NewUserInsert.
+// UserInsert is the input of an insert into users. Start it with Row.
 type UserInsert struct {
-	ID        ratel.Opt[int64]
+	id        ratel.Opt[int64]
 	email     Email
 	status    UserStatus
-	ManagerID ratel.Null[int64]
-	Balance   ratel.Opt[decimal.Decimal]
-	Tags      ratel.Opt[[]string]
-	Home      ratel.Null[Address]
-	Type      ratel.Null[string]
-	CreatedAt ratel.Opt[time.Time]
-	Profile   ratel.Null[doc.Profile]
+	managerID ratel.Null[int64]
+	balance   ratel.Opt[decimal.Decimal]
+	tags      ratel.Opt[[]string]
+	home      ratel.Null[Address]
+	typeValue ratel.Null[string]
+	createdAt ratel.Opt[time.Time]
+	profile   ratel.Null[doc.Profile]
 	valid     bool
 }
 
-// NewUserInsert sets the columns without a default.
-func NewUserInsert(email Email, status UserStatus) UserInsert {
-	return UserInsert{email: email, status: status, valid: true}
+// ID sets the column id; unset, its default applies.
+func (r UserInsert) ID(v int64) UserInsert {
+	r.id = ratel.OptFrom(v)
+
+	return r
+}
+
+// ManagerID sets the column manager_id.
+func (r UserInsert) ManagerID(v ratel.Null[int64]) UserInsert {
+	r.managerID = v
+
+	return r
+}
+
+// Balance sets the column balance; unset, its default applies.
+func (r UserInsert) Balance(v decimal.Decimal) UserInsert {
+	r.balance = ratel.OptFrom(v)
+
+	return r
+}
+
+// Tags sets the column tags; unset, its default applies.
+func (r UserInsert) Tags(v []string) UserInsert {
+	r.tags = ratel.OptFrom(v)
+
+	return r
+}
+
+// Home sets the column home.
+func (r UserInsert) Home(v ratel.Null[Address]) UserInsert {
+	r.home = v
+
+	return r
+}
+
+// Type sets the column type.
+func (r UserInsert) Type(v ratel.Null[string]) UserInsert {
+	r.typeValue = v
+
+	return r
+}
+
+// CreatedAt sets the column created_at; unset, its default applies.
+func (r UserInsert) CreatedAt(v time.Time) UserInsert {
+	r.createdAt = ratel.OptFrom(v)
+
+	return r
+}
+
+// Profile sets the column profile.
+func (r UserInsert) Profile(v ratel.Null[doc.Profile]) UserInsert {
+	r.profile = v
+
+	return r
+}
+
+// Row starts an insert row of users: one step per required column, in column order.
+func (t *usersTable) Row() userRowEmail {
+	return userRowEmail{}
+}
+
+type userRowEmail struct{ insert UserInsert }
+
+// Email sets the column email.
+func (s userRowEmail) Email(v Email) userRowStatus {
+	s.insert.email = v
+
+	return userRowStatus{s.insert}
+}
+
+type userRowStatus struct{ insert UserInsert }
+
+// Status sets the column status.
+func (s userRowStatus) Status(v UserStatus) UserInsert {
+	s.insert.status = v
+	s.insert.valid = true
+
+	return s.insert
 }
 
 var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
@@ -642,12 +790,12 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	func(insert UserInsert) bool { return insert.valid },
 	ratel.InsertField[UserInsert]{
 		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
-		Value: func(insert UserInsert) (any, bool) { return insert.ID.V, insert.ID.Set },
-		Set:   func(insert UserInsert) bool { return insert.ID.Set },
+		Value: func(insert UserInsert) (any, bool) { return insert.id.V, insert.id.Set },
+		Set:   func(insert UserInsert) bool { return insert.id.Set },
 		Values: func(rows []UserInsert) any {
 			out := make([]int64, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.ID.V
+				out[index] = insert.id.V
 			}
 
 			return out
@@ -681,12 +829,12 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "manager_id", Type: pgx.Identifier{"pg_catalog", "int8"},
-		Value: func(insert UserInsert) (any, bool) { return insert.ManagerID, true },
+		Value: func(insert UserInsert) (any, bool) { return insert.managerID, true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]*int64, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.ManagerID.Ptr()
+				out[index] = insert.managerID.Ptr()
 			}
 
 			return out
@@ -694,12 +842,12 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "balance", Type: pgx.Identifier{"pg_catalog", "numeric"},
-		Value: func(insert UserInsert) (any, bool) { return insert.Balance.V, insert.Balance.Set },
-		Set:   func(insert UserInsert) bool { return insert.Balance.Set },
+		Value: func(insert UserInsert) (any, bool) { return insert.balance.V, insert.balance.Set },
+		Set:   func(insert UserInsert) bool { return insert.balance.Set },
 		Values: func(rows []UserInsert) any {
 			out := make([]decimal.Decimal, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.Balance.V
+				out[index] = insert.balance.V
 			}
 
 			return out
@@ -707,18 +855,18 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "tags", Type: pgx.Identifier{"pg_catalog", "text"},
-		Value: func(insert UserInsert) (any, bool) { return insert.Tags.V, insert.Tags.Set },
-		Set:   func(insert UserInsert) bool { return insert.Tags.Set },
+		Value: func(insert UserInsert) (any, bool) { return insert.tags.V, insert.tags.Set },
+		Set:   func(insert UserInsert) bool { return insert.tags.Set },
 		Array: true,
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "home", Type: pgx.Identifier{"app", "address"},
-		Value: func(insert UserInsert) (any, bool) { return insert.Home, true },
+		Value: func(insert UserInsert) (any, bool) { return insert.home, true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]*Address, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.Home.Ptr()
+				out[index] = insert.home.Ptr()
 			}
 
 			return out
@@ -726,12 +874,12 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "type", Type: pgx.Identifier{"pg_catalog", "text"},
-		Value: func(insert UserInsert) (any, bool) { return insert.Type, true },
+		Value: func(insert UserInsert) (any, bool) { return insert.typeValue, true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]*string, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.Type.Ptr()
+				out[index] = insert.typeValue.Ptr()
 			}
 
 			return out
@@ -739,12 +887,12 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "created_at", Type: pgx.Identifier{"pg_catalog", "timestamptz"},
-		Value: func(insert UserInsert) (any, bool) { return insert.CreatedAt.V, insert.CreatedAt.Set },
-		Set:   func(insert UserInsert) bool { return insert.CreatedAt.Set },
+		Value: func(insert UserInsert) (any, bool) { return insert.createdAt.V, insert.createdAt.Set },
+		Set:   func(insert UserInsert) bool { return insert.createdAt.Set },
 		Values: func(rows []UserInsert) any {
 			out := make([]time.Time, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.CreatedAt.V
+				out[index] = insert.createdAt.V
 			}
 
 			return out
@@ -752,12 +900,12 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	},
 	ratel.InsertField[UserInsert]{
 		Name: "profile", Type: pgx.Identifier{"pg_catalog", "jsonb"},
-		Value: func(insert UserInsert) (any, bool) { return insert.Profile, true },
+		Value: func(insert UserInsert) (any, bool) { return insert.profile, true },
 		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]*doc.Profile, len(rows))
 			for index, insert := range rows {
-				out[index] = insert.Profile.Ptr()
+				out[index] = insert.profile.Ptr()
 			}
 
 			return out

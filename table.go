@@ -21,21 +21,29 @@ type source[M any] struct {
 	render func(*sqlWriter) error
 	// static is a static query's own statement. A SELECT without clauses runs
 	// it verbatim, so DML with RETURNING, which cannot be a subquery, runs too.
-	static *Statement
+	static *stmt
 }
 
 // Table describes an immutable, schema-qualified result and its generated scanner.
 type Table[M any] struct {
+	// Everything sits behind one pointer, shared by every copy, so a Table
+	// (and a Select over it) is a word to copy through db.Run. It is nil only
+	// in a zero Table, which is never valid.
+	*tableMeta[M]
+}
+
+// tableMeta is the immutable metadata of a Table.
+type tableMeta[M any] struct {
 	schema      string
 	name        string
-	columns     []string
 	scan        Scanner[M]
+	projection  string
+	selectSQL   string
+	columns     []string
 	keys        []string
 	keyValues   func(M) []any
 	values      func(M) []any // every column's model value, in column order
 	constraints []ConstraintError
-	projection  string
-	selectSQL   string
 }
 
 // TableOption supplies generated table metadata.
@@ -65,7 +73,9 @@ func ModelValues[M any](values func(M) []any) TableOption[M] {
 
 // NewTable constructs the descriptor embedded by generated table and view types.
 func NewTable[M any](schema, name string, columns []string, scan Scanner[M], options ...TableOption[M]) Table[M] {
-	table := Table[M]{schema: schema, name: name, columns: slices.Clone(columns), scan: scan}
+	table := Table[M]{tableMeta: &tableMeta[M]{
+		schema: schema, name: name, scan: scan, columns: slices.Clone(columns),
+	}}
 	for _, option := range options {
 		table = option(table)
 	}
@@ -91,8 +101,14 @@ func (t Table[M]) renderProjection() string {
 }
 
 func (t Table[M]) withSchema(schema string) Table[M] {
-	t.schema = schema
-	t.selectSQL = ""
+	if t.tableMeta == nil {
+		return t
+	}
+
+	meta := *t.tableMeta
+	meta.schema = schema
+	meta.selectSQL = ""
+	t.tableMeta = &meta
 
 	if t.valid() && validIdentifier(schema) && validIdentifier(t.name) {
 		t.selectSQL = "SELECT " + t.projection + " FROM " + pgx.Identifier{schema, t.name}.Sanitize() + ` AS "q"`
@@ -111,8 +127,13 @@ func (t Table[M]) ratelSource() source[M] {
 	return source[M]{table: t}
 }
 
+// Select starts a SELECT over the table's rows.
+func (t Table[M]) Select() Select[M] {
+	return Select[M]{source: t.ratelSource()}
+}
+
 func (t Table[M]) render(writer *sqlWriter) error {
-	if !validIdentifier(t.schema) || !validIdentifier(t.name) {
+	if t.tableMeta == nil || !validIdentifier(t.schema) || !validIdentifier(t.name) {
 		return ErrInvalidQuery
 	}
 
@@ -122,7 +143,7 @@ func (t Table[M]) render(writer *sqlWriter) error {
 }
 
 func (t Table[M]) valid() bool {
-	if len(t.columns) == 0 || t.scan == nil {
+	if t.tableMeta == nil || len(t.columns) == 0 || t.scan == nil {
 		return false
 	}
 
@@ -139,30 +160,85 @@ func validIdentifier(name string) bool {
 	return name != "" && !strings.ContainsRune(name, 0)
 }
 
-// Query is a generated static SELECT, bound to its arguments.
+// Query is a generated static row query, bound to its arguments. It is a
+// value: Build renders it, db.Run runs its statement verbatim (so DML with
+// RETURNING works) with the row verbs, and Select starts a SELECT over its result.
 type Query[M any] struct {
 	table Table[M]
-	sql   string
-	args  []any
+	// one is the query's statement as a single-element slice, shared by
+	// every run without copying.
+	one []stmt
 }
 
-// NewQuery binds a static SELECT whose output columns match the generated scanner.
+// NewQuery binds a static row query whose output columns match the generated scanner.
 // Its parameters are contiguous $1..$n; SQL is trusted, generated PostgreSQL SQL.
 func NewQuery[M any](columns []string, scan Scanner[M], sql string, args ...any) Query[M] {
-	return Query[M]{table: NewTable("", "", columns, scan), sql: sql, args: slices.Clone(args)}
+	return Query[M]{table: NewTable("", "", columns, scan), one: []stmt{{SQL: sql, Args: slices.Clone(args)}}}
 }
 
+// Select starts a SELECT over the query's result.
+func (q Query[M]) Select() Select[M] { return Select[M]{source: q.ratelSource()} }
+
+// Build returns the query's SQL and a copy of its arguments.
+func (q Query[M]) Build() (string, []any, error) { return buildStatements(q.one) }
+
 func (q Query[M]) ratelSource() source[M] {
-	return source[M]{table: q.table, static: &Statement{SQL: q.sql, Args: q.args}, render: func(writer *sqlWriter) error {
-		if q.sql == "" || len(writer.args) != 0 {
+	if len(q.one) != 1 {
+		return source[M]{table: q.table, render: func(*sqlWriter) error { return ErrInvalidQuery }}
+	}
+
+	only := &q.one[0]
+
+	return source[M]{table: q.table, static: only, render: func(writer *sqlWriter) error {
+		if only.SQL == "" || len(writer.args) != 0 {
 			return ErrInvalidQuery
 		}
 
 		writer.WriteByte('(')
-		writer.WriteString(q.sql)
+		writer.WriteString(only.SQL)
 		writer.WriteByte(')')
-		writer.args = append(writer.args, q.args...)
+		writer.args = append(writer.args, only.Args...)
 
 		return nil
 	}}
+}
+
+// Command is a generated static statement without result rows, as generated
+// for :exec and :execrows queries. db.Run gives it a single verb, Exec.
+type Command struct{ one []stmt }
+
+// NewCommand binds a static statement. Its parameters are contiguous $1..$n;
+// SQL is trusted, generated PostgreSQL SQL.
+func NewCommand(sql string, args ...any) Command {
+	return Command{one: []stmt{{SQL: sql, Args: slices.Clone(args)}}}
+}
+
+// Build returns the command's SQL and a copy of its arguments.
+func (c Command) Build() (string, []any, error) { return buildStatements(c.one) }
+
+func (c Command) execPlan() execPlan { return execPlan{plan: staticPlan(c.one)} }
+
+func (c Command) bind(db *DB) ExecRunner { return ExecRunner{db: db, plan: c.execPlan()} }
+
+func (q Query[M]) rowsPlan() rowsPlan[M] { return rowsPlan[M]{plan: staticPlan(q.one), table: q.table} }
+
+func (q Query[M]) bind(db *DB) RowRunner[M] { return RowRunner[M]{db: db, plan: q.rowsPlan()} }
+
+// staticPlan sends a static statement as it is; empty SQL cannot be sent.
+func staticPlan(one []stmt) plan {
+	if len(one) != 1 || one[0].SQL == "" {
+		return plan{err: ErrInvalidQuery}
+	}
+
+	return plan{head: one[0]}
+}
+
+// buildStatements renders a static statement: empty SQL is invalid, and the
+// caller owns the returned arguments.
+func buildStatements(one []stmt) (string, []any, error) {
+	if len(one) != 1 || one[0].SQL == "" {
+		return "", nil, ErrInvalidQuery
+	}
+
+	return one[0].SQL, slices.Clone(one[0].Args), nil
 }

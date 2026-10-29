@@ -11,9 +11,9 @@ import (
 // An item that cannot render keeps its error, and db.Batch returns it before
 // anything is sent.
 type BatchItem struct {
-	statements []Statement
-	handle     func(pgx.BatchResults) error // reads one result per statement, in order
-	err        error
+	plan   plan
+	handle func(pgx.BatchResults) error // reads one result per statement, in order
+	err    error
 }
 
 // Batch sends the items in one round trip and fills each item's destination
@@ -32,8 +32,10 @@ func (db *DB) Batch(ctx context.Context, items ...BatchItem) error {
 			return item.err
 		}
 
-		for _, statement := range item.statements {
-			batch.Queue(statement.SQL, statement.Args...)
+		for index := range item.plan.count() {
+			rendered := item.plan.at(index)
+
+			batch.Queue(rendered.SQL, rendered.Args...)
 		}
 	}
 
@@ -58,122 +60,120 @@ func (db *DB) Batch(ctx context.Context, items ...BatchItem) error {
 	return err
 }
 
-// Batch is the SELECT as a batch item that collects every row into dest.
-func (q Select[M]) Batch(dest *[]M) BatchItem {
-	statement, err := q.SQL()
-	if err != nil {
-		return BatchItem{err: err}
-	}
-
-	return BatchItem{statements: []Statement{statement}, handle: func(results pgx.BatchResults) error {
-		rows, err := results.Query()
-		if err != nil {
-			return fmt.Errorf("ratel: batch SELECT: %w", err)
-		}
-
-		defer rows.Close()
-
-		models := make([]M, 0)
-
-		for rows.Next() {
-			model, err := q.source.table.scan(rows)
-			if err != nil {
-				return fmt.Errorf("ratel: scan batch SELECT: %w", err)
-			}
-
-			models = append(models, model)
-		}
-
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("ratel: iterate batch SELECT: %w", err)
-		}
-
-		*dest = models
-
-		return nil
-	}}
+// List is a batch item that collects every row of a row query into dest; an
+// empty result is a non-nil slice. Only values that return rows are accepted.
+func List[M any, Q RowQuery[M]](query Q, dest *[]M) BatchItem {
+	return rowsItem(query.rowsPlan(), dest, nil)
 }
 
-// BatchOne is the SELECT as a batch item that scans its single row into dest:
-// ErrNotFound for none, ErrMultipleRows for more.
-func (q Select[M]) BatchOne(dest *M) BatchItem {
-	var models []M
-
-	item := q.Batch(&models)
-	if item.err != nil {
-		return item
-	}
-
-	list := item.handle
-	item.handle = func(results pgx.BatchResults) error {
-		if err := list(results); err != nil {
-			return err
-		}
-
-		switch len(models) {
-		case 0:
-			return ErrNotFound
-		case 1:
-			*dest = models[0]
-
-			return nil
-		default:
-			return ErrMultipleRows
-		}
-	}
-
-	return item
+// One is a batch item that scans the single row of a row query into dest:
+// ErrNotFound (or the write's refusal) for none, ErrMultipleRows for more.
+// Only values that return rows are accepted.
+func One[M any, Q RowQuery[M]](query Q, dest *M) BatchItem {
+	return rowsItem(query.rowsPlan(), nil, dest)
 }
 
-// Batch is the write as a batch item that stores the affected rows in count.
-func (q Write[M]) Batch(count *int64) BatchItem {
-	statement, err := q.SQL()
-	if err != nil {
-		return BatchItem{err: err}
+// Exec is a batch item that stores the affected rows of a write, an insert
+// or a Command in count, with the missed-row refusals of Save and DeleteRow.
+// Only values that do not return rows are accepted.
+func Exec[Q ExecQuery](query Q, count *int64) BatchItem {
+	planned := query.execPlan()
+	if planned.err != nil {
+		return BatchItem{err: planned.err}
 	}
 
-	return execItem([]Statement{statement}, q.table, q.missing, count)
-}
-
-// Batch is the insert as a batch item that stores the inserted rows in count.
-func (q Insert[M, I]) Batch(count *int64) BatchItem {
-	statements, err := q.Statements()
-	if err != nil {
-		return BatchItem{err: err}
-	}
-
-	return execItem(statements, q.table.Table, "", count)
-}
-
-// ExecItem is a static statement, as generated for :exec and :execrows
-// queries, as a batch item that stores the affected rows in count.
-func ExecItem(statement Statement, count *int64) BatchItem {
-	if statement.SQL == "" {
-		return BatchItem{err: ErrInvalidQuery}
-	}
-
-	return execItem([]Statement{statement}, Table[struct{}]{}, "", count)
-}
-
-func execItem[M any](statements []Statement, table Table[M], missing refusal, count *int64) BatchItem {
-	return BatchItem{statements: statements, handle: func(results pgx.BatchResults) error {
+	return BatchItem{plan: planned.plan, handle: func(results pgx.BatchResults) error {
 		var total int64
 
-		for range statements {
+		for range planned.count() {
 			tag, err := results.Exec()
 			if err != nil {
-				return mapWriteError(err, table)
+				return mapWriteError(err, planned.target)
 			}
 
 			total += tag.RowsAffected()
 		}
 
-		if total == 0 && missing != "" {
-			return missing
+		if total == 0 && planned.missing != "" {
+			return planned.missing
 		}
 
 		*count = total
 
 		return nil
 	}}
+}
+
+// rowsItem reads one result per statement into one slice and stores it in
+// list, or, for a single-row item, the only row in one.
+func rowsItem[M any](planned rowsPlan[M], list *[]M, one *M) BatchItem {
+	if planned.err != nil {
+		return BatchItem{err: planned.err}
+	}
+
+	return BatchItem{plan: planned.plan, handle: func(results pgx.BatchResults) error {
+		runner := RowRunner[M]{plan: planned}
+		models := make([]M, 0)
+
+		for range planned.count() {
+			rows, err := results.Query()
+			if err != nil {
+				return runner.fail(err, "batch query")
+			}
+
+			err = readBatchRows(rows, runner, &models)
+			rows.Close()
+
+			if err != nil {
+				return err
+			}
+
+			if err = rows.Err(); err != nil {
+				return runner.fail(err, "batch iterate")
+			}
+		}
+
+		return storeBatchRows(planned.missing, models, list, one)
+	}}
+}
+
+// storeBatchRows hands the rows of a batch item to its destination.
+func storeBatchRows[M any](missing refusal, models []M, list *[]M, one *M) error {
+	if list != nil {
+		if len(models) == 0 && missing != "" {
+			return missing
+		}
+
+		*list = models
+
+		return nil
+	}
+
+	switch len(models) {
+	case 0:
+		if missing != "" {
+			return missing
+		}
+
+		return ErrNotFound
+	case 1:
+		*one = models[0]
+
+		return nil
+	default:
+		return ErrMultipleRows
+	}
+}
+
+func readBatchRows[M any](rows pgx.Rows, runner RowRunner[M], models *[]M) error {
+	for rows.Next() {
+		model, err := runner.scan(rows)
+		if err != nil {
+			return err
+		}
+
+		*models = append(*models, model)
+	}
+
+	return nil
 }

@@ -53,7 +53,6 @@ func TestRowWrites(t *testing.T) {
 	t.Parallel()
 
 	users := keyedDescriptor(true)
-	database := ratel.New(&pgx.Conn{})
 	user := readUser{ID: 7, Email: "a@x"}
 
 	for _, tc := range []struct {
@@ -63,17 +62,17 @@ func TestRowWrites(t *testing.T) {
 		args  []any
 	}{
 		{
-			"save", database.Save(users, user),
+			"save", users.Save(user),
 			`UPDATE "app"."users" AS "q" SET "email" = $1 WHERE "q"."id" = $2`,
 			[]any{"a@x", int64(7)},
 		},
 		{
-			"save with version", database.Save(users, user).ExpectVersion(users.Email, "old"),
+			"save with version", users.Save(user).ExpectVersion(users.Email, "old"),
 			`UPDATE "app"."users" AS "q" SET "email" = $1 WHERE ("q"."id" = $2 AND "q"."email" = $3)`,
 			[]any{"a@x", int64(7), "old"},
 		},
 		{
-			"delete row", database.DeleteRow(users, user),
+			"delete row", users.DeleteRow(user),
 			`DELETE FROM "app"."users" AS "q" WHERE "q"."id" = $1`,
 			[]any{int64(7)},
 		},
@@ -81,14 +80,14 @@ func TestRowWrites(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := tc.write.SQL()
+			statement, err := build(tc.write)
 			if err != nil || statement.SQL != tc.sql || !reflect.DeepEqual(statement.Args, tc.args) {
 				t.Fatalf("got %+v, %v; want %s, %#v", statement, err, tc.sql, tc.args)
 			}
 		})
 	}
 
-	if _, err := database.Save(keyedDescriptor(false), user).SQL(); !errors.Is(err, ratel.ErrInvalidQuery) {
+	if _, err := build(keyedDescriptor(false).Save(user)); !errors.Is(err, ratel.ErrInvalidQuery) {
 		t.Fatalf("Save without model values = %v", err)
 	}
 }
@@ -99,7 +98,7 @@ func TestRowWriteMissing(t *testing.T) {
 	users := keyedDescriptor(true)
 	user := readUser{ID: 7, Email: "a@x"}
 
-	save := func(db *ratel.DB) ratel.Write[readUser] { return db.Save(users, user) }
+	save := func(_ *ratel.DB) ratel.Write[readUser] { return users.Save(user) }
 
 	for _, tc := range []struct {
 		name  string
@@ -108,11 +107,11 @@ func TestRowWriteMissing(t *testing.T) {
 		want  error
 	}{
 		{"save missing", save, "UPDATE 0", ratel.ErrNotFound},
-		{"stale version", func(db *ratel.DB) ratel.Write[readUser] {
-			return db.Save(users, user).ExpectVersion(users.Email, "old")
+		{"stale version", func(_ *ratel.DB) ratel.Write[readUser] {
+			return users.Save(user).ExpectVersion(users.Email, "old")
 		}, "UPDATE 0", ratel.ErrStaleVersion},
-		{"delete missing", func(db *ratel.DB) ratel.Write[readUser] {
-			return db.DeleteRow(users, user)
+		{"delete missing", func(_ *ratel.DB) ratel.Write[readUser] {
+			return users.DeleteRow(user)
 		}, "DELETE 0", ratel.ErrNotFound},
 		{"saved", save, "UPDATE 1", nil},
 	} {
@@ -123,7 +122,7 @@ func TestRowWriteMissing(t *testing.T) {
 				return pgconn.NewCommandTag(tc.rows), nil
 			}}
 
-			if _, err := tc.write(ratel.New(executor)).Exec(t.Context()); !errors.Is(err, tc.want) {
+			if _, err := ratel.New(executor).Run(tc.write(ratel.New(executor))).Exec(t.Context()); !errors.Is(err, tc.want) {
 				t.Fatalf("Exec() error = %v, want %v", err, tc.want)
 			}
 		})
@@ -150,21 +149,20 @@ func TestRowInSchema(t *testing.T) {
 
 	users := keyedDescriptor(true)
 	moved := users.InSchema("tenant")
-	database := ratel.New(&pgx.Conn{})
 	user := readUser{ID: 7, Email: "a@x"}
 
-	save, err := database.Save(moved, user).SQL()
+	save, err := build(moved.Save(user))
 	if err != nil || save.SQL != `UPDATE "tenant"."users" AS "q" SET "email" = $1 WHERE "q"."id" = $2` ||
 		!reflect.DeepEqual(save.Args, []any{"a@x", int64(7)}) {
 		t.Fatalf("Save() = %+v, %v", save, err)
 	}
 
-	del, err := database.DeleteRow(moved, user).SQL()
+	del, err := build(moved.DeleteRow(user))
 	if err != nil || del.SQL != `DELETE FROM "tenant"."users" AS "q" WHERE "q"."id" = $1` {
 		t.Fatalf("DeleteRow() = %+v, %v", del, err)
 	}
 
-	original, err := database.DeleteRow(users, user).SQL()
+	original, err := build(users.DeleteRow(user))
 	if err != nil || original.SQL != `DELETE FROM "app"."users" AS "q" WHERE "q"."id" = $1` {
 		t.Fatalf("original schema changed: %+v, %v", original, err)
 	}
@@ -173,7 +171,6 @@ func TestRowInSchema(t *testing.T) {
 func TestRowByKey(t *testing.T) {
 	t.Parallel()
 
-	database := ratel.New(&pgx.Conn{})
 	user := readUser{ID: 7, Email: "a@x"}
 
 	for _, tc := range []struct {
@@ -203,12 +200,12 @@ func TestRowByKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := database.DeleteRow(tc.users, user).SQL()
+			statement, err := build(tc.users.DeleteRow(user))
 			if !errors.Is(err, tc.wantError) || statement.SQL != tc.sql || !reflect.DeepEqual(statement.Args, tc.args) {
 				t.Fatalf("DeleteRow() = %+v, %v; want %s, %#v, %v", statement, err, tc.sql, tc.args, tc.wantError)
 			}
 
-			if _, saveErr := database.Save(tc.users, user).SQL(); tc.wantError != nil && !errors.Is(saveErr, tc.wantError) {
+			if _, saveErr := build(tc.users.Save(user)); tc.wantError != nil && !errors.Is(saveErr, tc.wantError) {
 				t.Fatalf("Save() error = %v, want %v", saveErr, tc.wantError)
 			}
 		})
@@ -217,24 +214,23 @@ func TestRowByKey(t *testing.T) {
 
 func BenchmarkRowStatements(b *testing.B) {
 	users := keyedDescriptor(true)
-	database := ratel.New(&pgx.Conn{})
 	user := readUser{ID: 7, Email: "a@x"}
 
 	for _, tc := range []struct {
 		name  string
 		query func() ratel.Write[readUser]
 	}{
-		{"delete row", func() ratel.Write[readUser] { return database.DeleteRow(users, user) }},
+		{"delete row", func() ratel.Write[readUser] { return users.DeleteRow(user) }},
 		{"expect version", func() ratel.Write[readUser] {
-			return database.Save(users, user).ExpectVersion(users.ID, int64(3))
+			return users.Save(user).ExpectVersion(users.ID, int64(3))
 		}},
-		{"in schema", func() ratel.Write[readUser] { return database.DeleteRow(users.InSchema("tenant"), user) }},
+		{"in schema", func() ratel.Write[readUser] { return users.InSchema("tenant").DeleteRow(user) }},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				if _, err := tc.query().SQL(); err != nil {
+				if _, err := build(tc.query()); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -244,11 +240,10 @@ func BenchmarkRowStatements(b *testing.B) {
 
 func BenchmarkSave(b *testing.B) {
 	users := keyedDescriptor(true)
-	database := ratel.New(&pgx.Conn{})
 	user := readUser{ID: 7, Email: "a@x"}
 
 	for b.Loop() {
-		if _, err := database.Save(users, user).SQL(); err != nil {
+		if _, err := build(users.Save(user)); err != nil {
 			b.Fatal(err)
 		}
 	}

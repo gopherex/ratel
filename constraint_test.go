@@ -44,7 +44,7 @@ func TestConstraintErrors(t *testing.T) {
 				func(row writeInsert) bool { return row.valid })
 			columns[0] = "mutated"
 
-			_, err := ratel.New(executor).Delete(users).All().Exec(t.Context())
+			_, err := ratel.New(executor).Run(users.Delete().All()).Exec(t.Context())
 			if !errors.Is(err, cause) {
 				t.Fatalf("lost cause: %v", err)
 			}
@@ -105,7 +105,7 @@ func TestBwConstraintColumn(t *testing.T) {
 				return pgconn.CommandTag{}, cause
 			}}
 
-			_, err := ratel.New(executor).Exec(t.Context(), ratel.Statement{SQL: "INSERT INTO app.users DEFAULT VALUES"})
+			_, err := ratel.New(executor).Run(ratel.NewCommand("INSERT INTO app.users DEFAULT VALUES")).Exec(t.Context())
 
 			var constraint *ratel.ConstraintError
 			if !errors.As(err, &constraint) || constraint.Kind != ratel.ConstraintNotNull ||
@@ -121,12 +121,14 @@ func BenchmarkConstraintError(b *testing.B) {
 	executor := writeExecutor{exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
 		return pgconn.CommandTag{}, cause
 	}}
-	query := ratel.New(executor).Delete(writeDescriptor()).All()
+	query := writeDescriptor().Delete().All()
+
+	database := ratel.New(executor)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := query.Exec(b.Context()); err == nil {
+		if _, err := database.Run(query).Exec(b.Context()); err == nil {
 			b.Fatal("missing error")
 		}
 	}
@@ -140,12 +142,14 @@ func BenchmarkConstraints(b *testing.B) {
 	table := ratel.NewTable("app", "users", []string{"id", "email", "manager_id"}, scanReadUser,
 		ratel.Constraints[readUser](ratel.ConstraintError{Constraint: "users_email_key", Columns: []string{"email"}}))
 	sentinel := &ratel.ConstraintError{Kind: ratel.ConstraintUnique, Table: "users"}
-	query := ratel.New(executor).Delete(ratel.NewWriteTable(table, func(row writeInsert) bool { return row.valid })).All()
+	query := ratel.NewWriteTable(table, func(row writeInsert) bool { return row.valid }).Delete().All()
+
+	database := ratel.New(executor)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, err := query.Exec(b.Context())
+		_, err := database.Run(query).Exec(b.Context())
 		if !errors.Is(err, sentinel) || err.Error() == "" {
 			b.Fatal("missing constraint error")
 		}

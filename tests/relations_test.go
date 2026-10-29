@@ -282,8 +282,8 @@ func relationsNested(t *testing.T, pool *pgxpool.Pool) {
 	users, orders := relDescriptors()
 	counter := &relationCounter{Executor: pool}
 
-	models, err := ratel.New(counter).From(users).With(users.Orders.OrderBy(orders.ID.Asc()).With(orders.Items),
-		users.Tags, users.Manager).WithCount(users.Orders).OrderBy(users.Tenant.Asc(), users.ID.Asc()).List(t.Context())
+	models, err := ratel.New(counter).Run(users.Select().With(users.Orders.OrderBy(orders.ID.Asc()).With(orders.Items),
+		users.Tags, users.Manager).WithCount(users.Orders).OrderBy(users.Tenant.Asc(), users.ID.Asc())).List(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,10 +356,10 @@ func relationsPagination(t *testing.T, pool *pgxpool.Pool) {
 	for _, strategy := range []ratel.LoadStrategy{{}, ratel.Window()} {
 		counter := &relationCounter{Executor: pool}
 
-		models, err := ratel.New(counter).From(users).Where(users.Tenant.Eq(1)).OrderBy(users.ID.Asc()).
+		models, err := ratel.New(counter).Run(users.Select().Where(users.Tenant.Eq(1)).OrderBy(users.ID.Asc()).
 			With(users.Orders.OrderBy(orders.ID.Desc()).Offset(1).Limit(1).Strategy(strategy),
 				users.Tags.Limit(1), users.Manager.Strategy(ratel.Joined())).
-			WithCount(users.Orders.Strategy(ratel.Correlated())).List(t.Context())
+			WithCount(users.Orders.Strategy(ratel.Correlated()))).List(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -395,7 +395,7 @@ func relationsStatic(t *testing.T, pool *pgxpool.Pool) {
 	counter := &relationCounter{Executor: pool}
 	database := ratel.New(counter)
 
-	models, err := database.From(source).List(t.Context())
+	models, err := database.Run(source.Select()).List(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func relationsChunks(t *testing.T, pool *pgxpool.Pool) {
 
 	users, _ := relDescriptors()
 	counter := &relationCounter{Executor: pool}
-	query := ratel.New(counter).From(users).With(users.Orders).Limit(4)
+	query := ratel.New(counter).Run(users.Select().With(users.Orders).Limit(4))
 	count := 0
 
 	for page, err := range query.Chunks(t.Context(), 2) {
@@ -481,9 +481,9 @@ func relationsProtocol(t *testing.T, pool *pgxpool.Pool, mode pgx.QueryExecMode)
 
 	users, orders := relDescriptors()
 
-	models, err := ratel.New(connection).From(users).Where(users.Tenant.Eq(1)).Where(users.ID.Eq(1)).
+	models, err := ratel.New(connection).Run(users.Select().Where(users.Tenant.Eq(1)).Where(users.ID.Eq(1)).
 		With(users.Orders.Where(orders.ID.Lt(13)).OrderBy(orders.ID.Desc()).Limit(1)).
-		WithCount(users.Orders.Where(orders.ID.Lt(13))).List(t.Context())
+		WithCount(users.Orders.Where(orders.ID.Lt(13)))).List(t.Context())
 	if err != nil {
 		t.Fatalf("%s: %v", mode, err)
 	}

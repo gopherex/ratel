@@ -46,7 +46,7 @@ func TestRateltestPostgres(t *testing.T) {
 
 	t.Cleanup(func() {
 		counts := make(map[string]int)
-		for _, statement := range recorder.Statements() {
+		for _, statement := range recorder.Queries() {
 			counts[statement.SQL]++
 		}
 

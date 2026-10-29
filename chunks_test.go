@@ -21,7 +21,7 @@ func TestChunksInvalid(t *testing.T) {
 
 		return nil, errors.New("unexpected query")
 	}}
-	base := ratel.New(executor).From(users)
+	base := ratel.From(users)
 
 	for _, tc := range []struct {
 		name  string
@@ -37,9 +37,9 @@ func TestChunksInvalid(t *testing.T) {
 		{"negative limit", base.Limit(-1), 1},
 		{"negative offset", base.Offset(-1), 1},
 		{"zero limit invalid column", base.Where(ratel.Col[readUser, int64]{}.Eq(1)).Limit(0), 1},
-		{"zero limit invalid nested source", ratel.New(executor).From(base.Limit(-1)).Limit(0), 1},
-		{"no key", ratel.New(executor).From(ratel.NewTable("app", "view", []string{"id"}, scanReadUser)), 1},
-		{"missing key column", ratel.New(executor).From(ratel.NewTable("app", "users", []string{"id"}, scanReadUser,
+		{"zero limit invalid nested source", ratel.From(base.Limit(-1)).Limit(0), 1},
+		{"no key", ratel.From(ratel.NewTable("app", "view", []string{"id"}, scanReadUser)), 1},
+		{"missing key column", ratel.From(ratel.NewTable("app", "users", []string{"id"}, scanReadUser,
 			ratel.PrimaryKey([]string{"missing"}, func(user readUser) []any { return []any{user.ID} }))), 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestChunksInvalid(t *testing.T) {
 
 			count := 0
 
-			for page, err := range tc.query.Chunks(t.Context(), tc.size) {
+			for page, err := range ratel.New(executor).Run(tc.query).Chunks(t.Context(), tc.size) {
 				count++
 
 				if page != nil || !errors.Is(err, ratel.ErrInvalidQuery) {
@@ -84,9 +84,9 @@ func TestChunksLimitOffset(t *testing.T) {
 
 		return &readRows{ids: []int64{8}}, nil
 	}}
-	query := ratel.New(executor).From(userDescriptor()).Limit(3).Offset(5)
+	query := ratel.From(userDescriptor()).Limit(3).Offset(5)
 
-	for _, err := range query.Chunks(t.Context(), 2) {
+	for _, err := range ratel.New(executor).Run(query).Chunks(t.Context(), 2) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -124,9 +124,9 @@ func TestChunksTermination(t *testing.T) {
 
 				return &readRows{ids: tc.ids}, tc.failure
 			}}
-			query := ratel.New(executor).From(userDescriptor()).Limit(tc.limit)
+			query := ratel.From(userDescriptor()).Limit(tc.limit)
 
-			for _, err := range query.Chunks(t.Context(), 2) {
+			for _, err := range ratel.New(executor).Run(query).Chunks(t.Context(), 2) {
 				if !errors.Is(err, tc.failure) {
 					t.Fatal(err)
 				}
@@ -169,7 +169,7 @@ func TestBwChunksCompositeKey(t *testing.T) {
 
 	pages := 0
 
-	for page, err := range ratel.New(executor).From(table).Chunks(t.Context(), 2) {
+	for page, err := range ratel.New(executor).Run(ratel.From(table)).Chunks(t.Context(), 2) {
 		if err != nil || len(page) != 2 {
 			t.Fatalf("%v %v", page, err)
 		}
@@ -195,7 +195,7 @@ func TestBwChunksKeyValuesMismatch(t *testing.T) {
 
 	yields := 0
 
-	for page, err := range ratel.New(executor).From(table).Chunks(t.Context(), 2) {
+	for page, err := range ratel.New(executor).Run(ratel.From(table)).Chunks(t.Context(), 2) {
 		yields++
 
 		if page != nil || !errors.Is(err, ratel.ErrInvalidQuery) {
@@ -218,12 +218,14 @@ func BenchmarkBwChunksCompositeKey(b *testing.B) {
 
 		return &readRows{}, nil
 	}}
-	query := ratel.New(executor).From(bwCompositeUsers(func(user readUser) []any { return []any{user.ID, user.Email} }))
+	query := ratel.From(bwCompositeUsers(func(user readUser) []any { return []any{user.ID, user.Email} }))
+
+	database := ratel.New(executor)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		for _, err := range query.Chunks(b.Context(), 2) {
+		for _, err := range database.Run(query).Chunks(b.Context(), 2) {
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -235,12 +237,14 @@ func BenchmarkChunks(b *testing.B) {
 	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
 		return &readRows{ids: []int64{1}}, nil
 	}}
-	query := ratel.New(executor).From(userDescriptor()).Limit(1)
+	query := ratel.From(userDescriptor()).Limit(1)
+
+	database := ratel.New(executor)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		for _, err := range query.Chunks(b.Context(), 2) {
+		for _, err := range database.Run(query).Chunks(b.Context(), 2) {
 			if err != nil {
 				b.Fatal(err)
 			}

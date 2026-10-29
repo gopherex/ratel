@@ -9,7 +9,7 @@ import (
 )
 
 type loadJob struct {
-	statement Statement
+	statement stmt
 	read      func(pgx.Rows) error
 	children  func() ([]loadJob, error)
 	attach    func()

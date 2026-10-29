@@ -68,26 +68,26 @@ func run(ctx context.Context, url string, out io.Writer) error {
 	database := ratel.New(pool)
 
 	// Insert, returning the generated rows.
-	created, err := database.Insert(app.Users,
-		app.NewUserInsert("ann@example.com", "Ann"),
-		app.NewUserInsert("bob@example.com", "Bob"),
-	).Returning(ctx)
+	created, err := database.Run(app.Users.Insert(
+		app.Users.Row().Email("ann@example.com").Name("Ann"),
+		app.Users.Row().Email("bob@example.com").Name("Bob"),
+	).Returning()).List(ctx)
 	if err != nil {
 		return err
 	}
 
 	ann := created[0]
 	for _, total := range []string{"12.50", "40.00"} {
-		order := app.NewOrderInsert(ann.ID, decimal.RequireFromString(total))
-		if _, err := database.Insert(app.Orders, order).Exec(ctx); err != nil {
+		order := app.Orders.Row().UserID(ann.ID).Total(decimal.RequireFromString(total))
+		if _, err := database.Run(app.Orders.Insert(order)).Exec(ctx); err != nil {
 			return err
 		}
 	}
 
 	// Typed builder with an eager relation: two queries, no N+1.
-	loaded, err := database.From(app.Users).
+	loaded, err := database.Run(app.Users.Select().
 		Where(app.Users.Email.Eq("ann@example.com")).
-		With(app.Users.Orders).
+		With(app.Users.Orders)).
 		One(ctx)
 	if err != nil {
 		return err
@@ -101,7 +101,7 @@ func run(ctx context.Context, url string, out io.Writer) error {
 	fmt.Fprintln(out, loaded.Name, "has", len(orders), "orders")
 
 	// A static query from queries/users/users.sql.
-	top, err := users.TopCustomers(ctx, database, topCustomers)
+	top, err := database.Run(users.TopCustomers().Limit(topCustomers)).List(ctx)
 	if err != nil {
 		return err
 	}

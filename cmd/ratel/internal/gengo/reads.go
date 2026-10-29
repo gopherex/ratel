@@ -9,7 +9,7 @@ import (
 )
 
 // writeRead generates a :one or :many query: its row type and scanner, a
-// builder descriptor for SELECT queries, and the query functions.
+// column descriptor for SELECT queries, and the query builder steps.
 func (s *state) writeRead(file *unit, value *ir.Query, parameters []parameter) error {
 	name := value.GetName()
 
@@ -36,34 +36,25 @@ func (s *state) writeRead(file *unit, value *ir.Query, parameters []parameter) e
 	file.imports = append(file.imports, "github.com/jackc/pgx/v5")
 	writeQueryScanner(file, scanner, result)
 
-	source, err := s.querySource(file, value, parameters, result, scanner)
-	if err != nil {
-		return err
+	columns := make([]string, 0, len(result.columns))
+	for _, column := range result.columns {
+		columns = append(columns, column.name)
 	}
 
-	declared := declaration(name, parameters)
-
-	if value.GetCommand() == ir.QueryCommand_QUERY_COMMAND_ONE {
-		file.printf("// %s returns the query's row; ratel.ErrNotFound when there is none.\n"+
-			"func %s(ctx context.Context, db *ratel.DB%s) (%s, error) {\n\treturn db.From(%s).One(ctx)\n}\n\n",
-			name, name, declared, result.typeName, source)
-
-		return nil
+	if value.GetAst().GetSelect() != nil && distinctIdentifiers(columns) {
+		if err := s.writeColumns(file, value, result); err != nil {
+			return err
+		}
 	}
 
-	if err := file.declare(name+"All", "query "+name); err != nil {
-		return err
-	}
+	return writeSteps(file, name, "ratel.Query["+result.typeName+"]", parameters, func(arguments string) string {
+		call := "ratel.NewQuery(" + quotedList(columns) + ", " + scanner + ", " + strconv.Quote(value.GetSql())
+		if arguments != "" {
+			call += ", " + arguments
+		}
 
-	file.imports = append(file.imports, "iter")
-	file.printf("// %s returns every row of the query.\n"+
-		"func %s(ctx context.Context, db *ratel.DB%s) ([]%s, error) {\n\treturn db.From(%s).List(ctx)\n}\n\n",
-		name, name, declared, result.typeName, source)
-	file.printf("// %sAll streams the rows of the query.\n"+
-		"func %sAll(ctx context.Context, db *ratel.DB%s) iter.Seq2[%s, error] {\n\treturn db.From(%s).All(ctx)\n}\n\n",
-		name, name, declared, result.typeName, source)
-
-	return nil
+		return call + ")"
+	})
 }
 
 // checkShape warns when a query declares the same row shape as an earlier
@@ -104,35 +95,15 @@ func writeQueryScanner(file *unit, scanner string, result shape) {
 		strings.Join(targets, ", "), result.after)
 }
 
-// querySource is the expression a query function passes to db.From. A
-// SELECT gets a descriptor <Name>Q whose Args builds it, usable as a builder
-// source; DML with RETURNING builds the query inline.
-func (s *state) querySource(file *unit, value *ir.Query, parameters []parameter, result shape,
-	scanner string,
-) (string, error) {
+// writeColumns writes the descriptor <Name>Q of a SELECT query: its columns
+// only, for the filters and ordering of query.Select().
+func (s *state) writeColumns(file *unit, value *ir.Query, result shape) error {
 	name := value.GetName()
-	passed := arguments(parameters)
-
-	columns := make([]string, 0, len(result.columns))
-	for _, column := range result.columns {
-		columns = append(columns, column.name)
-	}
-
-	query := "ratel.NewQuery(" + quotedList(columns) + ", " + scanner + ", " + strconv.Quote(value.GetSql())
-	if passed != "" {
-		query += ", " + passed
-	}
-
-	query += ")"
-
-	if value.GetAst().GetSelect() == nil || !distinctIdentifiers(columns) {
-		return query, nil
-	}
 
 	descriptor, descriptorType := name+"Q", camel(name)+"Query"
 	for _, identifier := range []string{descriptor, descriptorType} {
 		if err := file.declare(identifier, "query "+name); err != nil {
-			return "", err
+			return err
 		}
 	}
 
@@ -141,7 +112,7 @@ func (s *state) querySource(file *unit, value *ir.Query, parameters []parameter,
 	for index := range value.GetColumns() {
 		column, err := s.column(file, value, index)
 		if err != nil {
-			return "", err
+			return err
 		}
 
 		kind := "Col"
@@ -155,14 +126,11 @@ func (s *state) querySource(file *unit, value *ir.Query, parameters []parameter,
 			file.use(column.goType) + "](" + strconv.Quote(column.name) + "),\n")
 	}
 
-	declared := declaration(name, parameters)
-	file.printf("// %s is the query %s as a builder source: db.From(%s.Args(...)). Clauses added\n"+
-		"// outside apply to the query's result.\nvar %s = %s{\n%s}\n\ntype %s struct {\n%s}\n\n",
-		descriptor, name, descriptor, descriptor, descriptorType, values.String(), descriptorType, fields.String())
-	file.printf("// Args binds the query's parameters.\nfunc (%s) Args(%s) ratel.Query[%s] {\n\treturn %s\n}\n\n",
-		descriptorType, strings.TrimPrefix(declared, ", "), result.typeName, query)
+	file.printf("// %s describes the columns of the query %s: %s().Select().Where(%s.Column...).\n"+
+		"// Clauses added outside apply to the query's result.\nvar %s = %s{\n%s}\n\ntype %s struct {\n%s}\n\n",
+		descriptor, name, name, descriptor, descriptor, descriptorType, values.String(), descriptorType, fields.String())
 
-	return descriptor + ".Args(" + callArguments(parameters) + ")", nil
+	return nil
 }
 
 // distinctIdentifiers reports output names that make distinct Go fields.

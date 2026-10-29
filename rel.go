@@ -80,8 +80,8 @@ type Rel[M, R any] struct {
 }
 
 type relationStatements struct {
-	rows  Statement
-	count Statement
+	rows  stmt
+	count stmt
 }
 
 // RelOption supplies generated relation metadata.

@@ -6,14 +6,15 @@ import (
 	"slices"
 )
 
-// EagerSelect buffers parents before loading relations. It deliberately has no
-// All method and does not implement Source: eager work cannot be discarded by nesting.
+// EagerSelect is a SELECT with requested relations. It deliberately has no
+// All verb after db.Run and does not implement Source: eager work cannot be
+// discarded by nesting.
 type EagerSelect[M any] struct {
 	query     Select[M]
 	relations []Relation[M]
 }
 
-// With switches to an eager SELECT, whose method set excludes the row iterator.
+// With switches to an eager SELECT, whose runner excludes the row iterator.
 func (q Select[M]) With(relations ...Relation[M]) EagerSelect[M] {
 	return EagerSelect[M]{query: q, relations: slices.Clone(relations)}
 }
@@ -63,16 +64,28 @@ func (q EagerSelect[M]) Offset(count int) EagerSelect[M] {
 	return q
 }
 
+// Build renders the root query only: relation queries bind the parent keys,
+// which exist only after it runs. Observe them with rateltest.Recorder.
+func (q EagerSelect[M]) Build() (string, []any, error) { return q.query.Build() }
+
+// EagerRunner is an eager SELECT bound to a database by db.Run.
+type EagerRunner[M any] struct {
+	db    *DB
+	eager EagerSelect[M]
+}
+
+func (q EagerSelect[M]) bind(db *DB) EagerRunner[M] { return EagerRunner[M]{db: db, eager: q} }
+
 // List reads parents, closes their cursor, then loads every requested depth.
 // A failure returns no partial slice.
-func (q EagerSelect[M]) List(ctx context.Context, options ...CallOption) ([]M, error) {
-	if err := q.validate(options); err != nil {
+func (r EagerRunner[M]) List(ctx context.Context, options ...CallOption) ([]M, error) {
+	if err := r.validate(options); err != nil {
 		return nil, err
 	}
 
-	models, err := q.query.List(ctx, options...)
+	models, err := SelectRunner[M]{db: r.db, query: r.eager.query}.List(ctx, options...)
 	if err == nil {
-		err = q.loadModels(ctx, models)
+		err = r.loadModels(ctx, models)
 	}
 
 	if err != nil {
@@ -82,48 +95,51 @@ func (q EagerSelect[M]) List(ctx context.Context, options ...CallOption) ([]M, e
 	return models, nil
 }
 
-func (q EagerSelect[M]) validate(options []CallOption) error {
-	if err := q.query.db.validateLoadMode(options); err != nil {
+func (r EagerRunner[M]) validate(options []CallOption) error {
+	if err := r.db.validateLoadMode(options); err != nil {
 		return err
 	}
 
-	_, err := prepareRelations([]M{}, q.relations)
+	_, err := prepareRelations([]M{}, r.eager.relations)
 
 	return err
 }
 
-func (q EagerSelect[M]) loadModels(ctx context.Context, models []M) error {
-	jobs, err := prepareRelations(models, q.relations)
+func (r EagerRunner[M]) loadModels(ctx context.Context, models []M) error {
+	jobs, err := prepareRelations(models, r.eager.relations)
 	if err != nil {
 		return err
 	}
 
-	return q.query.db.load(ctx, jobs)
+	return r.db.load(ctx, jobs)
 }
 
 // One requires exactly one parent before any relations are loaded.
-func (q EagerSelect[M]) One(ctx context.Context, options ...CallOption) (M, error) {
+func (r EagerRunner[M]) One(ctx context.Context, options ...CallOption) (M, error) {
 	const detectMultiple = 2
 
-	return q.single(ctx, detectMultiple, options)
+	return r.single(ctx, detectMultiple, options)
 }
 
 // First loads the first parent and its relations, or returns ErrNotFound.
-func (q EagerSelect[M]) First(ctx context.Context, options ...CallOption) (M, error) {
-	return q.single(ctx, 1, options)
+func (r EagerRunner[M]) First(ctx context.Context, options ...CallOption) (M, error) {
+	return r.single(ctx, 1, options)
 }
 
-func (q EagerSelect[M]) single(ctx context.Context, limit int, options []CallOption) (M, error) {
+func (r EagerRunner[M]) single(ctx context.Context, limit int, options []CallOption) (M, error) {
 	var zero M
-	if err := q.validate(options); err != nil {
+	if err := r.validate(options); err != nil {
 		return zero, err
 	}
 
-	if !q.query.verbatim() && (!q.query.limit.Set || q.query.limit.V > limit) {
-		q.query = q.query.Limit(limit)
+	query := r.eager.query
+	if !query.verbatim() && (!query.limit.Set || query.limit.V > limit) {
+		query = query.Limit(limit)
 	}
 	// Check cardinality before loading children, so invalid One results do no eager I/O.
-	models, err := q.query.collect(ctx, limit, options)
+	parents := SelectRunner[M]{db: r.db, query: query}
+
+	models, err := parents.collect(ctx, limit, options)
 	if err != nil {
 		return zero, err
 	}
@@ -136,7 +152,7 @@ func (q EagerSelect[M]) single(ctx context.Context, limit int, options []CallOpt
 		return zero, ErrMultipleRows
 	}
 
-	if err := q.loadModels(ctx, models); err != nil {
+	if err := r.loadModels(ctx, models); err != nil {
 		return zero, err
 	}
 
@@ -145,17 +161,17 @@ func (q EagerSelect[M]) single(ctx context.Context, limit int, options []CallOpt
 
 // Chunks loads each keyset page only after its parent cursor has closed.
 // Each page is fully loaded before it is yielded; no per-row lazy I/O occurs.
-func (q EagerSelect[M]) Chunks(ctx context.Context, size int, options ...CallOption) iter.Seq2[[]M, error] {
+func (r EagerRunner[M]) Chunks(ctx context.Context, size int, options ...CallOption) iter.Seq2[[]M, error] {
 	return func(yield func([]M, error) bool) {
-		if err := q.validate(options); err != nil {
+		if err := r.validate(options); err != nil {
 			yield(nil, err)
 
 			return
 		}
 
-		for models, err := range q.query.Chunks(ctx, size, options...) {
+		for models, err := range (SelectRunner[M]{db: r.db, query: r.eager.query}).Chunks(ctx, size, options...) {
 			if err == nil {
-				err = q.loadModels(ctx, models)
+				err = r.loadModels(ctx, models)
 			}
 
 			if err != nil {

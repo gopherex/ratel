@@ -56,7 +56,7 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 		}
 	}
 
-	// The descriptor is a pointer: db.From and the writes take it as an
+	// The descriptor is a pointer: the writes and sources take it as an
 	// interface, which then holds the pointer instead of a copy.
 	file.printf(")%s\n\n// %s describes %s.%s.\nvar %s = &%s{\n\t%s: %s,\n", unwrap, names.descriptor,
 		schema, table, names.descriptor, names.descriptorType, embedded, names.base)
@@ -145,16 +145,14 @@ func setParameter(insert, set string) string {
 }
 
 func writeInsertField(file *unit, names identifiers, value column) {
-	access := "insert." + value.field
+	access := "insert." + value.param
 	set := "true"
 
 	switch value.insert {
-	case insertRequired:
-		access = "insert." + parameterName(value.name)
 	case insertOptional:
 		set = access + ".Set"
 		access += ".V"
-	case insertNullable, insertOmitted:
+	case insertRequired, insertNullable, insertOmitted:
 	}
 
 	file.printf("\t\tratel.InsertField[%s]{\n\t\t\tName: %s, Type: %s,\n", names.insert, strconv.Quote(value.name),

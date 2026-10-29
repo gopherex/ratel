@@ -5,8 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/gopherex/ratel"
 )
 
@@ -22,7 +20,7 @@ type rawCase struct {
 }
 
 func rawQuery(sql string, args ...any) ratel.Select[readUser] {
-	return ratel.New(&pgx.Conn{}).From(userDescriptor()).Where(ratel.Raw[readUser](sql, args...))
+	return ratel.From(userDescriptor()).Where(ratel.Raw[readUser](sql, args...))
 }
 
 func TestRawScanning(t *testing.T) {
@@ -74,7 +72,7 @@ func TestRawScanning(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := rawQuery(tc.sql, "a", "b").SQL()
+			statement, err := build(rawQuery(tc.sql, "a", "b"))
 			want := rawPrefix + tc.want + `)`
 
 			if err != nil || statement.SQL != want || !reflect.DeepEqual(statement.Args, tc.args) {
@@ -99,7 +97,7 @@ func TestRawInvalidMarker(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := rawQuery(tc.sql, "a", "b").SQL(); !errors.Is(err, ratel.ErrInvalidQuery) {
+			if _, err := build(rawQuery(tc.sql, "a", "b")); !errors.Is(err, ratel.ErrInvalidQuery) {
 				t.Fatalf("SQL() error = %v", err)
 			}
 		})

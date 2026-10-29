@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/gopherex/ratel"
 )
 
@@ -18,8 +16,6 @@ func (u readUsers) InSchema(schema string) readUsers {
 
 func TestTableMetadata(t *testing.T) {
 	t.Parallel()
-
-	database := ratel.New(&pgx.Conn{})
 
 	for _, tc := range []struct {
 		name    string
@@ -39,7 +35,7 @@ func TestTableMetadata(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := database.From(tc.table).SQL()
+			statement, err := build(ratel.From(tc.table))
 			if tc.invalid {
 				if !errors.Is(err, ratel.ErrInvalidQuery) {
 					t.Fatalf("error: %v", err)
@@ -64,14 +60,13 @@ func TestDescriptorCopiesInputs(t *testing.T) {
 	query := ratel.NewQuery(columns, scanReadUser, "SELECT $1 AS id, '' AS email, NULL AS manager_id", args...)
 	columns[0] = "changed"
 	args[0] = int64(2)
-	database := ratel.New(&pgx.Conn{})
 
-	tableSQL, err := database.From(table).SQL()
+	tableSQL, err := build(ratel.From(table))
 	if err != nil || !strings.HasPrefix(tableSQL.SQL, `SELECT "q"."id",`) {
 		t.Fatalf("%+v: %v", tableSQL, err)
 	}
 
-	querySQL, err := database.From(database.From(query)).SQL()
+	querySQL, err := build(ratel.From(ratel.From(query)))
 	if err != nil || querySQL.Args[0] != int64(1) {
 		t.Fatalf("%+v: %v", querySQL, err)
 	}
@@ -80,24 +75,77 @@ func TestDescriptorCopiesInputs(t *testing.T) {
 func TestBwStaticSourceInvalid(t *testing.T) {
 	t.Parallel()
 
-	database := ratel.New(&pgx.Conn{})
 	columns := []string{"id", "email", "manager_id"}
 
 	for name, query := range map[string]ratel.Select[readUser]{
-		"nested empty SQL": database.From(database.From(ratel.NewQuery(columns, scanReadUser, ""))),
+		"nested empty SQL": ratel.From(ratel.From(ratel.NewQuery(columns, scanReadUser, ""))),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := query.SQL(); !errors.Is(err, ratel.ErrInvalidQuery) {
+			if _, err := build(query); !errors.Is(err, ratel.ErrInvalidQuery) {
 				t.Fatalf("SQL() error = %v, want ErrInvalidQuery", err)
 			}
 		})
 	}
 }
 
+func TestStaticBuild(t *testing.T) {
+	t.Parallel()
+
+	columns := []string{"id", "email", "manager_id"}
+	args := []any{int64(1)}
+	query := ratel.NewQuery(columns, scanReadUser, "SELECT $1", args...)
+	command := ratel.NewCommand("DELETE FROM app.users WHERE id = $1", args...)
+
+	args[0] = int64(2)
+
+	for name, value := range map[string]buildable{
+		"query": query, "command": command, "query select": query.Select(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			sql, got, err := value.Build()
+			if err != nil || sql == "" || got[0] != int64(1) {
+				t.Fatalf("Build() = %q, %v, %v", sql, got, err)
+			}
+
+			got[0] = int64(3)
+
+			if again, _ := build(value); again.Args[0] != int64(1) {
+				t.Fatal("Build() shares the statement's arguments")
+			}
+		})
+	}
+
+	for name, value := range map[string]buildable{
+		"empty query": ratel.NewQuery(columns, scanReadUser, ""), "empty command": ratel.NewCommand(""),
+		"zero query": ratel.Query[readUser]{}, "zero command": ratel.Command{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, _, err := value.Build(); !errors.Is(err, ratel.ErrInvalidQuery) {
+				t.Fatalf("Build() error = %v", err)
+			}
+		})
+	}
+}
+
+func BenchmarkStaticBuild(b *testing.B) {
+	query := ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser, "SELECT $1", int64(1))
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, _, err := query.Build(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkStaticSource(b *testing.B) {
-	database := ratel.New(&pgx.Conn{})
 	users := userDescriptor()
 
 	b.ReportAllocs()
@@ -106,8 +154,8 @@ func BenchmarkStaticSource(b *testing.B) {
 		source := ratel.NewQuery([]string{"id", "email", "manager_id"}, scanReadUser,
 			"SELECT id, email, manager_id FROM app.users WHERE id > $1", int64(1))
 
-		_, err := database.From(database.From(source)).Where(users.ID.Lt(10)).
-			OrderBy(users.ID.Asc()).Limit(2).Offset(1).SQL()
+		_, err := build(ratel.From(ratel.From(source)).Where(users.ID.Lt(10)).
+			OrderBy(users.ID.Asc()).Limit(2).Offset(1))
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -115,12 +163,10 @@ func BenchmarkStaticSource(b *testing.B) {
 }
 
 func BenchmarkDescriptors(b *testing.B) {
-	database := ratel.New(&pgx.Conn{})
-
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, err := database.From(userDescriptor().InSchema("tenant_42")).SQL()
+		_, err := build(ratel.From(userDescriptor().InSchema("tenant_42")))
 		if err != nil {
 			b.Fatal(err)
 		}

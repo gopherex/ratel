@@ -13,27 +13,102 @@ import (
 	"github.com/gopherex/ratel"
 )
 
+// compileOutput compiles source as a test file of its own package inside this
+// module and returns the compiler's output, which is empty for valid code.
+func compileOutput(t *testing.T, source string) string {
+	t.Helper()
+
+	file := filepath.Join(t.TempDir(), "misuse_test.go")
+	if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := exec.CommandContext(t.Context(), "go", "test", file).CombinedOutput()
+	if err == nil {
+		t.Fatalf("misuse compiled: %s", source)
+	}
+
+	return string(output)
+}
+
 func TestReadOnlyDescriptorsCannotWrite(t *testing.T) {
 	t.Parallel()
 
-	for _, operation := range []string{"db.Insert(view)", "db.Upsert(view)", "db.Update(view)", "db.Delete(view)"} {
+	for _, operation := range []string{"view.Insert()", "view.Upsert()", "view.Update()", "view.Delete()"} {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
-			file := filepath.Join(t.TempDir(), "readonly_test.go")
-			source := `package readonly
+
+			output := compileOutput(t, `package readonly
  import "github.com/gopherex/ratel"
  type Model struct{}
  type View struct{ratel.Table[Model]}
- func invalid(db *ratel.DB,view View){` + operation + `}
- `
-
-			if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
-				t.Fatal(err)
+ func invalid(view View){`+operation+`}
+ `)
+			if !strings.Contains(output, "undefined") {
+				t.Fatalf("unexpected compiler output: %s", output)
 			}
+		})
+	}
+}
 
-			output, err := exec.CommandContext(t.Context(), "go", "test", file).CombinedOutput()
-			if err == nil || !strings.Contains(string(output), "Writable") {
-				t.Fatalf("read-only descriptor compiled: %s %v", output, err)
+// TestVerbsFitTheBuiltValue checks that a verb or batch item that does not fit
+// the kind of the built value does not compile.
+func TestVerbsFitTheBuiltValue(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		statement string
+		want      string
+	}{
+		{
+			"list of a write without Returning", `_, _ = db.Run(tbl.Update().All()).List(ctx)`,
+			"ExecRunner has no field or method List",
+		},
+		{
+			"exec of a write with Returning", `_, _ = db.Run(tbl.Delete().All().Returning()).Exec(ctx)`,
+			"RowRunner[Model] has no field or method Exec",
+		},
+		{
+			"all of an eager select", `for range db.Run(tbl.Select().With()).All(ctx) {}`,
+			"EagerRunner[Model] has no field or method All",
+		},
+		{
+			"exec item of a select", `_ = ratel.Exec(tbl.Select(), &count)`,
+			"ExecQuery",
+		},
+		{
+			"list item of a write", `_ = ratel.List(tbl.Delete().All(), &models)`,
+			"RowQuery",
+		},
+		{
+			"insert of another table's row", `_ = tbl.Insert(Other{})`,
+			"cannot use Other{} (value of struct type Other) as Ins value",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			output := compileOutput(t, `package misuse
+ import (
+	"context"
+
+	"github.com/gopherex/ratel"
+ )
+ type Model struct{}
+ type Ins struct{}
+ type Other struct{}
+ func invalid(ctx context.Context, db *ratel.DB, tbl ratel.WriteTable[Model, Ins]) {
+	var (
+		count  int64
+		models []Model
+	)
+	_, _ = count, models
+	`+tc.statement+`
+ }
+ `)
+			if !strings.Contains(output, tc.want) {
+				t.Fatalf("compiler output lacks %q: %s", tc.want, output)
 			}
 		})
 	}
@@ -43,10 +118,9 @@ func TestWriteMetadata(t *testing.T) {
 	t.Parallel()
 
 	users := writeDescriptor()
-	database := ratel.New(readExecutor{})
 	copied := users.InSchema(`tenant"42`)
 
-	statement, err := database.Insert(copied, newWriteInsert("a")).SQL()
+	statement, err := build(copied.Insert(newWriteInsert("a")))
 	if err != nil || !strings.Contains(statement.SQL, `"tenant""42"."users"`) {
 		t.Fatalf("%+v %v", statement, err)
 	}
@@ -61,7 +135,7 @@ func TestWriteMetadata(t *testing.T) {
 	fields[0].Name = "changed"
 	fields[0].Type[0] = "changed"
 
-	statement, err = database.Insert(table, newWriteInsert("a"), newWriteInsert("b")).SQL()
+	statement, err = build(table.Insert(newWriteInsert("a"), newWriteInsert("b")))
 	if err != nil || !strings.Contains(statement.SQL, `$1::"pg_catalog"."text"[]`) {
 		t.Fatalf("%+v %v", statement, err)
 	}
@@ -71,9 +145,9 @@ func TestWriteMetadata(t *testing.T) {
 		{Name: "email", Type: pgx.Identifier{""}, Value: func(row writeInsert) (any, bool) { return row.email, true }},
 		{Name: "unknown", Type: pgx.Identifier{"text"}, Value: func(row writeInsert) (any, bool) { return row.email, true }},
 	} {
-		query := database.Insert(ratel.NewWriteTable(userDescriptor().Table,
-			func(row writeInsert) bool { return row.valid }, field), newWriteInsert("a"))
-		if _, err = query.SQL(); !errors.Is(err, ratel.ErrInvalidQuery) {
+		query := ratel.NewWriteTable(userDescriptor().Table,
+			func(row writeInsert) bool { return row.valid }, field).Insert(newWriteInsert("a"))
+		if _, err = build(query); !errors.Is(err, ratel.ErrInvalidQuery) {
 			t.Fatal(err)
 		}
 	}

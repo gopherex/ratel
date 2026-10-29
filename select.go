@@ -17,7 +17,7 @@ func (q Select[M]) After(values ...any) Select[M] {
 
 // keyset expands (c1, c2) after (v1, v2) per direction:
 // c1 > v1 OR (c1 = v1 AND c2 > v2), with < for descending terms.
-func (q Select[M]) keyset() Cond[M] {
+func (q *Select[M]) keyset() Cond[M] {
 	orders, values := q.orders, q.after
 
 	return Cond[M]{expr: func(writer *sqlWriter) {
@@ -63,7 +63,9 @@ func (q Select[M]) Join[N any](other Source[N], predicate Cond2[M, N]) Select[M]
 		writer.WriteString(" JOIN ")
 
 		if joined.render == nil {
-			writer.qualifiedColumn(joined.table.schema, joined.table.name)
+			if err := joined.table.render(writer); err != nil {
+				return err
+			}
 		} else if err := joined.render(writer); err != nil {
 			return err
 		}
@@ -81,73 +83,73 @@ func (q Select[M]) Join[N any](other Source[N], predicate Cond2[M, N]) Select[M]
 
 // ForUpdate locks the selected rows against concurrent updates and deletes
 // until the transaction ends.
-func (q Select[M]) ForUpdate() Select[M] { return q.locked(" FOR UPDATE") }
+func (q Select[M]) ForUpdate() Select[M] { return q.locked(lockUpdate) }
 
 // ForShare locks the selected rows against concurrent updates, sharing the
 // lock with other readers.
-func (q Select[M]) ForShare() Select[M] { return q.locked(" FOR SHARE") }
+func (q Select[M]) ForShare() Select[M] { return q.locked(lockShare) }
 
 // SkipLocked skips rows another transaction holds locked. It requires
 // ForUpdate or ForShare; without one, rendering returns ErrInvalidQuery.
-func (q Select[M]) SkipLocked() Select[M] { return q.waiting(" SKIP LOCKED") }
+func (q Select[M]) SkipLocked() Select[M] { return q.waiting(waitSkipLocked) }
 
 // NoWait fails instead of waiting for a row another transaction holds
 // locked. It requires ForUpdate or ForShare.
-func (q Select[M]) NoWait() Select[M] { return q.waiting(" NOWAIT") }
+func (q Select[M]) NoWait() Select[M] { return q.waiting(waitNoWait) }
 
-func (q Select[M]) locked(mode string) Select[M] {
+func (q Select[M]) locked(mode lockMode) Select[M] {
 	q.lock = mode
 
 	return q
 }
 
-func (q Select[M]) waiting(policy string) Select[M] {
+func (q Select[M]) waiting(policy waitMode) Select[M] {
 	q.wait = policy
 
 	return q
 }
 
 // wrapped renders an outer statement over this SELECT as a subquery.
-func (q Select[M]) wrapped(prefix, suffix string) (Statement, error) {
-	inner, err := q.SQL()
+func (q *Select[M]) wrapped(prefix, suffix string) (stmt, error) {
+	sql, args, err := q.Build()
 	if err != nil {
-		return Statement{}, err
+		return stmt{}, err
 	}
 
-	return Statement{SQL: prefix + inner.SQL + suffix, Args: inner.Args}, nil
+	return stmt{SQL: prefix + sql + suffix, Args: args}, nil
 }
 
 // Count returns the number of rows of the result, after Limit and Offset.
-func (q Select[M]) Count(ctx context.Context, options ...CallOption) (int64, error) {
+func (r SelectRunner[M]) Count(ctx context.Context, options ...CallOption) (int64, error) {
 	var count int64
 
-	err := q.scalar(ctx, "ratel.select.count", `SELECT count(*) FROM (`, `) AS "c"`, &count, options)
+	err := r.scalar(ctx, "ratel.select.count", `SELECT count(*) FROM (`, `) AS "c"`, &count, options)
 
 	return count, err
 }
 
 // Exists reports whether the result has a row.
-func (q Select[M]) Exists(ctx context.Context, options ...CallOption) (bool, error) {
+func (r SelectRunner[M]) Exists(ctx context.Context, options ...CallOption) (bool, error) {
 	var exists bool
 
-	err := q.scalar(ctx, "ratel.select.exists", `SELECT EXISTS (`, `)`, &exists, options)
+	err := r.scalar(ctx, "ratel.select.exists", `SELECT EXISTS (`, `)`, &exists, options)
 
 	return exists, err
 }
 
-func (q Select[M]) scalar(ctx context.Context, operation, prefix, suffix string, target any,
+func (r *SelectRunner[M]) scalar(ctx context.Context, operation, prefix, suffix string, target any,
 	options []CallOption,
 ) error {
-	if q.db == nil {
+	if r.db == nil {
 		return ErrInvalidQuery
 	}
 
-	statement, err := q.wrapped(prefix, suffix)
+	rendered, err := r.query.wrapped(prefix, suffix)
 	if err != nil {
 		return err
 	}
 
-	err = q.db.executor.QueryRow(ctx, statement.SQL, q.db.arguments(options, statement.Args)...).Scan(target)
+	err = r.db.executor.QueryRow(ctx, rendered.SQL, r.db.arguments(options, rendered.Args)...).Scan(target)
 	if err != nil {
 		return fmt.Errorf("ratel: %s: %w", operation, err)
 	}
@@ -155,10 +157,10 @@ func (q Select[M]) scalar(ctx context.Context, operation, prefix, suffix string,
 	return nil
 }
 
-// Plucked is one column of a SELECT's result.
+// Plucked is one column of a SELECT's result, a value that renders through
+// Build and, run by db.Run, yields the column's values.
 type Plucked[V any] struct {
-	db        *DB
-	statement func() (Statement, error)
+	render func() (stmt, error)
 }
 
 // Pluck selects one non-null column of the result.
@@ -172,30 +174,44 @@ func (q Select[M]) PluckNull[V any](column NullCol[M, V]) Plucked[Null[V]] {
 }
 
 func pluck[V, M any](query Select[M], name string) Plucked[V] {
-	return Plucked[V]{db: query.db, statement: func() (Statement, error) {
+	return Plucked[V]{render: func() (stmt, error) {
 		writer := newSQLWriter()
 		writer.WriteString("SELECT ")
 		writer.qualifiedColumn("p", name)
 		writer.WriteString(" FROM (")
 
 		if writer.invalid {
-			return Statement{}, ErrInvalidQuery
+			return stmt{}, ErrInvalidQuery
 		}
 
-		statement, err := query.wrapped(writer.String(), `) AS "p"`)
-		if err != nil {
-			return Statement{}, err
-		}
-
-		return statement, nil
+		return query.wrapped(writer.String(), `) AS "p"`)
 	}}
 }
 
+// Build renders the column query and its arguments without executing it.
+func (p Plucked[V]) Build() (string, []any, error) {
+	if p.render == nil {
+		return "", nil, ErrInvalidQuery
+	}
+
+	rendered, err := p.render()
+
+	return rendered.SQL, rendered.Args, err
+}
+
+// PluckRunner is a Plucked column bound to a database by db.Run.
+type PluckRunner[V any] struct {
+	db     *DB
+	column Plucked[V]
+}
+
+func (p Plucked[V]) bind(db *DB) PluckRunner[V] { return PluckRunner[V]{db: db, column: p} }
+
 // List collects the column's values; an empty result is a non-nil slice.
-func (p Plucked[V]) List(ctx context.Context, options ...CallOption) ([]V, error) {
+func (r PluckRunner[V]) List(ctx context.Context, options ...CallOption) ([]V, error) {
 	values := make([]V, 0)
 
-	for value, err := range p.All(ctx, options...) {
+	for value, err := range r.All(ctx, options...) {
 		if err != nil {
 			return nil, err
 		}
@@ -207,24 +223,24 @@ func (p Plucked[V]) List(ctx context.Context, options ...CallOption) ([]V, error
 }
 
 // All streams the column's values; breaking the loop releases the cursor.
-func (p Plucked[V]) All(ctx context.Context, options ...CallOption) iter.Seq2[V, error] {
+func (r PluckRunner[V]) All(ctx context.Context, options ...CallOption) iter.Seq2[V, error] {
 	return func(yield func(V, error) bool) {
 		var zero V
 
-		if p.db == nil {
+		if r.db == nil {
 			yield(zero, ErrInvalidQuery)
 
 			return
 		}
 
-		statement, err := p.statement()
+		sql, args, err := r.column.Build()
 		if err != nil {
 			yield(zero, err)
 
 			return
 		}
 
-		rows, err := p.db.executor.Query(ctx, statement.SQL, p.db.arguments(options, statement.Args)...)
+		rows, err := r.db.executor.Query(ctx, sql, r.db.arguments(options, args)...)
 		if err != nil {
 			yield(zero, fmt.Errorf("ratel: pluck: %w", err))
 

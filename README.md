@@ -102,20 +102,20 @@ err := migrate.Apply(ctx, pool, dir) // no table is locked longer than a moment
 db := ratel.New(pool)
 
 // Insert, returning the rows with their generated ids.
-created, err := db.Insert(app.Users,
-	app.NewUserInsert("ann@example.com", "Ann"),
-	app.NewUserInsert("bob@example.com", "Bob"),
-).Returning(ctx)
+created, err := db.Run(app.Users.Insert(
+	app.Users.Row().Email("ann@example.com").Name("Ann"),
+	app.Users.Row().Email("bob@example.com").Name("Bob"),
+).Returning()).List(ctx)
 
 // Typed builder with an eager relation: two queries, no N+1.
-ann, err := db.From(app.Users).
+ann, err := db.Run(app.Users.Select().
 	Where(app.Users.Email.Eq("ann@example.com")).
-	With(app.Users.Orders).
+	With(app.Users.Orders)).
 	One(ctx)
 orders, err := ann.Orders()
 
 // A static query from queries/users/users.sql.
-top, err := users.TopCustomers(ctx, db, 10)
+top, err := db.Run(users.TopCustomers().Limit(10)).List(ctx)
 ```
 
 Error checks are left out here. The complete program, with the pool setup

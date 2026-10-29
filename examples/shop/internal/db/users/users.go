@@ -4,7 +4,6 @@ package users
 
 import (
 	"context"
-	"iter"
 
 	"github.com/gopherex/ratel"
 	"github.com/gopherex/ratel/examples/shop/internal/db/app"
@@ -23,8 +22,8 @@ func scanUserByEmail(row pgx.Row) (app.User, error) {
 	return model, nil
 }
 
-// UserByEmailQ is the query UserByEmail as a builder source: db.From(UserByEmailQ.Args(...)). Clauses added
-// outside apply to the query's result.
+// UserByEmailQ describes the columns of the query UserByEmail: UserByEmail().Select().Where(UserByEmailQ.Column...).
+// Clauses added outside apply to the query's result.
 var UserByEmailQ = userByEmailQuery{
 	ID:    ratel.NewCol[app.User, int64]("id"),
 	Email: ratel.NewCol[app.User, string]("email"),
@@ -37,14 +36,16 @@ type userByEmailQuery struct {
 	Name  ratel.Col[app.User, string]
 }
 
-// Args binds the query's parameters.
-func (userByEmailQuery) Args(email string) ratel.Query[app.User] {
-	return ratel.NewQuery([]string{"id", "email", "name"}, scanUserByEmail, "SELECT * FROM app.users WHERE email = $1", email)
+// UserByEmail starts the query; each parameter is one step, in order of appearance.
+func UserByEmail() userByEmailEmail {
+	return userByEmailEmail{}
 }
 
-// UserByEmail returns the query's row; ratel.ErrNotFound when there is none.
-func UserByEmail(ctx context.Context, db *ratel.DB, email string) (app.User, error) {
-	return db.From(UserByEmailQ.Args(email)).One(ctx)
+type userByEmailEmail struct{}
+
+// Email sets the parameter email.
+func (s userByEmailEmail) Email(v string) ratel.Query[app.User] {
+	return ratel.NewQuery([]string{"id", "email", "name"}, scanUserByEmail, "SELECT * FROM app.users WHERE email = $1", v)
 }
 
 // TopCustomersRow is a row of TopCustomers.
@@ -63,8 +64,8 @@ func scanTopCustomers(row pgx.Row) (TopCustomersRow, error) {
 	return model, nil
 }
 
-// TopCustomersQ is the query TopCustomers as a builder source: db.From(TopCustomersQ.Args(...)). Clauses added
-// outside apply to the query's result.
+// TopCustomersQ describes the columns of the query TopCustomers: TopCustomers().Select().Where(TopCustomersQ.Column...).
+// Clauses added outside apply to the query's result.
 var TopCustomersQ = topCustomersQuery{
 	Email: ratel.NewCol[TopCustomersRow, string]("email"),
 	Spent: ratel.NewNullCol[TopCustomersRow, decimal.Decimal]("spent"),
@@ -75,19 +76,16 @@ type topCustomersQuery struct {
 	Spent ratel.NullCol[TopCustomersRow, decimal.Decimal]
 }
 
-// Args binds the query's parameters.
-func (topCustomersQuery) Args(limit int64) ratel.Query[TopCustomersRow] {
-	return ratel.NewQuery([]string{"email", "spent"}, scanTopCustomers, "SELECT u.email, sum(o.total) AS spent\nFROM app.users u JOIN app.orders o ON o.user_id = u.id\nGROUP BY u.email\nORDER BY spent DESC\nLIMIT $1", limit)
+// TopCustomers starts the query; each parameter is one step, in order of appearance.
+func TopCustomers() topCustomersLimit {
+	return topCustomersLimit{}
 }
 
-// TopCustomers returns every row of the query.
-func TopCustomers(ctx context.Context, db *ratel.DB, limit int64) ([]TopCustomersRow, error) {
-	return db.From(TopCustomersQ.Args(limit)).List(ctx)
-}
+type topCustomersLimit struct{}
 
-// TopCustomersAll streams the rows of the query.
-func TopCustomersAll(ctx context.Context, db *ratel.DB, limit int64) iter.Seq2[TopCustomersRow, error] {
-	return db.From(TopCustomersQ.Args(limit)).All(ctx)
+// Limit sets the parameter limit.
+func (s topCustomersLimit) Limit(v int64) ratel.Query[TopCustomersRow] {
+	return ratel.NewQuery([]string{"email", "spent"}, scanTopCustomers, "SELECT u.email, sum(o.total) AS spent\nFROM app.users u JOIN app.orders o ON o.user_id = u.id\nGROUP BY u.email\nORDER BY spent DESC\nLIMIT $1", v)
 }
 
 // RegisterTypes registers the PostgreSQL types of this package and the

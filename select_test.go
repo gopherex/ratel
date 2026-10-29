@@ -18,7 +18,7 @@ func TestSelectClauses(t *testing.T) {
 	t.Parallel()
 
 	users := userDescriptor()
-	base := ratel.New(&pgx.Conn{}).From(users)
+	base := ratel.From(users)
 
 	for _, tc := range []struct {
 		name  string
@@ -54,7 +54,7 @@ func TestSelectClauses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := tc.query.SQL()
+			statement, err := build(tc.query)
 			if err != nil || statement.SQL != tc.sql || !reflect.DeepEqual(statement.Args, tc.args) {
 				t.Fatalf("got %+v, %v; want %s, %#v", statement, err, tc.sql, tc.args)
 			}
@@ -68,12 +68,11 @@ func TestJoin(t *testing.T) {
 	users, orders := relationDescriptors()
 	userID := ratel.NewCol[relationOrder, int64]("user_id")
 	orderID := ratel.NewCol[relationOrder, int64]("id")
-	database := ratel.New(&pgx.Conn{})
 
-	query := database.From(users).Join(orders, users.ID.EqCol(userID)).Where(users.ID.Gt(1)).
-		Join(database.From(orders).Where(orderID.Gt(9)), users.ID.EqCol(userID))
+	query := ratel.From(users).Join(orders, users.ID.EqCol(userID)).Where(users.ID.Gt(1)).
+		Join(ratel.From(orders).Where(orderID.Gt(9)), users.ID.EqCol(userID))
 
-	statement, err := query.SQL()
+	statement, err := build(query)
 	want := `SELECT "q"."id" FROM "app"."users" AS "q" JOIN "app"."orders" AS "j0" ON "q"."id" = "j0"."user_id"` +
 		` JOIN (SELECT "q"."id", "q"."user_id" FROM "app"."orders" AS "q" WHERE "q"."id" > $1) AS "j1"` +
 		` ON "q"."id" = "j1"."user_id" WHERE "q"."id" > $2`
@@ -87,7 +86,7 @@ func TestSelectClausesInvalid(t *testing.T) {
 	t.Parallel()
 
 	users := userDescriptor()
-	base := ratel.New(&pgx.Conn{}).From(users)
+	base := ratel.From(users)
 
 	for _, tc := range []struct {
 		name  string
@@ -101,7 +100,7 @@ func TestSelectClausesInvalid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := tc.query.SQL(); !errors.Is(err, ratel.ErrInvalidQuery) {
+			if _, err := build(tc.query); !errors.Is(err, ratel.ErrInvalidQuery) {
 				t.Fatalf("SQL() error = %v", err)
 			}
 		})
@@ -140,12 +139,14 @@ func TestCountExists(t *testing.T) {
 
 	var sql string
 
-	count, err := ratel.New(scalarExecutor{sql: &sql, value: int64(7)}).From(users).Limit(10).Count(t.Context())
+	count, err := ratel.New(scalarExecutor{sql: &sql, value: int64(7)}).Run(ratel.From(users).Limit(10)).Count(t.Context())
 	if err != nil || count != 7 || sql != `SELECT count(*) FROM (`+usersSQL+` LIMIT $1) AS "c"` {
 		t.Fatalf("Count() = %d, %v; SQL %s", count, err, sql)
 	}
 
-	exists, err := ratel.New(scalarExecutor{sql: &sql, value: true}).From(users).Where(users.ID.Eq(1)).Exists(t.Context())
+	database := ratel.New(scalarExecutor{sql: &sql, value: true})
+
+	exists, err := database.Run(ratel.From(users).Where(users.ID.Eq(1))).Exists(t.Context())
 	if err != nil || !exists || sql != `SELECT EXISTS (`+usersSQL+` WHERE "q"."id" = $1)` {
 		t.Fatalf("Exists() = %v, %v; SQL %s", exists, err, sql)
 	}
@@ -165,10 +166,26 @@ func TestPluck(t *testing.T) {
 		return rows, nil
 	}}
 
-	ids, err := ratel.New(executor).From(users).OrderBy(users.ID.Asc()).Pluck(users.ID).List(t.Context())
+	ids, err := ratel.New(executor).Run(ratel.From(users).OrderBy(users.ID.Asc()).Pluck(users.ID)).List(t.Context())
 	if err != nil || !reflect.DeepEqual(ids, []int64{3, 4}) ||
 		sql != `SELECT "p"."id" FROM (`+usersSQL+` ORDER BY "q"."id" ASC) AS "p"` || !rows.closed {
 		t.Fatalf("Pluck() = %v, %v; SQL %s", ids, err, sql)
+	}
+}
+
+func TestPluckBuild(t *testing.T) {
+	t.Parallel()
+
+	users := userDescriptor()
+
+	got, err := build(ratel.From(users).Where(users.ID.Gt(1)).Pluck(users.ID))
+	if err != nil || got.SQL != `SELECT "p"."id" FROM (`+usersSQL+` WHERE "q"."id" > $1) AS "p"` ||
+		!reflect.DeepEqual(got.Args, []any{int64(1)}) {
+		t.Fatalf("Build() = %+v, %v", got, err)
+	}
+
+	if _, err = build(ratel.Plucked[int64]{}); !errors.Is(err, ratel.ErrInvalidQuery) {
+		t.Fatalf("zero Build() = %v", err)
 	}
 }
 
@@ -276,27 +293,27 @@ func TestScalarFailures(t *testing.T) {
 	}{
 		{
 			"count no database",
-			func() (int64, error) { return ratel.Select[readUser]{}.Count(t.Context()) },
+			func() (int64, error) { return (*ratel.DB)(nil).Run(ratel.Select[readUser]{}).Count(t.Context()) },
 			ratel.ErrInvalidQuery,
 		},
 		{
 			"count invalid query",
 			func() (int64, error) {
-				return ratel.New(selXScalarExecutor{row: selXRow{}}).From(users).SkipLocked().Count(t.Context())
+				return ratel.New(selXScalarExecutor{row: selXRow{}}).Run(ratel.From(users).SkipLocked()).Count(t.Context())
 			},
 			ratel.ErrInvalidQuery,
 		},
 		{
 			"count scan error",
 			func() (int64, error) {
-				return ratel.New(selXScalarExecutor{row: selXRow{err: offline}}).From(users).Count(t.Context())
+				return ratel.New(selXScalarExecutor{row: selXRow{err: offline}}).Run(ratel.From(users)).Count(t.Context())
 			},
 			offline,
 		},
 		{
 			"exists no database",
 			func() (int64, error) {
-				_, err := ratel.Select[readUser]{}.Exists(t.Context())
+				_, err := (*ratel.DB)(nil).Run(ratel.Select[readUser]{}).Exists(t.Context())
 
 				return 0, err
 			},
@@ -305,7 +322,7 @@ func TestScalarFailures(t *testing.T) {
 		{
 			"exists scan error",
 			func() (int64, error) {
-				_, err := ratel.New(selXScalarExecutor{row: selXRow{err: offline}}).From(users).Exists(t.Context())
+				_, err := ratel.New(selXScalarExecutor{row: selXRow{err: offline}}).Run(ratel.From(users)).Exists(t.Context())
 
 				return 0, err
 			},
@@ -329,17 +346,15 @@ func TestJoinInvalidSource(t *testing.T) {
 	users, orders := relationDescriptors()
 	userID := ratel.NewCol[relationOrder, int64]("user_id")
 
-	database := ratel.New(&pgx.Conn{})
-
 	for name, source := range map[string]ratel.Source[relationOrder]{
 		"invalid table":    orders.InSchema(""),
-		"invalid subquery": database.From(orders).SkipLocked(),
+		"invalid subquery": ratel.From(orders).SkipLocked(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			query := database.From(users).Join(source, users.ID.EqCol(userID))
-			if _, err := query.SQL(); !errors.Is(err, ratel.ErrInvalidQuery) {
+			query := ratel.From(users).Join(source, users.ID.EqCol(userID))
+			if _, err := build(query); !errors.Is(err, ratel.ErrInvalidQuery) {
 				t.Fatalf("SQL() error = %v", err)
 			}
 		})
@@ -363,8 +378,8 @@ func TestPluckNull(t *testing.T) {
 		return rows, nil
 	}}
 
-	managers, err := ratel.New(executor, ratel.WithExecMode(pgx.QueryExecModeExec)).From(users).
-		Where(users.ID.Gt(1)).OrderBy(users.ID.Asc()).PluckNull(users.ManagerID).List(t.Context())
+	managers, err := ratel.New(executor, ratel.WithExecMode(pgx.QueryExecModeExec)).Run(ratel.From(users).
+		Where(users.ID.Gt(1)).OrderBy(users.ID.Asc()).PluckNull(users.ManagerID)).List(t.Context())
 
 	want := []ratel.Null[int64]{{V: 3, Valid: true}, {}, {V: 5, Valid: true}}
 	wantSQL := `SELECT "p"."manager_id" FROM (` + usersSQL + ` WHERE "q"."id" > $1 ORDER BY "q"."id" ASC) AS "p"`
@@ -437,7 +452,7 @@ func TestPluckedAll(t *testing.T) {
 				return rows, nil
 			}}
 
-			query := ratel.New(executor).From(users)
+			query := ratel.From(users)
 			if tc.invalid {
 				query = query.SkipLocked()
 			}
@@ -451,7 +466,7 @@ func TestPluckedAll(t *testing.T) {
 				plucked = ratel.Plucked[int64]{}
 			}
 
-			got, errs := selXDrain(plucked.All(t.Context()), tc.stopAfter)
+			got, errs := selXDrain(ratel.New(executor).Run(plucked).All(t.Context()), tc.stopAfter)
 			if len(got) != len(tc.wantValues) || (len(got) > 0 && !reflect.DeepEqual(got, tc.wantValues)) {
 				t.Fatalf("values = %v, want %v", got, tc.wantValues)
 			}
@@ -474,14 +489,14 @@ func TestPluckedListErrors(t *testing.T) {
 		return &selXRows{values: []any{int64(1)}, failure: failure}, nil
 	}}
 
-	values, err := ratel.New(executor).From(users).Pluck(users.ID).List(t.Context())
+	values, err := ratel.New(executor).Run(ratel.From(users).Pluck(users.ID)).List(t.Context())
 	if !errors.Is(err, failure) || values != nil {
 		t.Fatalf("List() = %v, %v", values, err)
 	}
 
 	empty, err := ratel.New(readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
 		return &selXRows{}, nil
-	}}).From(users).Pluck(users.ID).List(t.Context())
+	}}).Run(ratel.From(users).Pluck(users.ID)).List(t.Context())
 	if err != nil || empty == nil || len(empty) != 0 {
 		t.Fatalf("empty List() = %#v, %v", empty, err)
 	}
@@ -492,12 +507,14 @@ func BenchmarkPluckNull(b *testing.B) {
 	executor := readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
 		return &selXRows{values: []any{ratel.NullFrom(int64(3)), ratel.Null[int64]{}}}, nil
 	}}
-	plucked := ratel.New(executor).From(users).OrderBy(users.ID.Asc()).PluckNull(users.ManagerID)
+	plucked := ratel.From(users).OrderBy(users.ID.Asc()).PluckNull(users.ManagerID)
+
+	database := ratel.New(executor)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := plucked.List(b.Context()); err != nil {
+		if _, err := database.Run(plucked).List(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -505,10 +522,10 @@ func BenchmarkPluckNull(b *testing.B) {
 
 func BenchmarkKeyset(b *testing.B) {
 	users := userDescriptor()
-	query := ratel.New(&pgx.Conn{}).From(users).OrderBy(users.Email.Desc(), users.ID.Asc()).After("m", int64(5))
+	query := ratel.From(users).OrderBy(users.Email.Desc(), users.ID.Asc()).After("m", int64(5))
 
 	for b.Loop() {
-		if _, err := query.SQL(); err != nil {
+		if _, err := build(query); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -528,12 +545,12 @@ func BenchmarkRaw(b *testing.B) {
 		{"escape strings", `E'\'$1' <> "q"."email" AND e'a\\' <> $1`, []any{"a"}},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			query := ratel.New(&pgx.Conn{}).From(users).Where(ratel.Raw[readUser](tc.sql, tc.args...))
+			query := ratel.From(users).Where(ratel.Raw[readUser](tc.sql, tc.args...))
 
 			b.ReportAllocs()
 
 			for b.Loop() {
-				if _, err := query.SQL(); err != nil {
+				if _, err := build(query); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -544,15 +561,14 @@ func BenchmarkRaw(b *testing.B) {
 func BenchmarkSelectJoinLock(b *testing.B) {
 	users, orders := relationDescriptors()
 	userID := ratel.NewCol[relationOrder, int64]("user_id")
-	database := ratel.New(&pgx.Conn{})
-	base := database.From(users)
+	base := ratel.From(users)
 
 	cases := []struct {
 		name  string
 		query ratel.Select[relationUser]
 	}{
 		{"join", base.Join(orders, users.ID.EqCol(userID))},
-		{"join subquery", base.Join(database.From(orders).Where(userID.Gt(9)), users.ID.EqCol(userID))},
+		{"join subquery", base.Join(ratel.From(orders).Where(userID.Gt(9)), users.ID.EqCol(userID))},
 		{"for update", base.ForUpdate()},
 		{"for share", base.ForShare()},
 		{"skip locked", base.ForUpdate().SkipLocked()},
@@ -566,7 +582,7 @@ func BenchmarkSelectJoinLock(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				if _, err := tc.query.SQL(); err != nil {
+				if _, err := build(tc.query); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -577,28 +593,31 @@ func BenchmarkSelectJoinLock(b *testing.B) {
 func BenchmarkSelectScalars(b *testing.B) {
 	users := userDescriptor()
 	sql := ""
-	counted := ratel.New(scalarExecutor{sql: &sql, value: int64(7)}).From(users).Where(users.ID.Gt(1))
-	present := ratel.New(scalarExecutor{sql: &sql, value: true}).From(users).Where(users.ID.Gt(1))
-	plucked := ratel.New(readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
+	counted := ratel.From(users).Where(users.ID.Gt(1))
+	present := ratel.From(users).Where(users.ID.Gt(1))
+	plucked := ratel.From(users).OrderBy(users.ID.Asc()).Pluck(users.ID)
+	countDB := ratel.New(scalarExecutor{sql: &sql, value: int64(7)})
+	existsDB := ratel.New(scalarExecutor{sql: &sql, value: true})
+	pluckDB := ratel.New(readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
 		return &selXRows{values: []any{int64(3), int64(4)}}, nil
-	}}).From(users).OrderBy(users.ID.Asc()).Pluck(users.ID)
+	}})
 
 	for _, tc := range []struct {
 		name string
 		run  func(ctx context.Context) error
 	}{
 		{"count", func(ctx context.Context) error {
-			_, err := counted.Count(ctx)
+			_, err := countDB.Run(counted).Count(ctx)
 
 			return err
 		}},
 		{"exists", func(ctx context.Context) error {
-			_, err := present.Exists(ctx)
+			_, err := existsDB.Run(present).Exists(ctx)
 
 			return err
 		}},
 		{"pluck", func(ctx context.Context) error {
-			_, err := plucked.List(ctx)
+			_, err := pluckDB.Run(plucked).List(ctx)
 
 			return err
 		}},

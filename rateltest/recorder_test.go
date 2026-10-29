@@ -24,21 +24,21 @@ func TestRecorder(t *testing.T) {
 
 			args[0] = int64(8)
 
-			got := recorder.Statements()
+			got := recorder.Queries()
 			if len(got) != 1 || got[0].SQL != sql || got[0].Args[0] != int64(7) {
-				t.Fatalf("statements = %v", got)
+				t.Fatalf("queries = %v", got)
 			}
 
 			got[0].SQL = "mutated"
 			got[0].Args[0] = 9
 
-			if recorder.Statements()[0].Args[0] != int64(7) || recorder.Statements()[0].SQL != sql {
+			if recorder.Queries()[0].Args[0] != int64(7) || recorder.Queries()[0].SQL != sql {
 				t.Fatal("snapshot aliases recorder")
 			}
 
 			recorder.Reset()
 
-			if len(recorder.Statements()) != 0 {
+			if len(recorder.Queries()) != 0 {
 				t.Fatal("reset did not clear")
 			}
 		})
@@ -60,9 +60,9 @@ func TestRecorderBatchAndCopy(t *testing.T) {
 	})
 	recorder.TraceCopyFromEnd(ctx, nil, pgx.TraceCopyFromEndData{})
 
-	got := recorder.Statements()
+	got := recorder.Queries()
 	if len(got) != 3 || got[1].Args[0] != 2 || got[2].SQL != `COPY "app"."values" ("v") FROM STDIN` {
-		t.Fatalf("statements = %v", got)
+		t.Fatalf("queries = %v", got)
 	}
 }
 
@@ -75,14 +75,14 @@ func TestRecorderConcurrent(t *testing.T) {
 	for range 10 {
 		group.Go(func() {
 			recorder.TraceQueryStart(context.Background(), nil, pgx.TraceQueryStartData{SQL: "SELECT 1"})
-			_ = recorder.Statements()
+			_ = recorder.Queries()
 		})
 	}
 
 	group.Wait()
 
-	if len(recorder.Statements()) != 10 {
-		t.Fatal("lost statements")
+	if len(recorder.Queries()) != 10 {
+		t.Fatal("lost queries")
 	}
 }
 
@@ -90,7 +90,7 @@ func BenchmarkRecorder(b *testing.B) {
 	recorder := &rateltest.Recorder{}
 	for b.Loop() {
 		recorder.TraceQueryStart(b.Context(), nil, pgx.TraceQueryStartData{SQL: "SELECT $1", Args: []any{1}})
-		_ = recorder.Statements()
+		_ = recorder.Queries()
 		recorder.Reset()
 	}
 }

@@ -108,29 +108,29 @@ func readTerminals(t *testing.T, pool *pgxpool.Pool) {
 		pgx.QueryExecModeCacheStatement, pgx.QueryExecModeCacheDescribe,
 		pgx.QueryExecModeExec, pgx.QueryExecModeSimpleProtocol,
 	} {
-		query := database.From(accounts).Where(accounts.Tenant.Eq(1)).OrderBy(accounts.ID.Asc())
+		query := accounts.Select().Where(accounts.Tenant.Eq(1)).OrderBy(accounts.ID.Asc())
 
-		users, err := query.List(t.Context(), ratel.ExecMode(mode))
+		users, err := database.Run(query).List(t.Context(), ratel.ExecMode(mode))
 		if err != nil || len(users) != 2 || users[0].ManagerID.Valid || users[1].ManagerID.V != 1 {
 			t.Fatalf("%v: %+v: %v", mode, users, err)
 		}
 
-		first, err := query.First(t.Context(), ratel.ExecMode(mode))
+		first, err := database.Run(query).First(t.Context(), ratel.ExecMode(mode))
 		if err != nil || first.ID != 1 {
 			t.Fatalf("%+v: %v", first, err)
 		}
 
-		one, err := query.Where(accounts.ManagerID.IsNotNull()).One(t.Context(), ratel.ExecMode(mode))
+		one, err := database.Run(query.Where(accounts.ManagerID.IsNotNull())).One(t.Context(), ratel.ExecMode(mode))
 		if err != nil || one.ID != 2 {
 			t.Fatalf("%+v: %v", one, err)
 		}
 
-		_, err = query.One(t.Context(), ratel.ExecMode(mode))
+		_, err = database.Run(query).One(t.Context(), ratel.ExecMode(mode))
 		if !errors.Is(err, ratel.ErrMultipleRows) {
 			t.Fatalf("expected multiple rows: %v", err)
 		}
 
-		_, err = query.Where(accounts.ID.Eq(99)).One(t.Context(), ratel.ExecMode(mode))
+		_, err = database.Run(query.Where(accounts.ID.Eq(99))).One(t.Context(), ratel.ExecMode(mode))
 		if !errors.Is(err, ratel.ErrNotFound) {
 			t.Fatalf("expected not found: %v", err)
 		}
@@ -142,10 +142,10 @@ func readSubqueries(t *testing.T, pool *pgxpool.Pool) {
 
 	accounts := accountDescriptor()
 	database := ratel.New(pool)
-	inner := database.From(accounts).Where(accounts.Tenant.Eq(2)).OrderBy(accounts.ID.Asc()).Limit(2)
-	outer := database.From(inner).Where(accounts.ID.Gt(1))
+	inner := accounts.Select().Where(accounts.Tenant.Eq(2)).OrderBy(accounts.ID.Asc()).Limit(2)
+	outer := ratel.From(inner).Where(accounts.ID.Gt(1))
 
-	rows, err := database.From(outer).Where(accounts.Email.ILike("%@ACME.COM")).List(t.Context())
+	rows, err := database.Run(ratel.From(outer).Where(accounts.Email.ILike("%@ACME.COM"))).List(t.Context())
 	if err != nil || len(rows) != 1 || rows[0].ID != 2 {
 		t.Fatalf("%+v: %v", rows, err)
 	}
@@ -153,7 +153,7 @@ func readSubqueries(t *testing.T, pool *pgxpool.Pool) {
 	source := ratel.NewQuery([]string{"tenant", "id", "email", "manager_id"}, scanAccount,
 		`SELECT tenant, id, email, manager_id FROM read_app.accounts WHERE tenant=$1 ORDER BY id LIMIT $2`, int64(2), 2)
 
-	rows, err = database.From(source).Where(accounts.ID.Gt(1)).List(t.Context())
+	rows, err = database.Run(source.Select().Where(accounts.ID.Gt(1))).List(t.Context())
 	if err != nil || len(rows) != 1 || rows[0].ID != 2 {
 		t.Fatalf("%+v: %v", rows, err)
 	}
@@ -163,7 +163,7 @@ func readChunks(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 
 	accounts := accountDescriptor()
-	query := ratel.New(pool).From(accounts).OrderBy(accounts.Tenant.Asc(), accounts.ID.Asc()).Offset(1).Limit(3)
+	query := ratel.New(pool).Run(accounts.Select().OrderBy(accounts.Tenant.Asc(), accounts.ID.Asc()).Offset(1).Limit(3))
 
 	var keys [][2]int64
 
@@ -195,7 +195,7 @@ func readEarlyBreak(t *testing.T, pool *pgxpool.Pool) {
 	accounts := accountDescriptor()
 	database := ratel.New(connection.Conn())
 
-	for _, err := range database.From(accounts).All(t.Context()) {
+	for _, err := range database.Run(accounts.Select()).All(t.Context()) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -204,16 +204,16 @@ func readEarlyBreak(t *testing.T, pool *pgxpool.Pool) {
 	}
 
 	// A leaked cursor makes this query fail with "conn busy" on the same connection.
-	if _, err := database.From(accounts).First(t.Context()); err != nil {
+	if _, err := database.Run(accounts.Select()).First(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, err := range database.From(accounts).Chunks(t.Context(), 2) {
+	for _, err := range database.Run(accounts.Select()).Chunks(t.Context(), 2) {
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if _, err := database.From(accounts).First(t.Context()); err != nil {
+		if _, err := database.Run(accounts.Select()).First(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 
@@ -233,8 +233,8 @@ func readTransaction(t *testing.T, pool *pgxpool.Pool) {
 
 	accounts := accountDescriptor()
 
-	account, err := ratel.New(transaction).From(accounts).
-		Where(accounts.Tenant.Eq(1).And(accounts.ID.Eq(1))).One(t.Context())
+	account, err := ratel.New(transaction).Run(accounts.Select().
+		Where(accounts.Tenant.Eq(1).And(accounts.ID.Eq(1)))).One(t.Context())
 	if err != nil || account.Email != "a@example.org" {
 		t.Fatalf("%+v: %v", account, err)
 	}
@@ -251,12 +251,12 @@ func readCancellation(t *testing.T, pool *pgxpool.Pool) {
 	source := ratel.NewQuery([]string{"tenant", "id", "email", "manager_id"}, scanAccount,
 		`SELECT 1::bigint tenant, 1::bigint id, ''::text email, NULL::bigint manager_id FROM pg_catalog.pg_sleep(30)`)
 
-	_, err := ratel.New(pool).From(source).List(ctx)
+	_, err := ratel.New(pool).Run(source.Select()).List(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lost cancellation cause: %v", err)
 	}
 
-	if _, err := ratel.New(pool).From(accountDescriptor()).First(t.Context()); err != nil {
+	if _, err := ratel.New(pool).Run(accountDescriptor().Select()).First(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -279,14 +279,14 @@ func readConnectionFailure(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatalf("termination: %v", err)
 	}
 
-	_, err = ratel.New(connection.Conn()).From(accountDescriptor()).First(t.Context())
+	_, err = ratel.New(connection.Conn()).Run(accountDescriptor().Select()).First(t.Context())
 	connection.Release()
 
 	if err == nil || errors.Unwrap(err) == nil {
 		t.Fatalf("missing wrapped connection failure: %v", err)
 	}
 
-	if _, err := ratel.New(pool).From(accountDescriptor()).First(t.Context()); err != nil {
+	if _, err := ratel.New(pool).Run(accountDescriptor().Select()).First(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -380,7 +380,7 @@ func benchmarkGeneratedRead(b *testing.B, pool *pgxpool.Pool) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		if _, err := database.From(accounts).List(b.Context()); err != nil {
+		if _, err := database.Run(accounts.Select()).List(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}

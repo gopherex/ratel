@@ -102,31 +102,31 @@ func (r Rel[M, R]) compile() Rel[M, R] {
 	return r
 }
 
-func (r Rel[M, R]) statement(models []M, count bool) (Statement, error) {
+func (r Rel[M, R]) statement(models []M, count bool) (stmt, error) {
 	if r.statements == nil {
-		return Statement{}, ErrInvalidQuery
+		return stmt{}, ErrInvalidQuery
 	}
 
-	statement := r.statements.rows
+	rendered := r.statements.rows
 	if count {
-		statement = r.statements.count
+		rendered = r.statements.count
 	}
 
-	if statement.SQL == "" {
-		return Statement{}, ErrInvalidQuery
+	if rendered.SQL == "" {
+		return stmt{}, ErrInvalidQuery
 	}
 
-	statement.Args = slices.Clone(statement.Args)
+	rendered.Args = slices.Clone(rendered.Args)
 	for index, key := range r.keys {
-		statement.Args[index] = key.Values(models)
+		rendered.Args[index] = key.Values(models)
 	}
 
-	return statement, nil
+	return rendered, nil
 }
 
-func (r Rel[M, R]) renderStatement(count bool) (Statement, error) {
+func (r Rel[M, R]) renderStatement(count bool) (stmt, error) {
 	if !r.valid(count) {
-		return Statement{}, ErrInvalidQuery
+		return stmt{}, ErrInvalidQuery
 	}
 
 	writer := newSQLWriter()
@@ -143,10 +143,10 @@ func (r Rel[M, R]) renderStatement(count bool) (Statement, error) {
 	}
 
 	if writer.invalid {
-		return Statement{}, ErrInvalidQuery
+		return stmt{}, ErrInvalidQuery
 	}
 
-	return writer.statement(), nil
+	return writer.result(), nil
 }
 
 func (r Rel[M, R]) internalColumn(name string) string {

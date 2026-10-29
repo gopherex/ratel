@@ -50,14 +50,14 @@ func testEagerTerminal(t *testing.T, terminal string) {
 		},
 	}
 	database := ratel.New(executor)
-	query := database.From(users).With(users.Orders).
+	query := ratel.From(users).With(users.Orders).
 		Where(users.ID.Eq(1)).OrderBy(users.ID.Asc()).Limit(1).Offset(0)
 
 	if terminal == "count" {
-		query = database.From(users).WithCount(users.Orders)
+		query = ratel.From(users).WithCount(users.Orders)
 	}
 
-	models, err := eagerTerminal(t.Context(), query, terminal)
+	models, err := eagerTerminal(t.Context(), database, query, terminal)
 	if err != nil || len(models) != 1 || calls != 1 {
 		t.Fatalf("models=%v calls=%d err=%v", models, calls, err)
 	}
@@ -78,25 +78,25 @@ func testEagerTerminal(t *testing.T, terminal string) {
 }
 
 func eagerTerminal(
-	ctx context.Context, query ratel.EagerSelect[relationUser], terminal string,
+	ctx context.Context, database *ratel.DB, query ratel.EagerSelect[relationUser], terminal string,
 ) ([]relationUser, error) {
 	switch terminal {
 	case "one":
-		model, err := query.One(ctx)
+		model, err := database.Run(query).One(ctx)
 
 		return []relationUser{model}, err
 	case "first":
-		model, err := query.First(ctx)
+		model, err := database.Run(query).First(ctx)
 
 		return []relationUser{model}, err
 	case "chunks":
-		for page, err := range query.Chunks(ctx, 1) {
+		for page, err := range database.Run(query).Chunks(ctx, 1) {
 			return page, err
 		}
 
 		return nil, nil
 	default:
-		return query.List(ctx)
+		return database.Run(query).List(ctx)
 	}
 }
 
@@ -105,9 +105,34 @@ func TestEagerNoAll(t *testing.T) {
 
 	users, _ := relationDescriptors()
 
-	query := ratel.New(readExecutor{}).From(users).With(users.Orders)
-	if _, exists := reflect.TypeOf(query).MethodByName("All"); exists {
+	query := ratel.From(users).With(users.Orders)
+	if _, exists := reflect.TypeOf(ratel.New(readExecutor{}).Run(query)).MethodByName("All"); exists {
 		t.Fatal("With exposes All")
+	}
+}
+
+func TestEagerBuildRootOnly(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+	plain := ratel.From(users).Where(users.ID.Gt(1)).Limit(3)
+
+	want, err := build(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, eager := range map[string]ratel.EagerSelect[relationUser]{
+		"with": plain.With(users.Orders), "with count": plain.WithCount(users.Orders),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := build(eager)
+			if err != nil || got.SQL != want.SQL || !reflect.DeepEqual(got.Args, want.Args) {
+				t.Fatalf("Build() = %+v, %v; want the root query %+v", got, err, want)
+			}
+		})
 	}
 }
 
@@ -123,7 +148,7 @@ func TestEagerFailure(t *testing.T) {
 		send: func(context.Context, *pgx.Batch) pgx.BatchResults { return &relationBatch{failure: failure} },
 	}
 
-	result, err := ratel.New(executor).From(users).With(users.Orders).List(t.Context())
+	result, err := ratel.New(executor).Run(ratel.From(users).With(users.Orders)).List(t.Context())
 	if result != nil || !errors.Is(err, failure) {
 		t.Fatalf("%v %v", result, err)
 	}
@@ -143,13 +168,13 @@ func TestEagerInvalidRelation(t *testing.T) {
 				return nil, ratel.ErrInvalidQuery
 			}}
 			database := ratel.New(executor)
-			query := database.From(users).With(ratel.Rel[relationUser, relationOrder]{})
+			query := ratel.From(users).With(ratel.Rel[relationUser, relationOrder]{})
 
 			if terminal == "nil count" {
-				query = database.From(users).WithCount(nil)
+				query = ratel.From(users).WithCount(nil)
 			}
 
-			_, err := eagerTerminal(t.Context(), query, terminal)
+			_, err := eagerTerminal(t.Context(), database, query, terminal)
 			if !errors.Is(err, ratel.ErrInvalidQuery) {
 				t.Fatal(err)
 			}
@@ -178,7 +203,7 @@ func TestEagerExecModeRejected(t *testing.T) {
 				},
 			}
 			database := ratel.New(executor, ratel.WithExecMode(pgx.QueryExecModeExec))
-			query := database.From(users).With(users.Orders)
+			query := ratel.From(users).With(users.Orders)
 
 			var err error
 
@@ -186,10 +211,10 @@ func TestEagerExecModeRejected(t *testing.T) {
 			case "load":
 				err = database.Load(t.Context(), []relationUser{{ID: 1}}, users.Orders)
 			case "override":
-				_, err = ratel.New(executor).From(users).With(users.Orders).
+				_, err = ratel.New(executor).Run(ratel.From(users).With(users.Orders)).
 					List(t.Context(), ratel.ExecMode(pgx.QueryExecModeExec))
 			default:
-				_, err = eagerTerminal(t.Context(), query, terminal)
+				_, err = eagerTerminal(t.Context(), database, query, terminal)
 			}
 
 			if !errors.Is(err, ratel.ErrInvalidQuery) {
@@ -218,8 +243,8 @@ func BenchmarkRelationBuilder(b *testing.B) {
 		relation := users.Orders.Where(id.Gt(0)).OrderBy(id.Desc()).Limit(5).Offset(0).
 			With(relationItems(orders)).Strategy(ratel.Window())
 
-		query := database.From(users).With(relation).WithCount(users.Orders)
-		if _, err := query.List(b.Context()); err != nil {
+		query := ratel.From(users).With(relation).WithCount(users.Orders)
+		if _, err := database.Run(query).List(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -314,9 +339,9 @@ func TestEagerWithAppends(t *testing.T) {
 					return eagerXBatch(queued)
 				},
 			}
-			base := ratel.New(executor).From(users).With(users.Orders)
+			base := ratel.From(users).With(users.Orders)
 
-			models, err := tc.build(base).List(t.Context())
+			models, err := ratel.New(executor).Run(tc.build(base)).List(t.Context())
 			if err != nil || len(models) != 1 || statements != tc.statements {
 				t.Fatalf("models=%v statements=%d err=%v", models, statements, err)
 			}
@@ -338,7 +363,7 @@ func TestEagerWithAppends(t *testing.T) {
 			// The base builder is not changed by any branch.
 			statements = 0
 
-			if _, err := base.List(t.Context()); err != nil || statements != 1 {
+			if _, err := ratel.New(executor).Run(base).List(t.Context()); err != nil || statements != 1 {
 				t.Fatalf("base statements=%d err=%v", statements, err)
 			}
 		})
@@ -361,7 +386,9 @@ func TestEagerWithCountOnSelect(t *testing.T) {
 		},
 	}
 
-	models, err := ratel.New(executor).From(users).WithCount(users.Orders).WithCount(users.Orders).List(t.Context())
+	counted := ratel.From(users).WithCount(users.Orders).WithCount(users.Orders)
+
+	models, err := ratel.New(executor).Run(counted).List(t.Context())
 	if err != nil || len(models) != 1 {
 		t.Fatalf("models=%v err=%v", models, err)
 	}
@@ -458,7 +485,7 @@ func TestEagerSingle(t *testing.T) {
 					return eagerXBatch(queued)
 				},
 			}
-			query := tc.prepare(ratel.New(executor).From(users).With(users.Orders))
+			query := tc.prepare(ratel.From(users).With(users.Orders))
 
 			var (
 				model relationUser
@@ -466,9 +493,9 @@ func TestEagerSingle(t *testing.T) {
 			)
 
 			if tc.terminal == "one" {
-				model, err = query.One(t.Context())
+				model, err = ratel.New(executor).Run(query).One(t.Context())
 			} else {
-				model, err = query.First(t.Context())
+				model, err = ratel.New(executor).Run(query).First(t.Context())
 			}
 
 			if !errors.Is(err, tc.wantErr) || batches != tc.wantBatch {
@@ -529,7 +556,7 @@ func TestEagerChunksFailures(t *testing.T) {
 
 			yields := 0
 
-			for page, err := range ratel.New(executor).From(users).With(users.Orders).Chunks(t.Context(), 1) {
+			for page, err := range ratel.New(executor).Run(ratel.From(users).With(users.Orders)).Chunks(t.Context(), 1) {
 				yields++
 
 				if page != nil || !errors.Is(err, tc.wantTarget) {
@@ -557,7 +584,7 @@ func TestEagerChunksStopsEarly(t *testing.T) {
 	pages := 0
 
 	// A full page of size 1 would make the iterator read a second page unless the consumer stops.
-	for page, err := range ratel.New(executor).From(users).With(users.Orders).Chunks(t.Context(), 1) {
+	for page, err := range ratel.New(executor).Run(ratel.From(users).With(users.Orders)).Chunks(t.Context(), 1) {
 		if err != nil || len(page) != 1 {
 			t.Fatalf("page=%v err=%v", page, err)
 		}
@@ -579,12 +606,13 @@ func BenchmarkEagerWith(b *testing.B) {
 		readExecutor: readExecutor{query: parents.query},
 		send:         func(_ context.Context, queued *pgx.Batch) pgx.BatchResults { return eagerXBatch(queued) },
 	}
+	query := ratel.From(users).With(users.Orders).With(users.Orders.Limit(2))
 	database := ratel.New(executor)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := database.From(users).With(users.Orders).With(users.Orders.Limit(2)).List(b.Context()); err != nil {
+		if _, err := database.Run(query).List(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -597,12 +625,13 @@ func BenchmarkEagerWithCount(b *testing.B) {
 		readExecutor: readExecutor{query: parents.query},
 		send:         func(_ context.Context, queued *pgx.Batch) pgx.BatchResults { return eagerXBatch(queued) },
 	}
+	query := ratel.From(users).WithCount(users.Orders).WithCount(users.Orders)
 	database := ratel.New(executor)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := database.From(users).WithCount(users.Orders).WithCount(users.Orders).List(b.Context()); err != nil {
+		if _, err := database.Run(query).List(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -618,7 +647,8 @@ func BenchmarkEagerSelect(b *testing.B) {
 			return &relationBatch{rows: []*relationRows{{values: [][]any{{1, int64(11), int64(1)}}}}}
 		},
 	}
-	query := ratel.New(executor).From(users).With(users.Orders)
+	database := ratel.New(executor)
+	query := ratel.From(users).With(users.Orders)
 
 	built := query.Where(users.ID.Eq(1)).OrderBy(users.ID.Asc()).Limit(1).Offset(0)
 
@@ -632,7 +662,7 @@ func BenchmarkEagerSelect(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				if _, err := eagerTerminal(b.Context(), target, terminal); err != nil {
+				if _, err := eagerTerminal(b.Context(), database, target, terminal); err != nil {
 					b.Fatal(err)
 				}
 			}

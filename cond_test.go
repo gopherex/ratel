@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/gopherex/ratel"
 )
 
@@ -27,7 +25,7 @@ func TestConditionGroups(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := ratel.New(&pgx.Conn{}).From(users).Where(tc.condition).SQL()
+			statement, err := build(ratel.From(users).Where(tc.condition))
 			if err != nil || !strings.HasSuffix(statement.SQL, " WHERE "+tc.suffix) {
 				t.Fatalf("%+v: %v", statement, err)
 			}
@@ -57,7 +55,7 @@ func TestJoinConditionGroups(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			statement, err := tc.condition.SQL(tc.alias, "right")
+			statement, err := renderCond(tc.condition, tc.alias, "right")
 			if tc.invalid {
 				if err == nil {
 					t.Fatal("invalid alias accepted")
@@ -79,7 +77,7 @@ func BenchmarkJoinConditions(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, err := users.ID.EqCol(users.ManagerID).And(users.ID.GtCol(users.ID)).Not().SQL("left", "right")
+		_, err := renderCond(users.ID.EqCol(users.ManagerID).And(users.ID.GtCol(users.ID)).Not(), "left", "right")
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -88,12 +86,11 @@ func BenchmarkJoinConditions(b *testing.B) {
 
 func BenchmarkConditions(b *testing.B) {
 	users := userDescriptor()
-	database := ratel.New(&pgx.Conn{})
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, err := database.From(users).Where(users.ID.Gt(1).Or(users.ID.Lt(3)).Not()).SQL()
+		_, err := build(ratel.From(users).Where(users.ID.Gt(1).Or(users.ID.Lt(3)).Not()))
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -96,7 +96,8 @@ commits, begins transactions or needs multiple independent connections.
 ### Recorder and failure injection
 
 Assign `&rateltest.Recorder{}` to `config.ConnConfig.Tracer` before creating a
-pool. `Statements()` returns `[]ratel.Statement` in trace-start order, with
+pool. `Queries()` returns `[]rateltest.Query` (`SQL string`, `Args []any`) in
+trace-start order, with
 independent statement and argument slices. Argument values are shallow copies;
 mutable values keep pgx's caller-owned lifetime contract. `Reset()` clears the
 history. Both methods are concurrency-safe. Avoid sharing a recorder between

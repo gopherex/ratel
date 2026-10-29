@@ -48,24 +48,25 @@ func TestGenerated(t *testing.T) {
 	ctx := t.Context()
 	db := ratel.New(pool(t))
 
-	first := app.NewUserInsert("ann@example.com", app.UserStatusActive)
-	first.Balance = ratel.OptFrom(decimal.RequireFromString("12.50"))
-	first.Tags = ratel.OptFrom([]string{"a", "b"})
-	first.Home = ratel.NullFrom(app.Address{Street: ratel.NullFrom("Main"), Zip: ratel.NullFrom("100")})
-	first.Profile = ratel.NullFrom(doc.Profile{Name: "Ann"})
+	first := app.Users.Row().Email("ann@example.com").Status(app.UserStatusActive).
+		Balance(decimal.RequireFromString("12.50")).
+		Tags([]string{"a", "b"}).
+		Home(ratel.NullFrom(app.Address{Street: ratel.NullFrom("Main"), Zip: ratel.NullFrom("100")})).
+		Profile(ratel.NullFrom(doc.Profile{Name: "Ann"}))
 
-	users, err := db.Insert(app.Users, first, app.NewUserInsert("bob@example.com", app.UserStatusOnHold)).Returning(ctx)
+	users, err := db.Run(app.Users.Insert(first,
+		app.Users.Row().Email("bob@example.com").Status(app.UserStatusOnHold)).Returning()).List(ctx)
 	if err != nil || len(users) != 2 {
 		t.Fatalf("insert = %v, %v", users, err)
 	}
 
-	ann, err := db.From(app.Users).Where(app.Users.Email.Eq("ann@example.com")).One(ctx)
+	ann, err := db.Run(app.Users.Select().Where(app.Users.Email.Eq("ann@example.com"))).One(ctx)
 	if err != nil || !ann.Balance.Equal(decimal.RequireFromString("12.5")) || !slices.Equal(ann.Tags, []string{"a", "b"}) ||
 		ann.Home.V.Street.V != "Main" || ann.Profile.V.Name != "Ann" || ann.Status != app.UserStatusActive {
 		t.Fatalf("read = %+v, %v", ann, err)
 	}
 
-	_, err = db.Insert(app.Users, app.NewUserInsert("ann@example.com", app.UserStatusActive)).Exec(ctx)
+	_, err = db.Run(app.Users.Insert(app.Users.Row().Email("ann@example.com").Status(app.UserStatusActive))).Exec(ctx)
 	if !errors.Is(err, app.ErrUsersEmailKey) {
 		t.Fatalf("duplicate email error = %v", err)
 	}
@@ -73,13 +74,13 @@ func TestGenerated(t *testing.T) {
 	bob := users[1]
 
 	for index, owner := range []int64{ann.ID, ann.ID, bob.ID} {
-		row := app.NewOrderInsert(int64(index+1), owner, decimal.NewFromInt(int64(10*(index+1))))
-		if _, err := db.Insert(app.Orders, row).Exec(ctx); err != nil {
+		row := app.Orders.Row().ID(int64(index + 1)).UserID(owner).Total(decimal.NewFromInt(int64(10 * (index + 1))))
+		if _, err := db.Run(app.Orders.Insert(row)).Exec(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	loaded, err := db.From(app.Users).Where(app.Users.ID.Eq(ann.ID)).With(app.Users.Orders).One(ctx)
+	loaded, err := db.Run(app.Users.Select().Where(app.Users.ID.Eq(ann.ID)).With(app.Users.Orders)).One(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,39 +89,38 @@ func TestGenerated(t *testing.T) {
 		t.Fatalf("relation = %v, %v", orders, err)
 	}
 
-	rich, err := db.From(app.Users).Where(app.Users.Orders.Has(app.Orders.Total.Gt(decimal.NewFromInt(25)))).List(ctx)
+	rich, err := db.Run(app.Users.Select().Where(app.Users.Orders.Has(app.Orders.Total.Gt(decimal.NewFromInt(25))))).List(ctx)
 	if err != nil || len(rich) != 1 || rich[0].ID != bob.ID {
 		t.Fatalf("Has = %+v, %v", rich, err)
 	}
 
-	byEmail, err := queries.UserByEmail(ctx, db, "bob@example.com")
+	byEmail, err := db.Run(queries.UserByEmail().Email("bob@example.com")).One(ctx)
 	if err != nil || byEmail.ID != bob.ID || byEmail.Status != app.UserStatusOnHold {
 		t.Fatalf("UserByEmail = %+v, %v", byEmail, err)
 	}
 
-	if _, err := queries.UserByEmail(ctx, db, "nobody@example.com"); !errors.Is(err, ratel.ErrNotFound) {
+	if _, err := db.Run(queries.UserByEmail().Email("nobody@example.com")).One(ctx); !errors.Is(err, ratel.ErrNotFound) {
 		t.Fatalf("missing user error = %v", err)
 	}
 
-	joined, err := queries.OrdersWithUsers(ctx, db)
+	joined, err := db.Run(queries.OrdersWithUsers()).List(ctx)
 	if err != nil || len(joined) != 3 || joined[0].User == nil || joined[0].User.ID != ann.ID || joined[2].User != nil {
 		t.Fatalf("OrdersWithUsers = %+v, %v", joined, err)
 	}
 
-	emails, err := db.From(queries.EmailsQ.Args()).Where(queries.EmailsQ.ID.Eq(bob.ID)).List(ctx)
+	emails, err := db.Run(queries.Emails().Select().Where(queries.EmailsQ.ID.Eq(bob.ID))).List(ctx)
 	if err != nil || len(emails) != 1 || emails[0].Email != "bob@example.com" {
 		t.Fatalf("Emails builder = %+v, %v", emails, err)
 	}
 
-	tag, err := queries.CreateTag(ctx, db, 1, "go")
+	tag, err := db.Run(queries.CreateTag().ID(1).Label("go")).One(ctx)
 	if err != nil || tag.Label != "go" || tag.Kind != app.TagKindTopic {
 		t.Fatalf("CreateTag = %+v, %v", tag, err)
 	}
 
-	brand := app.NewTagInsert(9, "acme")
-	brand.Kind = ratel.OptFrom(app.TagKindBrand)
+	brand := app.Tags.Row().ID(9).Label("acme").Kind(app.TagKindBrand)
 
-	if _, err := db.Insert(app.Tags, brand).Exec(ctx, ratel.ExecMode(pgx.QueryExecModeSimpleProtocol)); err != nil {
+	if _, err := db.Run(app.Tags.Insert(brand)).Exec(ctx, ratel.ExecMode(pgx.QueryExecModeSimpleProtocol)); err != nil {
 		t.Fatalf("insert checked enum in simple protocol = %v", err)
 	}
 
@@ -129,32 +129,32 @@ func TestGenerated(t *testing.T) {
 		t.Fatalf("CopyTags = %d, %v", copied, err)
 	}
 
-	deleted, err := queries.DeleteTag(ctx, db, 2)
+	deleted, err := db.Run(queries.DeleteTag().ID(2)).Exec(ctx)
 	if err != nil || deleted != 1 {
 		t.Fatalf("DeleteTag = %d, %v", deleted, err)
 	}
 
 	ann.Balance = decimal.NewFromInt(99)
-	if _, err := db.Save(app.Users, ann).Exec(ctx); err != nil {
+	if _, err := db.Run(app.Users.Save(ann)).Exec(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	saved, err := db.From(app.Users).Where(app.Users.ID.Eq(ann.ID)).One(ctx)
+	saved, err := db.Run(app.Users.Select().Where(app.Users.ID.Eq(ann.ID))).One(ctx)
 	if err != nil || !saved.Balance.Equal(decimal.NewFromInt(99)) {
 		t.Fatalf("Save = %+v, %v", saved, err)
 	}
 
-	stale := db.Save(app.Users, ann).ExpectVersion(app.Users.Email, "someone@example.com")
-	if _, err := stale.Exec(ctx); !errors.Is(err, ratel.ErrStaleVersion) {
+	stale := app.Users.Save(ann).ExpectVersion(app.Users.Email, "someone@example.com")
+	if _, err := db.Run(stale).Exec(ctx); !errors.Is(err, ratel.ErrStaleVersion) {
 		t.Fatalf("stale Save error = %v", err)
 	}
 
-	count, err := db.From(app.Users).Count(ctx)
+	count, err := db.Run(app.Users.Select()).Count(ctx)
 	if err != nil || count != 2 {
 		t.Fatalf("Count = %d, %v", count, err)
 	}
 
-	ids, err := db.From(app.Users).OrderBy(app.Users.ID.Asc()).After(ann.ID).Pluck(app.Users.ID).List(ctx)
+	ids, err := db.Run(app.Users.Select().OrderBy(app.Users.ID.Asc()).After(ann.ID).Pluck(app.Users.ID)).List(ctx)
 	if err != nil || !slices.Equal(ids, []int64{bob.ID}) {
 		t.Fatalf("keyset Pluck = %v, %v", ids, err)
 	}
@@ -166,20 +166,20 @@ func TestGenerated(t *testing.T) {
 	)
 
 	err = db.Batch(ctx,
-		db.From(app.Users).OrderBy(app.Users.ID.Asc()).Batch(&everyone),
-		db.From(queries.EmailsQ.Args()).Where(queries.EmailsQ.ID.Eq(ann.ID)).Batch(new([]queries.EmailsRow)),
-		db.From(app.Users).Where(app.Users.ID.Eq(bob.ID)).BatchOne(&single),
-		db.Update(app.Tags).Set(app.Tags.Label.To("relabeled")).All().Batch(&retagged),
+		ratel.List(app.Users.Select().OrderBy(app.Users.ID.Asc()), &everyone),
+		ratel.List(queries.Emails().Select().Where(queries.EmailsQ.ID.Eq(ann.ID)), new([]queries.EmailsRow)),
+		ratel.One(app.Users.Select().Where(app.Users.ID.Eq(bob.ID)), &single),
+		ratel.Exec(app.Tags.Update().Set(app.Tags.Label.To("relabeled")).All(), &retagged),
 	)
 	if err != nil || len(everyone) != 2 || single.ID != bob.ID || retagged != 3 {
 		t.Fatalf("Batch = %v, %d users, %+v, %d tags", err, len(everyone), single, retagged)
 	}
 
-	if _, err := db.DeleteRow(app.Orders, app.Order{ID: 3}).Exec(ctx); err != nil {
+	if _, err := db.Run(app.Orders.DeleteRow(app.Order{ID: 3})).Exec(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := db.DeleteRow(app.Orders, app.Order{ID: 3}).Exec(ctx); !errors.Is(err, ratel.ErrNotFound) {
+	if _, err := db.Run(app.Orders.DeleteRow(app.Order{ID: 3})).Exec(ctx); !errors.Is(err, ratel.ErrNotFound) {
 		t.Fatalf("second DeleteRow error = %v", err)
 	}
 }
