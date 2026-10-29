@@ -191,7 +191,10 @@ disk. `TestLibrariesAgree` (in `make test-integration`) checks that all six
 read and write the same data. `make bench-gen` regenerates the ratel, sqlc
 (Docker image `sqlc/sqlc`) and ent code; `make bench-compare` runs
 `BENCH_COUNT` (default 10) repetitions into `bench/results.txt` and tabulates
-them with benchstat into `bench/results-table.txt`.
+them with benchstat into `bench/results-table.txt`. `make readme-art` redraws
+the README chart `docs/assets/bench.svg` (and the banner) from that table with
+`tools/readme_art.py`; Inkscape converts the text to paths with pinned fonts
+downloaded into `bin/fonts`, so the SVGs render the same everywhere.
 
 ### Output-plugin SDK and host
 

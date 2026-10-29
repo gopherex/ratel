@@ -341,6 +341,7 @@ proto/, ir/, plugin/    the protobuf contracts, their generated Go, the plugin S
 tests/                  runtime integration suite (own module)
 bench/                  the comparison with other libraries (own module)
 examples/shop/          the quick start (own module)
+tools/                  the generator of the README banner and benchmark chart
 docs/                   the specification
 ```
 
@@ -350,6 +351,7 @@ make check             # format check + linter + unit tests (what CI runs)
 make test-integration  # integration suites on Docker (postgres:18-alpine)
 make bench             # every benchmark of every module
 make bench-compare     # the comparison table above
+make readme-art        # redraw the banner and the chart (needs python3, inkscape)
 ```
 
 `make lint` covers the integration suites too, and `make fmt` hands each

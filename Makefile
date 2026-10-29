@@ -18,7 +18,7 @@ MODULES := $(shell $(GO) work edit -json | sed -n 's/.*"DiskPath": "\([^"]*\)".*
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench bench-gen bench-compare proto builtins check
+.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench bench-gen bench-compare readme-art proto builtins check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -88,6 +88,26 @@ bench-compare: ## Compare ratel with pgx, sqlc, GORM, bun and ent on PostgreSQL 
 	( cd bench && $(GO) test -tags integration -run '^$$' -bench . -benchmem -count $(BENCH_COUNT) . | tee results.txt )
 	$(GO) run golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e \
 		-row /scenario -col /library bench/results.txt | tee bench/results-table.txt
+
+# Pinned fonts of the README art, so text-to-path output is reproducible.
+FONTS := $(BIN)/fonts
+JETBRAINS_MONO := https://raw.githubusercontent.com/JetBrains/JetBrainsMono/v2.304/fonts/ttf
+NOTO_SANS := https://raw.githubusercontent.com/google/fonts/9862abc066c9b83bf84c3e8ed1fc2d8d48f9bbf0/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf
+
+readme-art: ## Redraw docs/assets/{banner,bench}.svg from bench/results-table.txt (needs python3, inkscape)
+	mkdir -p $(FONTS)
+	for w in Bold ExtraBold; do
+		[ -f $(FONTS)/JetBrainsMono-$$w.ttf ] || curl -fsSL -o $(FONTS)/JetBrainsMono-$$w.ttf $(JETBRAINS_MONO)/JetBrainsMono-$$w.ttf
+	done
+	[ -f $(FONTS)/NotoSans.ttf ] || curl -fsSL -o $(FONTS)/NotoSans.ttf '$(NOTO_SANS)'
+	tmp=$$(mktemp -d)
+	trap 'rm -rf "$$tmp"' EXIT
+	# Only the pinned fonts are visible, never the system ones.
+	printf '<fontconfig><dir>%s</dir><cachedir>%s</cachedir></fontconfig>\n' "$(CURDIR)/$(FONTS)" "$$tmp/cache" > "$$tmp/fonts.conf"
+	python3 tools/readme_art.py docs/assets/ratel.svg bench/results-table.txt "$$tmp"
+	for n in banner bench; do
+		FONTCONFIG_FILE="$$tmp/fonts.conf" inkscape "$$tmp/$$n.svg" --export-text-to-path --export-plain-svg --export-filename=docs/assets/$$n.svg
+	done
 
 proto: ## Generate Go from proto/ (needs protoc-gen-go on PATH; no-op until .proto files exist)
 	# easyp fails on a module with no sources, so the target is an explicit
