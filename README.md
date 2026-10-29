@@ -89,112 +89,39 @@ ratel migrate plan init         # migrations/<timestamp>_init.sql and ratel.sum
 `plan` lints the schema as well: without the index above it stops with
 `RTL-P01: FK columns without a supporting index: user_id`.
 
-**4. Use it.** The application applies its own migrations on startup and
-then reads and writes through the generated descriptors:
+**4. Use it.** Apply the migrations on startup, then read and write through
+the generated code:
 
 ```go
 //go:embed migrations
 var migrations embed.FS
 
-func main() {
-	if err := run(context.Background(), os.Getenv("DATABASE_URL"), os.Stdout); err != nil {
-		log.Fatal(err)
-	}
-}
+dir, _ := fs.Sub(migrations, "migrations")
+err := migrate.Apply(ctx, pool, dir) // no table is locked longer than a moment
 
-// topCustomers is how many customers the report lists.
-const topCustomers = 10
+db := ratel.New(pool)
 
-func run(ctx context.Context, url string, out io.Writer) error {
-	config, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		return fmt.Errorf("database url: %w", err)
-	}
+// Insert, returning the rows with their generated ids.
+created, err := db.Insert(app.Users,
+	app.NewUserInsert("ann@example.com", "Ann"),
+	app.NewUserInsert("bob@example.com", "Bob"),
+).Returning(ctx)
 
-	// Each generated package registers the codecs of its types.
-	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		if err := app.RegisterTypes(ctx, conn); err != nil {
-			return err
-		}
+// Typed builder with an eager relation: two queries, no N+1.
+ann, err := db.From(app.Users).
+	Where(app.Users.Email.Eq("ann@example.com")).
+	With(app.Users.Orders).
+	One(ctx)
+orders, err := ann.Orders()
 
-		return users.RegisterTypes(ctx, conn)
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		return fmt.Errorf("connect: %w", err)
-	}
-	defer pool.Close()
-
-	// Apply the planned migrations: no table is locked longer than a moment.
-	dir, err := fs.Sub(migrations, "migrations")
-	if err != nil {
-		return fmt.Errorf("migrations: %w", err)
-	}
-
-	if err := migrate.Apply(ctx, pool, dir); err != nil {
-		return err
-	}
-
-	database := ratel.New(pool)
-
-	// Insert, returning the generated rows.
-	created, err := database.Insert(app.Users,
-		app.NewUserInsert("ann@example.com", "Ann"),
-		app.NewUserInsert("bob@example.com", "Bob"),
-	).Returning(ctx)
-	if err != nil {
-		return err
-	}
-
-	ann := created[0]
-	for _, total := range []string{"12.50", "40.00"} {
-		order := app.NewOrderInsert(ann.ID, decimal.RequireFromString(total))
-		if _, err := database.Insert(app.Orders, order).Exec(ctx); err != nil {
-			return err
-		}
-	}
-
-	// Typed builder with an eager relation: two queries, no N+1.
-	loaded, err := database.From(app.Users).
-		Where(app.Users.Email.Eq("ann@example.com")).
-		With(app.Users.Orders).
-		One(ctx)
-	if err != nil {
-		return err
-	}
-
-	orders, err := loaded.Orders()
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintln(out, loaded.Name, "has", len(orders), "orders")
-
-	// A static query from queries/users/users.sql.
-	top, err := users.TopCustomers(ctx, database, topCustomers)
-	if err != nil {
-		return err
-	}
-
-	for _, row := range top {
-		fmt.Fprintln(out, row.Email, row.Spent.V)
-	}
-
-	return nil
-}
+// A static query from queries/users/users.sql.
+top, err := users.TopCustomers(ctx, db, 10)
 ```
 
-```sh
-go mod tidy
-DATABASE_URL=postgres://... go run .
-# Ann has 2 orders
-# ann@example.com 52.5
-```
-
-This is [examples/shop/main.go](examples/shop/main.go) without its imports;
-the example, with its generated code and migrations, runs against
-PostgreSQL in CI.
+Error checks are left out here. The complete program, with the pool setup
+that registers the generated types, is
+[examples/shop/main.go](examples/shop/main.go); CI runs it against
+PostgreSQL.
 
 When the schema changes, edit `schema/*.sql`, run `ratel generate` and
 `ratel migrate plan <name>`, review the planned file, and deploy: the next
@@ -202,60 +129,50 @@ start applies it.
 
 ## What you get
 
-**Code from SQL.** ratel parses your schema and queries with PostgreSQL's
-own parser (libpg_query, compiled to WebAssembly: no cgo), infers every
-parameter and result column with its nullability, and generates models,
-scanners, typed descriptors and one function per query. Nullable values are
-`ratel.Null[T]`, optional insert columns `ratel.Opt[T]`; enums, domains,
-composites, ranges and arrays map to Go types; constraint violations come
-back as `*ratel.ConstraintError` values you match with `errors.Is` against
-generated sentinels.
-[docs/input.md](docs/input.md), [docs/runtime.md](docs/runtime.md)
+**Code from SQL.** PostgreSQL's own parser (libpg_query as WebAssembly, no
+cgo) reads the schema and queries; every parameter and column gets its Go
+type and nullability (`ratel.Null[T]`). Enums, domains, composites, ranges
+and arrays become Go types. Constraint violations are errors you match with
+`errors.Is` against generated sentinels.
+→ [input](docs/input.md), [runtime](docs/runtime.md)
 
-**A typed query builder.** `db.From(app.Users).Where(...).OrderBy(...)`
-checks column types at compile time and renders schema-qualified SQL with
-numbered parameters. Joins, subqueries, keyset pagination (`Chunks`),
-streaming (`All`), `FOR UPDATE ... SKIP LOCKED`, multi-row and upsert
-inserts, `UPDATE`/`DELETE ... RETURNING`, batches and `COPY` are all there.
-Relations come from foreign keys: `With(app.Users.Orders)` loads them in one
-query per depth, with per-parent `Limit`, counts and many-to-many through
-link tables. Static queries are builder sources too, so you can add clauses
-to them.
+**A typed query builder** for what a static query cannot express. Column
+types are checked at compile time, and the SQL is schema-qualified with
+numbered parameters. It covers joins, subqueries, keyset pagination,
+streaming, `SKIP LOCKED`, upserts, `RETURNING`, batches and `COPY`.
+Relations come from foreign keys and load in one query per depth.
+→ [runtime](docs/runtime.md)
 
 **Migrations that never lock production.** The schema files are the target
-state. `ratel migrate plan` diffs them against what the existing migrations
-produce, probes a dev database for table rewrites and dependents, and writes
-safe steps in three phases: **expand** (`CREATE INDEX CONCURRENTLY`,
-constraints `NOT VALID`, new columns), **backfill** (batched updates over
-the primary key, pausing while replicas lag) and **contract** (drops and
-validations, once old code is gone). Every step records the locks it takes;
-the runner checks for sessions that would block it before asking for a lock,
-runs short DDL under `lock_timeout` and `statement_timeout`, retries lock
-timeouts on GitLab's schedule, gives up with the list of blocking sessions
-instead of queueing behind them, and resumes interrupted index builds and
-backfills. Renames, retypes and backfills are declared as comments in the
-schema (`-- @ratel.renamed from=old_name`). 35 lint rules (`RTL-*`) catch
-what the planner cannot fix for you. [docs/migrations.md](docs/migrations.md)
+state. `ratel migrate plan` writes the steps in three phases:
 
-**Migrations inside your application.** `migrate.Apply` runs an embedded
-migrations directory with exactly the guarantees of `ratel migrate apply`;
-`migrate.Check` verifies one in a unit test. Hand-written migrations start
-with `ratel migrate new <name>` and are sealed by `ratel migrate hash`.
+- **expand:** `CONCURRENTLY` indexes, `NOT VALID` constraints, new columns;
+- **backfill:** batched updates that pause while replicas lag;
+- **contract:** drops and validations once old code is gone.
 
-**Tests on real PostgreSQL.** `rateltest` starts one container per suite and
-hands every test its own database cloned from a migrated template;
-`WithMigrationsDir` migrates the template with your real migrations. A query recorder and failure injection come with it.
-[docs/testing.md](docs/testing.md)
+The runner checks for blocking sessions before it takes a lock, keeps DDL
+short under `lock_timeout`, and resumes interrupted work. Renames and
+retypes are declared as schema comments (`-- @ratel.renamed from=old`).
+35 lint rules
+(`RTL-*`) catch what the planner cannot fix.
+→ [migrations](docs/migrations.md)
 
-**Plugins in any language.** The generator is a plugin over a documented
-protobuf contract (the Catalog IR); `ratel-gen-go` is just the built-in one.
-Plugins run as executables or WebAssembly. A `.proto` frontend
-(`protoc-gen-ratel`) turns annotated messages into the same SQL schema.
-[docs/plugins.md](docs/plugins.md), [docs/proto-frontend.md](docs/proto-frontend.md)
+**Migrations inside your application.** `migrate.Apply` gives an embedded
+directory the same guarantees as `ratel migrate apply`; `migrate.Check`
+verifies it in a unit test. Hand-written steps start with
+`ratel migrate new` and are sealed by `ratel migrate hash`.
 
-**No telemetry of its own.** ratel builds SQL and scans rows; trace the
-queries at the driver (a pgx tracer such as otelpgx) and the operations in
-your code.
+**Tests on real PostgreSQL.** `rateltest` gives every test its own database,
+cloned from a template migrated with your migrations.
+→ [testing](docs/testing.md)
+
+**Plugins in any language.** The generator is a plugin over a protobuf
+contract and runs as an executable or WebAssembly. A `.proto` frontend
+produces the same SQL schema.
+→ [plugins](docs/plugins.md), [proto frontend](docs/proto-frontend.md)
+
+**No telemetry of its own.** ratel only builds SQL and scans rows: trace
+queries at the driver (a pgx tracer such as otelpgx).
 
 ## Benchmarks
 
@@ -267,6 +184,13 @@ speed. A test checks that all six read and write the same rows. Median of
 <p align="center">
   <img src="docs/assets/bench.svg" alt="Geometric mean over six scenarios relative to hand-written pgx: time ratel 0.91×, sqlc 0.95×, ent 1.48×, bun 2.39×, GORM 3.41×; allocations ratel 1.12×, sqlc 1.04×, ent 5.21×, bun 2.85×, GORM 5.69×." width="100%">
 </p>
+
+ratel's builder costs about as much as the hand-written query it replaces:
+the generated code scans without reflection, relations load in one query per
+depth, and bulk inserts go through `unnest` arrays.
+
+<details>
+<summary>Per-scenario numbers and method</summary>
 
 Time per operation:
 
@@ -290,15 +214,14 @@ Allocations per operation:
 | insert 100 rows | 631 | **532** | 631 | 2988 | 746 | 1728 |
 | update by primary key | 8 | **12** | 8 | 151 | 27 | 94 |
 
-ratel's builder costs about as much as the hand-written query it replaces:
-the generated descriptors scan without reflection, relations load in one
-query per depth, and bulk inserts go through `unnest` arrays, which here
-outrun `COPY`. pgx and sqlc bulk-insert with `COPY`; the database/sql
-libraries run on pgx's stdlib driver over the same pool. Absolute numbers
+pgx and sqlc bulk-insert with `COPY`, which `unnest` outruns here; the
+database/sql libraries run on pgx's stdlib driver over the same pool. Absolute numbers
 depend on the machine (here an i5-14600K under load); compare the columns.
 Reproduce with `make bench-compare`; the raw results are
 [bench/results-table.txt](bench/results-table.txt), the method is in
 [docs/testing.md](docs/testing.md#comparison-with-other-libraries).
+
+</details>
 
 ## Roadmap
 
