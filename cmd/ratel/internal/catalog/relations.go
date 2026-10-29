@@ -9,7 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // Diagnostic codes of the relation graph (docs/ir.md, Relations).

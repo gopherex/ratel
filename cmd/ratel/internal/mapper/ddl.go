@@ -8,7 +8,7 @@ import (
 
 	pg "github.com/pganalyze/pg_query_go/v6"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // MapCreateTable maps a declaration without inventing implicit sequences or names.

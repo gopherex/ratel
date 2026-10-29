@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package ratel.v1.ir;
 
-option go_package = "github.com/gopherex/ratel/ir;ir";
+option go_package = "github.com/gopherex/ratel/pkg/ir;ir";
 
 // Identity, provenance, diagnostics and the annotation vocabulary shared by
 // the whole catalog IR.

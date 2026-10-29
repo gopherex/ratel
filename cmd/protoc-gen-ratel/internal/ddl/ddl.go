@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/gopherex/ratel/options"
+	"github.com/gopherex/ratel/pkg/options"
 )
 
 // Generation errors. Each returned error wraps one of them and names the proto

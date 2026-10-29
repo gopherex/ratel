@@ -5,7 +5,7 @@ import (
 
 	pg "github.com/pganalyze/pg_query_go/v6"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // MapExpr maps an expression and assigns deterministic ids to its entire tree.

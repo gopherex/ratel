@@ -156,7 +156,7 @@ type Customer struct {
 - A PostgreSQL enum that only proto models use gets no Go type of its own:
   their columns carry the proto enum. An array of it still needs the
   package's `RegisterTypes`, which loads its OID.
-- The generated code imports `github.com/gopherex/ratel/ratelpb` for the
+- The generated code imports `github.com/gopherex/ratel/pkg/ratelpb` for the
   conversions. `examples/proto` is the tested quick start; `make
   proto-example` regenerates its messages, schema and code.
 

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/gopherex/ratel"
+	"github.com/gopherex/ratel/pkg/ratel"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"

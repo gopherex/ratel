@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // Schema lints the desired schema for practices: foreign keys without an

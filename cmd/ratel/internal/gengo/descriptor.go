@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // parameterName is an unexported identifier that is never a Go keyword.

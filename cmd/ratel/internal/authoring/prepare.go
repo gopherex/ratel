@@ -1,7 +1,7 @@
 // Package authoring writes, classifies and seals migration files and applies
 // them to dev databases: the parts of the migration engine that need the
 // parser. The runner that applies them to a target is package
-// github.com/gopherex/ratel/migrate.
+// github.com/gopherex/ratel/pkg/migrate.
 package authoring
 
 import (
@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"

@@ -19,7 +19,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
 )
 
 // migrations is an application's migrations directory, embedded as an

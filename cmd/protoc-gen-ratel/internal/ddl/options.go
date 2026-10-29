@@ -4,7 +4,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/gopherex/ratel/options"
+	"github.com/gopherex/ratel/pkg/options"
 )
 
 // option reads a ratel extension from descriptor options. An unset extension

@@ -6,7 +6,7 @@ import (
 
 	pg "github.com/pganalyze/pg_query_go/v6"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // MapType preserves PostgreSQL parser-normalized names and declared modifiers.

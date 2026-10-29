@@ -93,8 +93,8 @@ PostgreSQL sees.
 
 | Module | Contains | Depends on |
 |---|---|---|
-| `github.com/gopherex/ratel` | runtime package `ratel`, migration runner `migrate`, Go types of the IR and plugin protos, plugin SDK | pgx v5, protobuf runtime |
-| `github.com/gopherex/ratel/rateltest` | user test helpers | the runtime module, testcontainers |
+| `github.com/gopherex/ratel` | under `pkg/`: runtime package `ratel`, migration runner `migrate`, proto conversions `ratelpb`, Go types of the IR and plugin protos, plugin SDK | pgx v5, protobuf runtime |
+| `github.com/gopherex/ratel/pkg/rateltest` | user test helpers | the runtime module, testcontainers |
 | `github.com/gopherex/ratel/cmd/ratel` | host CLI, parser, catalog, inference, migration engine, `ratel-gen-go` linked in | the runtime module, wazero, go-pgquery, testcontainers |
 | `github.com/gopherex/ratel/cmd/protoc-gen-ratel` | proto frontend | protobuf, the options proto |
 
@@ -112,17 +112,21 @@ anything a third-party plugin cannot.
 
 ```
 proto/ratel/v1/{ir,plugin,options}/*.proto   contract source (easyp, see below)
-ir/                                          generated Go for the IR protos
-options/                                     generated Go for the ratel.proto options
-plugin/pluginpb/                             generated Go for the plugin protocol
-plugin/                                      Go SDK for output plugins
-ratel.go, query.go, col.go, rel.go, ...      runtime package ratel
-migrate/                                     migration runner for the CLI and applications
-rateltest/                                   user test helpers (own module)
+pkg/ir/                                      generated Go for the IR protos
+pkg/options/                                 generated Go for the ratel.proto options
+pkg/plugin/pluginpb/                         generated Go for the plugin protocol
+pkg/plugin/                                  Go SDK for output plugins
+pkg/ratel/                                   runtime package ratel
+pkg/ratelpb/                                 proto message conversions
+pkg/migrate/                                 migration runner for the CLI and applications
+pkg/rateltest/                               user test helpers (own module)
 cmd/ratel/                                   host CLI module
 cmd/protoc-gen-ratel/                        proto frontend module
-internal/                                    host internals (inside cmd/ratel)
+cmd/ratel/internal/                          host internals
 tests/                                       integration and e2e suites
+examples/                                    quick starts, tested end to end
+bench/                                       comparison with other libraries
+tools/                                       generator of the README art
 docs/                                        this specification
 website/                                     Docusaurus documentation site
 ```
@@ -134,5 +138,6 @@ website/                                     Docusaurus documentation site
 - Generation runs with easyp v1 (`easyp.yaml`, `easyp.gen.yaml`,
   `protobuf.mod`, `protobuf.lock`). Plugins `protoc-gen-go` resolve from
   `PATH`. Generated Go is committed.
-- `easyp lint` and `easyp breaking` run in CI from the first tagged release.
+- `easyp lint` and `easyp breaking` run locally (`easyp.yaml`); they join CI
+  once easyp v1 is released.
   Field numbers are never reused; removed fields are `reserved`.

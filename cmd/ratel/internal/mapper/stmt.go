@@ -5,7 +5,7 @@ import (
 
 	pg "github.com/pganalyze/pg_query_go/v6"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // MapStatement maps DML structurally and preserves other statements as raw SQL.

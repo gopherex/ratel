@@ -6,7 +6,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/lint"

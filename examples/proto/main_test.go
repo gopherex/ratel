@@ -23,7 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/gopherex/ratel"
+	"github.com/gopherex/ratel/pkg/ratel"
 
 	shopv1 "github.com/gopherex/ratel/examples/proto/gen/shop/v1"
 	"github.com/gopherex/ratel/examples/proto/internal/db/shop"

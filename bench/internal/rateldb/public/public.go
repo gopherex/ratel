@@ -5,7 +5,7 @@ package public
 import (
 	"time"
 
-	"github.com/gopherex/ratel"
+	"github.com/gopherex/ratel/pkg/ratel"
 	"github.com/jackc/pgx/v5"
 )
 

@@ -13,8 +13,8 @@ import (
 
 	tclog "github.com/testcontainers/testcontainers-go/log"
 
-	"github.com/gopherex/ratel/ir"
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/migrate"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"

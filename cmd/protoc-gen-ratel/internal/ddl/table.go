@@ -8,7 +8,7 @@ import (
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/gopherex/ratel/options"
+	"github.com/gopherex/ratel/pkg/options"
 )
 
 // table is one CREATE TABLE statement and the CREATE INDEX statements after it.

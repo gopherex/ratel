@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
-	"github.com/gopherex/ratel/plugin"
-	"github.com/gopherex/ratel/plugin/pluginpb"
+	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/plugin"
+	"github.com/gopherex/ratel/pkg/plugin/pluginpb"
 )
 
 // parameter is a query parameter as a Go argument.

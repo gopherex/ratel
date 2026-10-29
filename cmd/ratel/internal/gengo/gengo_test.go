@@ -11,9 +11,9 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/gopherex/ratel/ir"
-	"github.com/gopherex/ratel/plugin"
-	"github.com/gopherex/ratel/plugin/pluginpb"
+	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/plugin"
+	"github.com/gopherex/ratel/pkg/plugin/pluginpb"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/annotate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"

@@ -262,12 +262,15 @@ The specification lives in [docs/](docs/architecture.md):
 ## Development
 
 ```
-*.go                    runtime package ratel (module github.com/gopherex/ratel)
-migrate/                migration runner for applications and the CLI
-rateltest/              test helpers for applications (own module)
+pkg/ratel/              runtime package ratel (module github.com/gopherex/ratel)
+pkg/migrate/            migration runner for applications and the CLI
+pkg/ratelpb/            conversions between proto messages and columns
+pkg/rateltest/          test helpers for applications (own module)
 cmd/ratel/              host CLI: parser, catalog, inference, generator, migration engine
 cmd/protoc-gen-ratel/   proto frontend (own module)
-proto/, ir/, plugin/    the protobuf contracts, their generated Go, the plugin SDK
+proto/                  the protobuf contracts
+pkg/ir/, pkg/options/   their generated Go
+pkg/plugin/             the plugin SDK and protocol
 tests/                  runtime integration suite (own module)
 bench/                  the comparison with other libraries (own module)
 examples/shop/          the quick start (own module)

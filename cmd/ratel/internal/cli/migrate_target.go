@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
 )
 
 // connect opens a pool on the target; connections open on first use.

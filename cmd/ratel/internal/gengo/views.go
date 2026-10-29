@@ -3,7 +3,7 @@ package gengo
 import (
 	"strconv"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // views generates a model, scanner and read-only descriptor per view and

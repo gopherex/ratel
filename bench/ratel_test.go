@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gopherex/ratel"
+	"github.com/gopherex/ratel/pkg/ratel"
 
 	"github.com/gopherex/ratel/bench/internal/rateldb/public"
 )

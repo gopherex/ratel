@@ -4,7 +4,7 @@ package ratel.v1.options;
 
 import "google/protobuf/descriptor.proto";
 
-option go_package = "github.com/gopherex/ratel/options;options";
+option go_package = "github.com/gopherex/ratel/pkg/options;options";
 
 // protoc-gen-ratel options (docs/proto-frontend.md). One extension field
 // number, 60120, is used on every descriptor scope. Precedence follows

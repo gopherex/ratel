@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
 )
 
 // Effect is the heaviest work a statement does under its locks.

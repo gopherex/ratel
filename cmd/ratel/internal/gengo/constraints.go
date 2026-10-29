@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // constraintKind is the ratel.ConstraintKind a violation of the constraint

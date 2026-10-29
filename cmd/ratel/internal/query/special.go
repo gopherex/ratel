@@ -5,7 +5,7 @@ import (
 
 	pg "github.com/pganalyze/pg_query_go/v6"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 func (s *inference) special(node *pg.Node, env *scope, expected *ir.TypeRef) *ir.QueryColumn {

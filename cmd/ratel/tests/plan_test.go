@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
 	"github.com/gopherex/ratel/cmd/ratel/internal/devdb"

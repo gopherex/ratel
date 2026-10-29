@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
-	"github.com/gopherex/ratel/plugin"
+	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/plugin"
 )
 
 // insertKind is how a column appears in the insert type.

@@ -14,8 +14,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/gopherex/ratel/ir"
-	sdk "github.com/gopherex/ratel/plugin"
+	"github.com/gopherex/ratel/pkg/ir"
+	sdk "github.com/gopherex/ratel/pkg/plugin"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"

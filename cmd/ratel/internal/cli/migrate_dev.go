@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/devdb"

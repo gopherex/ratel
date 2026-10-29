@@ -14,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
-	"github.com/gopherex/ratel"
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
+	"github.com/gopherex/ratel/pkg/ratel"
 
 	"github.com/gopherex/ratel/examples/shop/internal/db/app"
 	"github.com/gopherex/ratel/examples/shop/internal/db/users"

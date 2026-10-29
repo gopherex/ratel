@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
-	"github.com/gopherex/ratel"
+	"github.com/gopherex/ratel/pkg/ratel"
 
 	"example.com/e2e/db/app"
 	"example.com/e2e/db/queries"

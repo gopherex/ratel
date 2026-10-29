@@ -101,7 +101,7 @@ the migration engine `RTL-P*`, `RTL-L*` and the other codes of
 
 ## Go SDK
 
-Package `github.com/gopherex/ratel/plugin` supplies `Read`, `Write`, `Negotiate`,
+Package `github.com/gopherex/ratel/pkg/plugin` supplies `Read`, `Write`, `Negotiate`,
 `Dispatch` and `Serve`. Implement `plugin.Generator` (`Info` and `Generate`),
 parse `--format` with a default of `binpb`, then call
 `plugin.Serve(ctx, os.Stdin, os.Stdout, format, generator)`. `Serve` handles one
@@ -128,7 +128,7 @@ when the context expires. stderr is retained for failed or malformed exchanges.
 
 ## Conformance suite
 
-Package `github.com/gopherex/ratel/plugin/plugintest` runs any plugin against
+Package `github.com/gopherex/ratel/pkg/plugin/plugintest` runs any plugin against
 fixed empty-catalog and schema requests, malformed requests and invalid protocol
 ranges. It checks rules 2, 4 and 5, negotiation, repeated-response determinism
 and binary/JSON equivalence. Authors add `plugintest.Case` values with their own

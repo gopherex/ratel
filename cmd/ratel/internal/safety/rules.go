@@ -1,6 +1,6 @@
 package safety
 
-import "github.com/gopherex/ratel/migrate"
+import "github.com/gopherex/ratel/pkg/migrate"
 
 // Lint codes the table gives operations; docs/migrations.md lists them all.
 const (

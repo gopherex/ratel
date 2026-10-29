@@ -3,14 +3,14 @@ package gengo
 import (
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 const (
 	pgtypeImport  = "github.com/jackc/pgx/v5/pgtype"
 	decimalImport = "github.com/shopspring/decimal"
 	uuidImport    = "github.com/google/uuid"
-	ratelImport   = "github.com/gopherex/ratel"
+	ratelImport   = "github.com/gopherex/ratel/pkg/ratel"
 
 	numericType = "numeric"
 	boolType    = "bool" // the PostgreSQL and the Go name

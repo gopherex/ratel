@@ -7,7 +7,7 @@
 package shopv1
 
 import (
-	_ "github.com/gopherex/ratel/options"
+	_ "github.com/gopherex/ratel/pkg/options"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"

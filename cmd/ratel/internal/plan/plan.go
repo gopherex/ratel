@@ -9,7 +9,7 @@ package plan
 import (
 	"slices"
 
-	"github.com/gopherex/ratel/migrate"
+	"github.com/gopherex/ratel/pkg/migrate"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/introspect"

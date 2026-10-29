@@ -6,7 +6,7 @@ import (
 	pg "github.com/pganalyze/pg_query_go/v6"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 func (b *builder) dispatch(stmt statement) error {

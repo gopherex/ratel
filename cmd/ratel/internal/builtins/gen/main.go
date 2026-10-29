@@ -18,7 +18,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins/snapshot"
 

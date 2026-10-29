@@ -6,7 +6,7 @@ import "ratel/v1/ir/catalog.proto";
 import "ratel/v1/ir/common.proto";
 import "ratel/v1/ir/query.proto";
 
-option go_package = "github.com/gopherex/ratel/plugin/pluginpb;pluginpb";
+option go_package = "github.com/gopherex/ratel/pkg/plugin/pluginpb;pluginpb";
 
 // The output-plugin protocol (docs/plugins.md). One request message on stdin,
 // one response message on stdout: binary protobuf, or protojson with

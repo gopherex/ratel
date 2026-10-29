@@ -3,8 +3,8 @@ package gengo
 import (
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
-	"github.com/gopherex/ratel/plugin"
+	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/plugin"
 )
 
 // protoModel is a table whose model is a proto message, from the annotations

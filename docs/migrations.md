@@ -251,7 +251,7 @@ CREATE INDEX CONCURRENTLY orders_user_id_idx ON app.orders (user_id);
 
 ## Applying from an application
 
-The runner is package `github.com/gopherex/ratel/migrate` in the runtime
+The runner is package `github.com/gopherex/ratel/pkg/migrate` in the runtime
 module; it needs pgx and nothing of the CLI. An application embeds its
 migrations directory with its `ratel.sum` and applies it on startup:
 

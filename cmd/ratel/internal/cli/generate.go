@@ -8,8 +8,8 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/gopherex/ratel/ir"
-	sdk "github.com/gopherex/ratel/plugin"
+	"github.com/gopherex/ratel/pkg/ir"
+	sdk "github.com/gopherex/ratel/pkg/plugin"
 
 	host "github.com/gopherex/ratel/cmd/ratel/internal/plugin"
 )

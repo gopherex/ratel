@@ -18,7 +18,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/annotate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"

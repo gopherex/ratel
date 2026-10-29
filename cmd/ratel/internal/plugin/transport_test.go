@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/gopherex/ratel/plugin"
-	"github.com/gopherex/ratel/plugin/pluginpb"
+	sdk "github.com/gopherex/ratel/pkg/plugin"
+	"github.com/gopherex/ratel/pkg/plugin/pluginpb"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
 )

@@ -6,7 +6,7 @@ import (
 
 	pg "github.com/pganalyze/pg_query_go/v6"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/pgname"
 )

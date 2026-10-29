@@ -4,7 +4,7 @@ package ratel.v1.ir;
 
 import "ratel/v1/ir/common.proto";
 
-option go_package = "github.com/gopherex/ratel/ir;ir";
+option go_package = "github.com/gopherex/ratel/pkg/ir;ir";
 
 // The relation graph. Foreign keys remain the lossless source of truth on
 // Table; relations are the navigable edges derived from them for the ORM

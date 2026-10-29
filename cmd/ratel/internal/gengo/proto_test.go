@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gopherex/ratel/plugin"
+	"github.com/gopherex/ratel/pkg/plugin"
 )
 
 const protoTable = `CREATE SCHEMA shop;

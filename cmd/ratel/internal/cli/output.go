@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gopherex/ratel/plugin/pluginpb"
+	"github.com/gopherex/ratel/pkg/plugin/pluginpb"
 )
 
 // manifest records the files a plugin wrote into its output directory, one

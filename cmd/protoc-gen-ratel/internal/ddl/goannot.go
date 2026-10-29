@@ -6,7 +6,7 @@ import (
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/gopherex/ratel/options"
+	"github.com/gopherex/ratel/pkg/options"
 )
 
 // goIdent is a Go identifier as ratel-gen-go reads it: the import path and the

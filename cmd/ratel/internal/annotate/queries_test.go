@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/annotate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"

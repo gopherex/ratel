@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gopherex/ratel"
 	shopv1 "github.com/gopherex/ratel/examples/proto/gen/shop/v1"
-	"github.com/gopherex/ratel/ratelpb"
+	"github.com/gopherex/ratel/pkg/ratel"
+	"github.com/gopherex/ratel/pkg/ratelpb"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/durationpb"

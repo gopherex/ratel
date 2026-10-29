@@ -7,8 +7,8 @@ import (
 	"time"
 
 	shopv1 "example.com/shop/v1"
-	"github.com/gopherex/ratel"
-	"github.com/gopherex/ratel/ratelpb"
+	"github.com/gopherex/ratel/pkg/ratel"
+	"github.com/gopherex/ratel/pkg/ratelpb"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/durationpb"

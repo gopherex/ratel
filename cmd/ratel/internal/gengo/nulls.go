@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // nullTarget reads a nullable value without type registration: Scan fills a

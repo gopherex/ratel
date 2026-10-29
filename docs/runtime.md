@@ -1,6 +1,6 @@
 # Runtime and generated Go code
 
-The runtime is package `github.com/gopherex/ratel` (`ratel`). `ratel-gen-go`
+The runtime is package `github.com/gopherex/ratel/pkg/ratel` (`ratel`). `ratel-gen-go`
 generates thin packages on top of it: models, table descriptors with typed
 columns and relations, reflection-free scanners, insert types, enum types,
 type registration and static queries. Everything else is generic runtime code
@@ -262,7 +262,7 @@ stored as its name, is built with `ratel.NewCodecCol[M](name, codec)` or
 every argument the column binds (comparisons, `In`, `Between`, `To`), and
 `Scan func(pgx.Rows) (Null[V], error)`, which `Pluck` and `PluckNull` use; a
 NULL in `Pluck` returns `ratel.ErrUnexpectedNull`. Package
-`github.com/gopherex/ratel/ratelpb` holds the proto conversions generated
+`github.com/gopherex/ratel/pkg/ratelpb` holds the proto conversions generated
 code uses ([proto-frontend.md](proto-frontend.md#go-models)).
 
 `ratel.PrimaryKey(columns, func(M) []any)` supplies the ordered primary-key

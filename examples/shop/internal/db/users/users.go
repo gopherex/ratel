@@ -3,8 +3,8 @@
 package users
 
 import (
-	"github.com/gopherex/ratel"
 	"github.com/gopherex/ratel/examples/shop/internal/db/app"
+	"github.com/gopherex/ratel/pkg/ratel"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 )

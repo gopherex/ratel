@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/gopherex/ratel/options"
+	"github.com/gopherex/ratel/pkg/options"
 )
 
 // keyElements renders the table-level PRIMARY KEY, UNIQUE and CHECK

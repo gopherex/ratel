@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
-	"github.com/gopherex/ratel/plugin"
+	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/plugin"
 )
 
 // resultColumn is one output column with the Go expression it scans into.

@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
-	"github.com/gopherex/ratel/plugin"
+	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/plugin"
 )
 
 const (
-	ratelpbImport   = "github.com/gopherex/ratel/ratelpb"
+	ratelpbImport   = "github.com/gopherex/ratel/pkg/ratelpb"
 	timestampImport = "google.golang.org/protobuf/types/known/timestamppb"
 	durationImport  = "google.golang.org/protobuf/types/known/durationpb"
 	protoImport     = "google.golang.org/protobuf/proto"

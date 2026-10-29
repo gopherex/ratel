@@ -7,8 +7,8 @@ import (
 
 	"github.com/jinzhu/inflection"
 
-	"github.com/gopherex/ratel/ir"
-	"github.com/gopherex/ratel/plugin"
+	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/plugin"
 )
 
 // checkEdges rejects a column that collides with generated members, and a

@@ -3,7 +3,7 @@ package mapper_test
 import (
 	"testing"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"

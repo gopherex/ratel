@@ -3,7 +3,7 @@ package catalog
 import (
 	"strings"
 
-	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/pkg/ir"
 )
 
 // ObjectID is the canonical diagnostic and lookup identity, including overloads.

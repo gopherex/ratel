@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gopherex/ratel/plugin/pluginpb"
+	"github.com/gopherex/ratel/pkg/plugin/pluginpb"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
 )
