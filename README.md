@@ -14,7 +14,7 @@
   <a href="#what-you-get">What you get</a> ·
   <a href="#benchmarks">Benchmarks</a> ·
   <a href="#roadmap">Roadmap</a> ·
-  <a href="docs/architecture.md">Docs</a>
+  <a href="https://gopherex.github.io/ratel/">Docs</a>
 </p>
 
 You write PostgreSQL: the schema as `CREATE` statements, the queries as SQL.
@@ -248,7 +248,8 @@ Reproduce with `make bench-compare`; the raw results are
 
 ## Documentation
 
-The specification lives in [docs/](docs/architecture.md):
+The specification lives in [docs/](docs/architecture.md), published as the
+[documentation site](https://gopherex.github.io/ratel/):
 [architecture](docs/architecture.md) ·
 [input files and annotations](docs/input.md) ·
 [runtime and generated code](docs/runtime.md) ·
@@ -277,6 +278,7 @@ examples/shop/          the quick start (own module)
 examples/proto/         the quick start with proto messages as models (own module)
 tools/                  the generator of the README banner and benchmark chart
 docs/                   the specification
+website/                the documentation site (Docusaurus over docs/)
 ```
 
 ```sh
@@ -286,6 +288,7 @@ make test-integration  # integration suites on Docker (postgres:18-alpine)
 make bench             # every benchmark of every module
 make bench-compare     # the comparison table above
 make readme-art        # redraw the banner and the chart (needs python3, inkscape)
+make site              # serve the documentation site locally (needs Node 20+)
 ```
 
 `make lint` covers the integration suites too, and `make fmt` hands each

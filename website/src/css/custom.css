@@ -1,0 +1,44 @@
+/* Palette of the README art (tools/readme_art.py): ruby on a near-black surface. */
+:root {
+  --ratel-ruby: #e8174a;
+  --ratel-ruby-deep: #9c0a30;
+  --ratel-ink: #1a1417;
+  --ratel-ink-soft: #5a5156;
+  --ratel-surface: #ffffff;
+  --ratel-surface-raised: #f6f2f3;
+  --ratel-edge: #e6dde0;
+
+  --ifm-color-primary: #c8123f;
+  --ifm-color-primary-dark: #b41039;
+  --ifm-color-primary-darker: #aa0f36;
+  --ifm-color-primary-darkest: #8c0c2c;
+  --ifm-color-primary-light: #e8174a;
+  --ifm-color-primary-lighter: #ea2856;
+  --ifm-color-primary-lightest: #ee4d74;
+  --ifm-font-family-base: 'Noto Sans', system-ui, sans-serif;
+  --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, monospace;
+  --ifm-code-font-size: 92%;
+  --ifm-background-color: var(--ratel-surface);
+}
+
+html[data-theme='dark'] {
+  --ratel-ink: #f4f1f2;
+  --ratel-ink-soft: #b9b2b5;
+  --ratel-surface: #0f0b0d;
+  --ratel-surface-raised: #1a1316;
+  --ratel-edge: #2a2024;
+
+  --ifm-color-primary: #e8174a;
+  --ifm-color-primary-dark: #d4143f;
+  --ifm-color-primary-darker: #c8123f;
+  --ifm-color-primary-darkest: #a40e33;
+  --ifm-color-primary-light: #ea2856;
+  --ifm-color-primary-lighter: #ee4d74;
+  --ifm-color-primary-lightest: #f27a97;
+  --ifm-background-color: var(--ratel-surface);
+  --ifm-navbar-background-color: var(--ratel-surface);
+}
+
+.footer--dark {
+  --ifm-footer-background-color: #0a0709;
+}

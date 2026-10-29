@@ -18,7 +18,7 @@ MODULES := $(shell $(GO) work edit -json | sed -n 's/.*"DiskPath": "\([^"]*\)".*
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench bench-gen bench-compare readme-art proto proto-example builtins check
+.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench bench-gen bench-compare readme-art proto proto-example site builtins check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -123,6 +123,9 @@ proto-example: easyp-bin ## Regenerate examples/proto: Go messages, their schema
 	$(GO) build -o $(BIN)/protoc-gen-ratel ./cmd/protoc-gen-ratel
 	( cd examples/proto/proto && PATH="$(CURDIR)/$(BIN):$$PATH" ../../../$(BIN)/easyp generate )
 	( cd examples/proto && $(GO) run ../../cmd/ratel generate )
+
+site: ## Serve the documentation site on localhost:3000 (needs Node 20+)
+	( cd website && npm ci && npm start )
 
 builtins: ## Generate builtin signatures from pinned PostgreSQL 16, 17 and 18 containers (needs Docker)
 	( cd cmd/ratel && $(GO) generate ./internal/builtins )
