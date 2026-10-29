@@ -1,0 +1,10 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema: schema/schema.sql
+    queries: sqlc/query.sql
+    gen:
+      go:
+        package: sqlcdb
+        out: internal/sqlcdb
+        sql_package: pgx/v5

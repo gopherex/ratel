@@ -2,6 +2,7 @@ go 1.27.3
 
 use (
 	.
+	./bench
 	./cmd/protoc-gen-ratel
 	./cmd/ratel
 	./rateltest

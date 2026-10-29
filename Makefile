@@ -18,7 +18,7 @@ MODULES := $(shell $(GO) work edit -json | sed -n 's/.*"DiskPath": "\([^"]*\)".*
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench proto builtins check
+.PHONY: help setup tools easyp-bin fmt fmt-check lint test test-integration bench bench-gen bench-compare proto builtins check
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -65,12 +65,28 @@ test-integration: ## Run integration suites (needs Docker; RATEL_PG_IMAGE overri
 	( cd cmd/ratel && $(GO) test -tags integration ./tests/... )
 	( cd rateltest && $(GO) test -tags integration ./... )
 	( cd tests && $(GO) test -tags integration ./... )
+	( cd bench && $(GO) test -tags integration ./... )
 
 bench: ## Run every benchmark in every module
 	for m in $(MODULES); do
 		echo ">> bench $$m"
 		( cd $$m && $(GO) test -run '^$$' -bench . -benchmem ./... )
 	done
+
+# The sqlc release the comparison generates with, run from its image.
+SQLC_IMAGE := sqlc/sqlc:1.31.1
+# Repetitions of each comparison benchmark, enough for benchstat's intervals.
+BENCH_COUNT ?= 10
+
+bench-gen: ## Regenerate the code of every library in the comparison (needs Docker)
+	( cd bench && $(GO) run ../cmd/ratel generate )
+	( cd bench && docker run --rm -u $$(id -u):$$(id -g) -v $$(pwd):/src -w /src $(SQLC_IMAGE) generate )
+	( cd bench && $(GO) generate ./ent )
+
+bench-compare: ## Compare ratel with pgx, sqlc, GORM, bun and ent on PostgreSQL (needs Docker)
+	( cd bench && $(GO) test -tags integration -run '^$$' -bench . -benchmem -count $(BENCH_COUNT) . | tee results.txt )
+	$(GO) run golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e \
+		-row /scenario -col /library bench/results.txt | tee bench/results-table.txt
 
 proto: ## Generate Go from proto/ (needs protoc-gen-go on PATH; no-op until .proto files exist)
 	# easyp fails on a module with no sources, so the target is an explicit

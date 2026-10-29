@@ -1,0 +1,8 @@
+version: 1
+postgres: {version: 18}
+schema: [schema/*.sql]
+plugins:
+  - name: go
+    builtin: true
+    out: internal/rateldb
+    options: {import_path: github.com/gopherex/ratel/bench/internal/rateldb}
