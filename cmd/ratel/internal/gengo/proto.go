@@ -21,6 +21,7 @@ type protoField struct {
 	path       string // Go field path from the message root
 	conversion conversion
 	typ        goType // the Go type a conversion names, if any
+	key, value goType // a map's key and scalar value types
 	oneof      goType // the oneof wrapper type of a member
 	caseName   string // the member's proto name, its case column value
 }
@@ -43,16 +44,20 @@ const (
 	convMessageMap conversion = "messagemap"
 )
 
-// typed reports whether a conversion names a Go type; known is false for an
-// unknown conversion.
-func (c conversion) typed() (bool, bool) {
+// arguments are the keyed arguments a conversion needs, in the order
+// type, key, value; known is false for an unknown conversion.
+func (c conversion) arguments() ([3]bool, bool) {
 	switch c {
-	case convValue, convOptional, convUint32, convUint64, convTimestamp, convDuration, convMap:
-		return false, true
-	case convEnum, convWrapper, convMessage, convMessages, convMessageMap:
-		return true, true
+	case convValue, convOptional, convUint32, convUint64, convTimestamp, convDuration:
+		return [3]bool{}, true
+	case convEnum, convWrapper, convMessage, convMessages:
+		return [3]bool{true, false, false}, true
+	case convMap:
+		return [3]bool{false, true, true}, true
+	case convMessageMap:
+		return [3]bool{true, true, false}, true
 	default:
-		return false, false
+		return [3]bool{}, false
 	}
 }
 
@@ -173,7 +178,7 @@ func protoFieldOf(args []*ir.AnnotationArg) (protoField, bool) {
 
 	field := protoField{path: args[0].GetValue(), conversion: conversion(args[1].GetValue())}
 
-	typed, known := field.conversion.typed()
+	needs, known := field.conversion.arguments()
 	if !known {
 		return protoField{}, false
 	}
@@ -186,6 +191,10 @@ func protoFieldOf(args []*ir.AnnotationArg) (protoField, bool) {
 			field.oneof = override(arg.GetValue())
 		case "case":
 			field.caseName = arg.GetValue()
+		case "key":
+			field.key = override(arg.GetValue())
+		case "value":
+			field.value = override(arg.GetValue())
 		default:
 			return protoField{}, false
 		}
@@ -193,7 +202,9 @@ func protoFieldOf(args []*ir.AnnotationArg) (protoField, bool) {
 
 	member := field.oneof.expr != ""
 
-	return field, typed == (field.typ.expr != "") && member == (field.caseName != "")
+	given := [3]bool{field.typ.expr != "", field.key.expr != "", field.value.expr != ""}
+
+	return field, needs == given && member == (field.caseName != "")
 }
 
 // checkProtos rejects a proto table without its message or with a column

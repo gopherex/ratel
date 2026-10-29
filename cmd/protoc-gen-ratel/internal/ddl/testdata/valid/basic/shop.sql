@@ -33,7 +33,7 @@ CREATE TABLE "shop"."customers" (
 	-- @go.field Tags value
 	"tags" text[] NOT NULL,
 	-- @ratel.origin shop.v1.Customer.counters
-	-- @go.field Counters map
+	-- @go.field Counters map key=string value=int32
 	"counters" jsonb NOT NULL,
 	-- @ratel.origin shop.v1.Customer.address.street
 	-- @go.field Address.Street value

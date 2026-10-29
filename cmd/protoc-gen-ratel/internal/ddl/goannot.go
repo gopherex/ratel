@@ -35,11 +35,12 @@ func goConversion(field *protogen.Field, opt *options.Column) string {
 	case desc.Kind() == protoreflect.EnumKind:
 		return "enum type=" + goIdent(field.Enum.GoIdent)
 	case desc.IsMap():
-		if value := field.Message.Fields[1]; value.Message != nil {
-			return "messagemap type=" + goIdent(value.Message.GoIdent)
+		key, value := field.Message.Fields[0], field.Message.Fields[1]
+		if value.Message != nil {
+			return "messagemap key=" + goScalar(key) + " type=" + goIdent(value.Message.GoIdent)
 		}
 
-		return "map"
+		return "map key=" + goScalar(key) + " value=" + goScalar(value)
 	case desc.Kind() == protoreflect.MessageKind:
 		return messageConversion(field, opt)
 	case desc.Kind() == protoreflect.Uint32Kind || desc.Kind() == protoreflect.Fixed32Kind:
@@ -50,6 +51,32 @@ func goConversion(field *protogen.Field, opt *options.Column) string {
 		return "optional"
 	default:
 		return "value"
+	}
+}
+
+// goScalar is the Go type of a scalar or enum field: a map's key or value.
+func goScalar(field *protogen.Field) string {
+	switch field.Desc.Kind() {
+	case protoreflect.EnumKind:
+		return goIdent(field.Enum.GoIdent)
+	case protoreflect.BoolKind:
+		return "bool"
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		return "int32"
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
+		return "uint32"
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		return "int64"
+	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		return "uint64"
+	case protoreflect.FloatKind:
+		return "float32"
+	case protoreflect.DoubleKind:
+		return "float64"
+	case protoreflect.BytesKind:
+		return "[]byte"
+	default:
+		return "string"
 	}
 }
 
