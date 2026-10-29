@@ -93,7 +93,7 @@ PostgreSQL sees.
 
 | Module | Contains | Depends on |
 |---|---|---|
-| `github.com/gopherex/ratel` | runtime package `ratel`, migration runner `migrate`, Go types of the IR and plugin protos, plugin SDK | pgx v5, OpenTelemetry API, protobuf runtime |
+| `github.com/gopherex/ratel` | runtime package `ratel`, migration runner `migrate`, Go types of the IR and plugin protos, plugin SDK | pgx v5, protobuf runtime |
 | `github.com/gopherex/ratel/rateltest` | user test helpers | the runtime module, testcontainers |
 | `github.com/gopherex/ratel/cmd/ratel` | host CLI, parser, catalog, inference, migration engine, `ratel-gen-go` linked in | the runtime module, wazero, go-pgquery, testcontainers |
 | `github.com/gopherex/ratel/cmd/protoc-gen-ratel` | proto frontend | protobuf, the options proto |

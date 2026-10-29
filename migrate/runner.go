@@ -16,9 +16,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // LatestMajor is the newest PostgreSQL major version ratel supports.
@@ -113,33 +110,7 @@ func run(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS, settings opt
 
 	defer own.Close()
 
-	ctx, span := settings.tracer.Start(ctx, "ratel.migrate", trace.WithAttributes(phaseAttribute(phases)))
-	defer span.End()
-
-	err = (&runner{pool: own, options: settings, pause: sleep, jitter: spread}).apply(ctx, files, phases)
-	failed(span, err)
-
-	return err
-}
-
-func phaseAttribute(phases []Phase) attribute.KeyValue {
-	names := make([]string, 0, len(phases))
-	for _, phase := range phases {
-		names = append(names, string(phase))
-	}
-
-	return attribute.StringSlice("ratel.migrate.phases", names)
-}
-
-// failed marks a span with a run's failure; another run holding the lock is
-// an expected refusal, not a failure.
-func failed(span trace.Span, err error) {
-	if err == nil || errors.Is(err, ErrBusy) {
-		return
-	}
-
-	span.RecordError(err)
-	span.SetStatus(codes.Error, err.Error())
+	return (&runner{pool: own, options: settings, pause: sleep, jitter: spread}).apply(ctx, files, phases)
 }
 
 func (s Settings) validate() error {
@@ -326,20 +297,10 @@ func (r *runner) run(ctx context.Context, file string, step *Step, major int, re
 	default:
 	}
 
-	ctx, span := r.options.tracer.Start(ctx, "ratel.migrate.step", trace.WithAttributes(
-		attribute.String("ratel.migrate.file", file), attribute.String("ratel.migrate.step", step.ID),
-		attribute.String("ratel.migrate.phase", string(step.Phase)),
-		attribute.String("ratel.migrate.class", string(step.Class)),
-	))
-	defer span.End()
-
 	r.options.logger.InfoContext(ctx, "migration step",
 		"phase", step.Phase, "class", step.Class, "file", file, "step", step.ID)
 
-	err := r.step(ctx, file, step, checksum, recorded)
-	failed(span, err)
-
-	return err
+	return r.step(ctx, file, step, checksum, recorded)
 }
 
 func (r *runner) step(ctx context.Context, file string, step *Step, checksum string, recorded entry) error {

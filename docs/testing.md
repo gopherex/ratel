@@ -176,6 +176,12 @@ Gates, in order; a gate starts only after the previous one passes:
    exercised through its public API on testcontainers; extended as each module
    lands.
 
+`examples/shop` and `examples/proto` each check in `TestSourcesUpToDate` that
+the committed Go equals a fresh `ratel generate` of the committed schema. In
+`examples/proto` the step before it, `.proto` to `gen/` and `schema/` (`make
+proto-example`), is checked locally only: easyp v1 is not released, so CI has
+no reproducible easyp to run.
+
 ### Comparison with other libraries
 
 Module `bench` runs one schema and seed (1000 users, 10 orders each) through

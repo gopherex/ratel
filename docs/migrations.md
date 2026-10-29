@@ -281,9 +281,9 @@ if err := migrate.Apply(ctx, pool, directory); err != nil {
   `migrate` section of `ratel.yaml`. A non-positive value fails with
   `ErrSettings`.
 - `migrate.WithLogger` receives one record per step started (phase, class,
-  file, step); `migrate.WithTracerProvider` selects the provider of the run
-  span `ratel.migrate` and the step spans `ratel.migrate.step`. Another run
-  holding the lock (`ErrBusy`) is not a span error.
+  file, step). A run emits no spans or metrics: its pool is built from the
+  caller's pool configuration, so a pgx tracer set there (for example
+  `otelpgx`) traces every statement of the run.
 - Errors: `ErrSum`, `ErrHeader`, `ErrUnsealed` (the directory), `ErrBusy`,
   `ErrServer`, `ErrBlocked`, `ErrChanged`, `ErrBackfill` (a step).
 

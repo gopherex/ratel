@@ -3,9 +3,6 @@ package migrate
 import (
 	"log/slog"
 	"time"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Settings tune how a run waits for locks and fills rows. DefaultSettings
@@ -58,7 +55,6 @@ type Option func(*options)
 type options struct {
 	settings Settings
 	logger   *slog.Logger
-	tracer   trace.Tracer
 }
 
 // WithSettings replaces DefaultSettings.
@@ -72,20 +68,10 @@ func WithLogger(logger *slog.Logger) Option {
 	return func(o *options) { o.logger = logger }
 }
 
-// WithTracerProvider selects the provider of the run and step spans; by
-// default the global provider.
-func WithTracerProvider(provider trace.TracerProvider) Option {
-	return func(o *options) { o.tracer = provider.Tracer(instrumentation) }
-}
-
-// instrumentation is the tracer name of the package.
-const instrumentation = "github.com/gopherex/ratel/migrate"
-
 func configure(list []Option) options {
 	result := options{
 		settings: DefaultSettings(),
 		logger:   slog.New(slog.DiscardHandler),
-		tracer:   otel.GetTracerProvider().Tracer(instrumentation),
 	}
 
 	for _, option := range list {
