@@ -739,11 +739,20 @@ Generated descriptors construct each edge with
   nullable ordering is not silently replaced. Page reads observe separate
   statement snapshots unless the supplied executor provides a transaction
   with the desired isolation; concurrent writes can change later pages.
-- Writes per relation: `Create`, `Attach`, `Detach`, `Sync` on the relation
-  descriptor, one statement each. `Sync` (make the set of linked children equal
-  a given set) is one statement with data-modifying CTEs (`DELETE` of extra
-  links, `INSERT ... ON CONFLICT DO NOTHING` of missing ones), so it is atomic
-  on any executor. There are no nested graph writes.
+- Link writes of a many-to-many relation build a `LinkWrite` whose verb is
+  `Exec`, one statement on the join table each:
+  `app.Users.Tags.Attach(user, tags...)` inserts the links, skipping existing
+  ones (`ON CONFLICT DO NOTHING`); `Detach(user, tags...)` deletes them;
+  `Sync(user, tags...)` makes the links exactly the given set with a
+  data-modifying CTE (`DELETE` of the others, then the `INSERT`), atomic on any
+  executor, and `Sync(user)` removes them all. `Exec` returns the inserted
+  links for `Attach` and `Sync`, the removed ones for `Detach` and an empty
+  `Sync`. Parent keys come from the relation's key projections, child keys
+  from the target's primary key. A relation without a join table, or
+  `Attach`/`Detach` without children, is `ErrInvalidQuery`. A one-to-many
+  link is the child's foreign key and is written with `Insert`/`Update`;
+  creating a target and linking it is `Insert` then `Attach` in the caller's
+  transaction. There are no nested graph writes.
 - Loaded relations sit in the model's `R` field; accessors return
   `ratel.ErrNotLoaded` for a relation that was not requested.
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -346,6 +347,64 @@ func assertRelDetails(t *testing.T, models []relUser) {
 	tags, err := models[0].R.Tags.Get()
 	if err != nil || len(tags) != 2 {
 		t.Fatalf("tags=%v err=%v", tags, err)
+	}
+}
+
+// TestRelationLinks writes the many-to-many users.Tags of user (1,3), which
+// starts without tags, on its own server: composite parent keys
+// (tenant, user_id) and target tags.id through rel_app.user_tags.
+func TestRelationLinks(t *testing.T) {
+	t.Parallel()
+
+	pool := relationPool(t)
+	users, _ := relDescriptors()
+	database := ratel.New(pool)
+	user := relUser{Tenant: 1, ID: 3}
+	red, blue := relTag{ID: 10}, relTag{ID: 11}
+
+	tags := func() []int64 {
+		rows, err := pool.Query(t.Context(),
+			`SELECT tag_id FROM rel_app.user_tags WHERE tenant = 1 AND user_id = 3 ORDER BY tag_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return ids
+	}
+
+	for _, step := range []struct {
+		name     string
+		write    ratel.LinkWrite
+		affected int64
+		want     []int64
+	}{
+		{"attach", users.Tags.Attach(user, red, blue), 2, []int64{10, 11}},
+		{"attach again skips links", users.Tags.Attach(user, red), 0, []int64{10, 11}},
+		{"detach", users.Tags.Detach(user, red), 1, []int64{11}},
+		{"sync replaces", users.Tags.Sync(user, red), 1, []int64{10}},
+		{"sync to nothing", users.Tags.Sync(user), 1, []int64{}},
+	} {
+		affected, err := database.Run(step.write).Exec(t.Context())
+		if err != nil || affected != step.affected {
+			t.Fatalf("%s: affected %d, %v; want %d", step.name, affected, err, step.affected)
+		}
+
+		if got := tags(); !slices.Equal(got, step.want) {
+			t.Fatalf("%s: tags %v, want %v", step.name, got, step.want)
+		}
+	}
+
+	// The join table's foreign key still holds.
+	_, err := database.Run(users.Tags.Attach(user, relTag{ID: 99})).Exec(t.Context())
+
+	var constraint *ratel.ConstraintError
+	if !errors.As(err, &constraint) || constraint.Kind != ratel.ConstraintForeignKey {
+		t.Fatalf("missing tag = %v", err)
 	}
 }
 
