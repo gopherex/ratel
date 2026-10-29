@@ -17,7 +17,7 @@ func (db *DB) arguments(options []CallOption, args []any) []any {
 	}
 
 	if settings.mode.Set {
-		return append([]any{settings.mode.V}, args...)
+		return append(append(make([]any, 0, len(args)+1), settings.mode.V), args...)
 	}
 
 	return args

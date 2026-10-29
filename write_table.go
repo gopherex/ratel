@@ -15,11 +15,26 @@ const ErrInvalidInsert refusal = "ratel: invalid insert"
 // Go type must have a default pgx array mapping, including in exec/simple mode.
 // Array marks array-valued columns, which use VALUES rather than scalar unnest.
 type InsertField[I any] struct {
-	Name   string
-	Type   pgx.Identifier
-	Value  func(I) (any, bool)
+	Name  string
+	Type  pgx.Identifier
+	Value func(I) (any, bool)
+	// Set reports whether a row sets the column without boxing its value,
+	// so rows are grouped by their set columns without allocations; when
+	// nil, Value's flag decides.
+	Set    func(I) bool
 	Values func([]I) any
 	Array  bool
+}
+
+// set reports whether row sets the column.
+func (f InsertField[I]) set(row I) bool {
+	if f.Set != nil {
+		return f.Set(row)
+	}
+
+	_, set := f.Value(row)
+
+	return set
 }
 
 // Writable is implemented only by generated physical-table descriptors.

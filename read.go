@@ -53,7 +53,7 @@ func (q Select[M]) iterate(ctx context.Context, options []CallOption, yield func
 }
 
 func (q Select[M]) rows(ctx context.Context, options []CallOption) (pgx.Rows, error) {
-	statement, err := q.SQL()
+	statement, err := q.statement()
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (q Select[M]) collect(ctx context.Context, atMost int, options []CallOption
 
 	defer rows.Close()
 
-	models := make([]M, 0)
+	models := make([]M, 0, q.capacity(atMost))
 
 	for rows.Next() {
 		model, err := q.source.table.scan(rows)
@@ -104,6 +104,21 @@ func (q Select[M]) collect(ctx context.Context, atMost int, options []CallOption
 	}
 
 	return models, nil
+}
+
+// preallocatedRows bounds the result capacity reserved from a LIMIT, so a
+// large limit on a small result does not reserve memory it never fills.
+const preallocatedRows = 1024
+
+// capacity is the room to reserve for the result: the row bound the query
+// states, up to preallocatedRows.
+func (q Select[M]) capacity(atMost int) int {
+	bound := atMost
+	if q.limit.Set && (bound <= 0 || q.limit.V < bound) {
+		bound = q.limit.V
+	}
+
+	return max(0, min(bound, preallocatedRows))
 }
 
 // One requires exactly one row. It returns ErrNotFound or ErrMultipleRows otherwise.

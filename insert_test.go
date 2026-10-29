@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -84,6 +85,59 @@ func TestInsertSQL(t *testing.T) {
 				t.Fatalf("%+v %v", statement, err)
 			}
 		})
+	}
+}
+
+// TestInsertGroupsBySet groups rows by their set columns through Set, the
+// path generated descriptors take: Value, which boxes a value, runs only for
+// the parameters of a VALUES statement.
+func TestInsertGroupsBySet(t *testing.T) {
+	t.Parallel()
+
+	var boxed atomic.Int64
+
+	users := ratel.NewWriteTable(userDescriptor().Table, func(row writeInsert) bool { return row.valid },
+		ratel.InsertField[writeInsert]{
+			Name: "email", Type: pgx.Identifier{"pg_catalog", "text"},
+			Value: func(row writeInsert) (any, bool) {
+				boxed.Add(1)
+
+				return row.email, true
+			},
+			Set: func(writeInsert) bool { return true }, Values: writeEmails,
+		},
+		ratel.InsertField[writeInsert]{
+			Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
+			Value: func(row writeInsert) (any, bool) {
+				boxed.Add(1)
+
+				return row.ID.V, row.ID.Set
+			},
+			Set: func(row writeInsert) bool { return row.ID.Set }, Values: writeIDs,
+		})
+
+	withID := newWriteInsert("b")
+	withID.ID = ratel.OptFrom(int64(7))
+
+	database := ratel.New(&pgx.Conn{})
+
+	statements, err := database.Insert(users, newWriteInsert("a"), newWriteInsert("c"), withID, withID).Statements()
+	if err != nil || len(statements) != 2 {
+		t.Fatalf("Statements() = %v, %v", statements, err)
+	}
+
+	for _, statement := range statements {
+		if !strings.Contains(statement.SQL, "unnest(") {
+			t.Fatalf("not one statement per group: %s", statement.SQL)
+		}
+	}
+
+	if boxed.Load() != 0 {
+		t.Fatalf("Value ran %d times for unnest statements", boxed.Load())
+	}
+
+	if _, err := database.Insert(users, newWriteInsert("a")).Statements(); err != nil || boxed.Load() != 1 {
+		t.Fatalf("single row: %v, Value ran %d times", err, boxed.Load())
 	}
 }
 

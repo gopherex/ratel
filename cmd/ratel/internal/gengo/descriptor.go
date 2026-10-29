@@ -56,7 +56,9 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 		}
 	}
 
-	file.printf(")%s\n\n// %s describes %s.%s.\nvar %s = %s{\n\t%s: %s,\n", unwrap, names.descriptor,
+	// The descriptor is a pointer: db.From and the writes take it as an
+	// interface, which then holds the pointer instead of a copy.
+	file.printf(")%s\n\n// %s describes %s.%s.\nvar %s = &%s{\n\t%s: %s,\n", unwrap, names.descriptor,
 		schema, table, names.descriptor, names.descriptorType, embedded, names.base)
 
 	for _, value := range columns {
@@ -80,8 +82,8 @@ func writeDescriptor(file *unit, schema, table string, names identifiers, column
 	}
 
 	file.printf("}\n\n// InSchema is the descriptor for a copy of %s in another schema.\n", table)
-	file.printf("func (t %s) InSchema(schema string) %s {\n\tt.%s = t.%s.InSchema(schema)\n\n"+
-		"\treturn t\n}\n\n", names.descriptorType, names.descriptorType, embedded, embedded)
+	file.printf("func (t *%s) InSchema(schema string) *%s {\n\tcopied := *t\n\tcopied.%s = t.%s.InSchema(schema)\n\n"+
+		"\treturn &copied\n}\n\n", names.descriptorType, names.descriptorType, embedded, embedded)
 }
 
 // columnKind is the constructor of a descriptor column ("NewCol" or
@@ -132,6 +134,16 @@ func tableOptions(names identifiers, columns []column, table *ir.Table) string {
 	return options.String()
 }
 
+// setParameter is the parameter of a Set function: named only when the
+// result reads it.
+func setParameter(insert, set string) string {
+	if set == "true" {
+		return insert
+	}
+
+	return "insert " + insert
+}
+
 func writeInsertField(file *unit, names identifiers, value column) {
 	access := "insert." + value.field
 	set := "true"
@@ -148,6 +160,7 @@ func writeInsertField(file *unit, names identifiers, value column) {
 	file.printf("\t\tratel.InsertField[%s]{\n\t\t\tName: %s, Type: %s,\n", names.insert, strconv.Quote(value.name),
 		value.pgType)
 	file.printf("\t\t\tValue: func(insert %s) (any, bool) { return %s, %s },\n", names.insert, access, set)
+	file.printf("\t\t\tSet: func(%s) bool { return %s },\n", setParameter(names.insert, set), set)
 
 	if value.array {
 		file.printf("\t\t\tArray: true,\n\t\t},\n")

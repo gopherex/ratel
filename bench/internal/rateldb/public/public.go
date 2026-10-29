@@ -65,6 +65,7 @@ var ordersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.InsertField[OrderInsert]{
 		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
 		Value: func(insert OrderInsert) (any, bool) { return insert.ID.V, insert.ID.Set },
+		Set:   func(insert OrderInsert) bool { return insert.ID.Set },
 		Values: func(rows []OrderInsert) any {
 			out := make([]int64, len(rows))
 			for index, insert := range rows {
@@ -77,6 +78,7 @@ var ordersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.InsertField[OrderInsert]{
 		Name: "user_id", Type: pgx.Identifier{"pg_catalog", "int8"},
 		Value: func(insert OrderInsert) (any, bool) { return insert.userID, true },
+		Set:   func(OrderInsert) bool { return true },
 		Values: func(rows []OrderInsert) any {
 			out := make([]int64, len(rows))
 			for index, insert := range rows {
@@ -89,6 +91,7 @@ var ordersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.InsertField[OrderInsert]{
 		Name: "total", Type: pgx.Identifier{"pg_catalog", "int8"},
 		Value: func(insert OrderInsert) (any, bool) { return insert.total, true },
+		Set:   func(OrderInsert) bool { return true },
 		Values: func(rows []OrderInsert) any {
 			out := make([]int64, len(rows))
 			for index, insert := range rows {
@@ -101,6 +104,7 @@ var ordersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.InsertField[OrderInsert]{
 		Name: "status", Type: pgx.Identifier{"pg_catalog", "text"},
 		Value: func(insert OrderInsert) (any, bool) { return insert.status, true },
+		Set:   func(OrderInsert) bool { return true },
 		Values: func(rows []OrderInsert) any {
 			out := make([]string, len(rows))
 			for index, insert := range rows {
@@ -113,7 +117,7 @@ var ordersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 ))
 
 // Orders describes public.orders.
-var Orders = ordersTable{
+var Orders = &ordersTable{
 	KeyedTable: ordersBase,
 	ID:         ratel.NewCol[Order, int64]("id"),
 	UserID:     ratel.NewCol[Order, int64]("user_id"),
@@ -151,10 +155,11 @@ type ordersTable struct {
 }
 
 // InSchema is the descriptor for a copy of orders in another schema.
-func (t ordersTable) InSchema(schema string) ordersTable {
-	t.KeyedTable = t.KeyedTable.InSchema(schema)
+func (t *ordersTable) InSchema(schema string) *ordersTable {
+	copied := *t
+	copied.KeyedTable = t.KeyedTable.InSchema(schema)
 
-	return t
+	return &copied
 }
 
 // ErrOrdersIDNotNull matches a violation of orders_id_not_null on public.orders.
@@ -231,6 +236,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.InsertField[UserInsert]{
 		Name: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
 		Value: func(insert UserInsert) (any, bool) { return insert.ID.V, insert.ID.Set },
+		Set:   func(insert UserInsert) bool { return insert.ID.Set },
 		Values: func(rows []UserInsert) any {
 			out := make([]int64, len(rows))
 			for index, insert := range rows {
@@ -243,6 +249,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.InsertField[UserInsert]{
 		Name: "email", Type: pgx.Identifier{"pg_catalog", "text"},
 		Value: func(insert UserInsert) (any, bool) { return insert.email, true },
+		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]string, len(rows))
 			for index, insert := range rows {
@@ -255,6 +262,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.InsertField[UserInsert]{
 		Name: "name", Type: pgx.Identifier{"pg_catalog", "text"},
 		Value: func(insert UserInsert) (any, bool) { return insert.name, true },
+		Set:   func(UserInsert) bool { return true },
 		Values: func(rows []UserInsert) any {
 			out := make([]string, len(rows))
 			for index, insert := range rows {
@@ -267,6 +275,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 	ratel.InsertField[UserInsert]{
 		Name: "created_at", Type: pgx.Identifier{"pg_catalog", "timestamptz"},
 		Value: func(insert UserInsert) (any, bool) { return insert.CreatedAt.V, insert.CreatedAt.Set },
+		Set:   func(insert UserInsert) bool { return insert.CreatedAt.Set },
 		Values: func(rows []UserInsert) any {
 			out := make([]time.Time, len(rows))
 			for index, insert := range rows {
@@ -279,7 +288,7 @@ var usersBase = ratel.NewKeyedTable(ratel.NewWriteTable(
 ))
 
 // Users describes public.users.
-var Users = usersTable{
+var Users = &usersTable{
 	KeyedTable: usersBase,
 	ID:         ratel.NewCol[User, int64]("id"),
 	Email:      ratel.NewCol[User, string]("email"),
@@ -313,10 +322,11 @@ type usersTable struct {
 }
 
 // InSchema is the descriptor for a copy of users in another schema.
-func (t usersTable) InSchema(schema string) usersTable {
-	t.KeyedTable = t.KeyedTable.InSchema(schema)
+func (t *usersTable) InSchema(schema string) *usersTable {
+	copied := *t
+	copied.KeyedTable = t.KeyedTable.InSchema(schema)
 
-	return t
+	return &copied
 }
 
 // ErrUsersCreatedAtNotNull matches a violation of users_created_at_not_null on public.users.

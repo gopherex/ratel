@@ -25,6 +25,9 @@ type sqlWriter struct {
 	invalid bool
 	alias   string // source alias model columns render with; empty is "q"
 	depth   int    // nesting of correlated subqueries, for unique aliases
+	// inline backs args for a typical statement, in the writer's own
+	// allocation.
+	inline [writerParameters]any
 }
 
 // Initial capacities of a statement being written: room for a typical
@@ -45,7 +48,8 @@ func (w *sqlWriter) statement() Statement {
 
 // newSQLWriter is a writer with room for a typical statement.
 func newSQLWriter() *sqlWriter {
-	writer := &sqlWriter{args: make([]any, 0, writerParameters)}
+	writer := &sqlWriter{}
+	writer.args = writer.inline[:0]
 	writer.Grow(writerBytes)
 
 	return writer
@@ -159,12 +163,24 @@ type Statement struct {
 
 // SQL renders the query and numbered PostgreSQL arguments without executing it.
 func (q Select[M]) SQL() (Statement, error) {
+	statement, err := q.statement()
+	if err == nil && q.verbatim() {
+		// The caller owns the returned arguments; a static query keeps its own.
+		statement.Args = slices.Clone(statement.Args)
+	}
+
+	return statement, err
+}
+
+// statement renders the query; a static query's arguments are shared, for
+// execution, which does not modify them.
+func (q Select[M]) statement() (Statement, error) {
 	if q.verbatim() {
 		if q.source.static.SQL == "" {
 			return Statement{}, ErrInvalidQuery
 		}
 
-		return Statement{SQL: q.source.static.SQL, Args: slices.Clone(q.source.static.Args)}, nil
+		return *q.source.static, nil
 	}
 
 	if q.source.render == nil && q.source.table.selectSQL != "" && q.plain() {

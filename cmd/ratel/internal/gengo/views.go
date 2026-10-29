@@ -63,7 +63,7 @@ func (s *state) view(file *unit, schema string, name *ir.QualifiedName, output [
 		outputs = append(outputs, value.name)
 	}
 
-	file.printf("// %s describes the %s %s.%s; it is read-only.\nvar %s = %s{\n", names.descriptor, kind, schema,
+	file.printf("// %s describes the %s %s.%s; it is read-only.\nvar %s = &%s{\n", names.descriptor, kind, schema,
 		object, names.descriptor, names.descriptorType)
 	file.printf("\tTable: ratel.NewTable(%s, %s, %s, %s),\n", strconv.Quote(schema), strconv.Quote(object),
 		quotedList(outputs), names.scanner)
@@ -80,8 +80,8 @@ func (s *state) view(file *unit, schema string, name *ir.QualifiedName, output [
 	}
 
 	file.printf("}\n\n// InSchema is the descriptor for a copy of %s in another schema.\n", object)
-	file.printf("func (t %s) InSchema(schema string) %s {\n\tt.Table = t.Table.InSchema(schema)\n\n"+
-		"\treturn t\n}\n\n", names.descriptorType, names.descriptorType)
+	file.printf("func (t *%s) InSchema(schema string) *%s {\n\tcopied := *t\n"+
+		"\tcopied.Table = t.Table.InSchema(schema)\n\n\treturn &copied\n}\n\n", names.descriptorType, names.descriptorType)
 
 	return nil
 }

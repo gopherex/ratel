@@ -88,24 +88,18 @@ func (q Insert[M, I]) Statements() ([]Statement, error) {
 		return nil, err
 	}
 
-	statements := make([]Statement, 0)
+	statements := make([]Statement, 0, 1)
 
 	for start := 0; start < len(q.rows); {
-		first := q.rowValues(q.rows[start])
-		rows := [][]any{first.values}
+		fields := q.setFields(q.rows[start])
+		limit := q.rowLimit(fields)
 		end := start + 1
 
-		for end < len(q.rows) && len(rows) < q.rowLimit(first.fields) && len(first.fields) > 0 {
-			next := q.rowValues(q.rows[end])
-			if !slices.Equal(first.fields, next.fields) {
-				break
-			}
-
-			rows = append(rows, next.values)
+		for end < len(q.rows) && end-start < limit && len(fields) > 0 && q.sets(q.rows[end], fields) {
 			end++
 		}
 
-		statement, err := q.render(first.fields, rows, q.rows[start:end])
+		statement, err := q.render(fields, q.rows[start:end])
 		if err != nil {
 			return nil, err
 		}
@@ -180,11 +174,6 @@ func validWriteNames(columns, names []string) bool {
 	return true
 }
 
-type insertRow struct {
-	fields []int
-	values []any
-}
-
 func (q Insert[M, I]) rowLimit(fields []int) int {
 	// The extended PostgreSQL protocol limits a statement to 65535 parameters.
 	const parameterLimit = 65535
@@ -196,22 +185,39 @@ func (q Insert[M, I]) rowLimit(fields []int) int {
 	return q.db.batchRows
 }
 
-func (q Insert[M, I]) rowValues(row I) insertRow {
+// setFields lists the fields a row sets, by index.
+func (q Insert[M, I]) setFields(row I) []int {
 	fields := make([]int, 0, len(q.table.fields))
-	values := make([]any, 0, len(q.table.fields))
 
 	for index, field := range q.table.fields {
-		value, set := field.Value(row)
-		if set {
+		if field.set(row) {
 			fields = append(fields, index)
-			values = append(values, value)
 		}
 	}
 
-	return insertRow{fields: fields, values: values}
+	return fields
 }
 
-func (q Insert[M, I]) render(fields []int, rows [][]any, inputs []I) (Statement, error) {
+// sets reports whether a row sets exactly the given fields, without
+// allocating.
+func (q Insert[M, I]) sets(row I, fields []int) bool {
+	next := 0
+
+	for index, field := range q.table.fields {
+		listed := next < len(fields) && fields[next] == index
+		if field.set(row) != listed {
+			return false
+		}
+
+		if listed {
+			next++
+		}
+	}
+
+	return true
+}
+
+func (q Insert[M, I]) render(fields []int, inputs []I) (Statement, error) {
 	writer := newSQLWriter()
 	writer.WriteString("INSERT INTO ")
 
@@ -226,10 +232,10 @@ func (q Insert[M, I]) render(fields []int, rows [][]any, inputs []I) (Statement,
 	} else {
 		q.appendColumns(writer, fields)
 
-		if len(rows) > 1 && q.scalarFields(fields) {
+		if len(inputs) > 1 && q.scalarFields(fields) {
 			q.appendUnnest(writer, fields, inputs)
 		} else {
-			q.appendValues(writer, rows)
+			q.appendValues(writer, fields, inputs)
 		}
 	}
 
@@ -281,7 +287,7 @@ func (q Insert[M, I]) appendUnnest(writer *sqlWriter, fields []int, rows []I) {
 	writer.WriteByte(')')
 }
 
-func (q Insert[M, I]) appendValues(writer *sqlWriter, rows [][]any) {
+func (q Insert[M, I]) appendValues(writer *sqlWriter, fields []int, rows []I) {
 	writer.WriteString(" VALUES ")
 
 	for rowIndex, row := range rows {
@@ -291,11 +297,12 @@ func (q Insert[M, I]) appendValues(writer *sqlWriter, rows [][]any) {
 
 		writer.WriteByte('(')
 
-		for index, value := range row {
+		for index, field := range fields {
 			if index > 0 {
 				writer.WriteString(", ")
 			}
 
+			value, _ := q.table.fields[field].Value(row)
 			writer.param(value)
 		}
 

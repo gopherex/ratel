@@ -94,7 +94,7 @@ type UserInsert struct {
 
 func NewUserInsert(email string, status UserStatus) UserInsert
 
-var Users = usersTable{...}       // descriptor: immutable, dependency-free, generated code only
+var Users = &usersTable{...}      // descriptor: immutable, dependency-free, generated code only
 
 type usersTable struct {
 	ratel.WriteTable[User, UserInsert]
@@ -178,6 +178,10 @@ supplies `Name`, a schema-qualified PostgreSQL `Type` (`pgx.Identifier`), and
 `Value func(I) (any, bool)`: the boolean says whether to include the column.
 Required and nullable-without-default columns always return true; defaulted
 columns return their `Opt.Set` and unwrap `Opt.V`, including `Opt[Null[T]]`.
+`Set func(I) bool` answers the same question without boxing the value: rows
+are grouped by their set columns through it without allocations, and `Value`
+runs only for the parameters of a `VALUES` statement. Generated fields always
+supply it; a nil `Set` falls back to `Value`'s flag.
 Scalar fields also provide `Values func([]I) any`, projecting rows into a native
 typed slice for pgx (for example `[]string`, `[]int64`, or `[]pgtype.Text` for
 nullable text). Its length must equal the input length and preserve row order.
@@ -211,10 +215,13 @@ rendering an unmodified table SELECT reuses its SQL without a per-call cache.
 The caller must not mutate argument values (for example, bound slices) while
 an operation uses them, following pgx's argument ownership rules.
 
+Generated table and view descriptors are pointers (`var Users = &usersTable{...}`):
+`db.From` and the write methods take them as interfaces, which then hold the
+pointer, where a value descriptor would be copied to the heap on every call.
 A generated descriptor provides its own `InSchema(schema)` method: copy the
 whole descriptor, replace its embedded `Table` with `Table.InSchema(schema)`
-(or `WriteTable` with `WriteTable.InSchema(schema)`), and return that copy.
-This preserves typed columns, insert metadata and relation fields.
+(or `WriteTable` with `WriteTable.InSchema(schema)`), and return a pointer to
+that copy. This preserves typed columns, insert metadata and relation fields.
 
 Generated static query `.Args(...)` methods return
 `ratel.NewQuery(columns, scan, sql, args...)`. SQL is trusted generated SQL
