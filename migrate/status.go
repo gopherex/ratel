@@ -3,8 +3,9 @@ package migrate
 import (
 	"context"
 	"fmt"
+	"io/fs"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/plan"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // State is where a step stands on the target.
@@ -22,16 +23,21 @@ const (
 type StepStatus struct {
 	File  string
 	ID    string
-	Phase plan.Phase
+	Phase Phase
 	State State
 }
 
-// Status lists every step of the files with its state on the target. A
-// target without a journal has every step pending.
-func (r *Runner) Status(ctx context.Context, files []File) ([]StepStatus, error) {
+// Status lists every step of the migrations with its state on the database.
+// A database without a journal has every step pending.
+func Status(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS) ([]StepStatus, error) {
+	files, err := load(migrations)
+	if err != nil {
+		return nil, err
+	}
+
 	var exists bool
 
-	err := r.pool.QueryRow(ctx, `SELECT to_regclass('ratel.migrations_journal') IS NOT NULL`).Scan(&exists)
+	err = pool.QueryRow(ctx, `SELECT to_regclass('ratel.migrations_journal') IS NOT NULL`).Scan(&exists)
 	if err != nil {
 		return nil, fmt.Errorf("journal: %w", err)
 	}
@@ -39,7 +45,7 @@ func (r *Runner) Status(ctx context.Context, files []File) ([]StepStatus, error)
 	recorded := make(map[string]entry)
 
 	if exists {
-		if recorded, err = r.journal(ctx); err != nil {
+		if recorded, err = journal(ctx, pool); err != nil {
 			return nil, err
 		}
 	}

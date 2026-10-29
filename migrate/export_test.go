@@ -1,22 +1,16 @@
 package migrate
 
-import (
-	"time"
-
-	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
-	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
-	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
-)
+import "time"
 
 // Exposed internals.
 func Split(sql string) []Piece                        { return split(sql) }
 func LockKey(database string) string                  { return lockKey(database) }
 func Spread(duration time.Duration) time.Duration     { return spread(duration) }
-func Conflicting(mode safety.LockMode) string         { return conflicting(mode) }
+func Conflicting(mode LockMode) string                { return conflicting(mode) }
 func ConcurrentIndex(statement string) (string, bool) { return concurrentIndex(statement) }
 func Milliseconds(duration time.Duration) string      { return milliseconds(duration) }
 func TopLevelWhere(statement string) int              { return topLevelWhere(statement) }
-func Locks(step *Step) []safety.RelLock               { return locks(step) }
+func Validate(settings Settings) error                { return settings.validate() }
 
 // Schedule is the attempt timeouts and pauses for a first lock timeout.
 func Schedule(first time.Duration) [][2]time.Duration {
@@ -33,11 +27,6 @@ func Schedule(first time.Duration) [][2]time.Duration {
 // StateOf exposes stateOf for a journal row's outcome and checksum.
 func StateOf(outcome, recorded string, found bool, checksum string) State {
 	return stateOf(entry{outcome: outcome, checksum: recorded}, found, checksum)
-}
-
-// SchemaStatements exposes schemaStatements.
-func SchemaStatements(parser parse.Parser, files []catalog.File) ([]string, error) {
-	return schemaStatements(parser, files)
 }
 
 // SplitUpdate exposes splitUpdate as table, head and condition.

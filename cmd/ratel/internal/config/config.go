@@ -13,6 +13,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
@@ -120,23 +122,17 @@ func Decode(reader io.Reader) (Config, error) {
 }
 
 func defaults() Config {
-	const (
-		lockTimeout      = 100 * time.Millisecond
-		statementTimeout = 5 * time.Second
-		batchSize        = 1000
-		postgresMajor    = 18
-		totalWait        = 10 * time.Minute
-		backfillPause    = 50 * time.Millisecond
-		replicaLag       = 10 * time.Second
-	)
+	run := migrate.DefaultSettings()
 
 	return Config{
-		Postgres: Postgres{Version: postgresMajor}, Parser: parse.Config{Concurrency: parse.DefaultConcurrency},
+		Postgres: Postgres{Version: migrate.LatestMajor}, Parser: parse.Config{Concurrency: parse.DefaultConcurrency},
 		Schema: []string{"schema/**/*.sql"}, Migrations: "migrations",
 		Migrate: Migrate{
-			LockTimeout: lockTimeout, RetrySchedule: "gitlab", MaxTotalWait: totalWait,
-			StatementTimeout: statementTimeout, LongTxThreshold: time.Minute,
-			Backfill: Backfill{Batch: batchSize, Pause: backfillPause, MaxReplicaLag: replicaLag},
+			LockTimeout: run.LockTimeout, RetrySchedule: "gitlab", MaxTotalWait: run.MaxTotalWait,
+			StatementTimeout: run.StatementTimeout, LongTxThreshold: run.LongTxThreshold,
+			Backfill: Backfill{
+				Batch: run.Backfill.Batch, Pause: run.Backfill.Pause, MaxReplicaLag: run.Backfill.MaxReplicaLag,
+			},
 		},
 	}
 }

@@ -3,6 +3,8 @@ package plan
 import (
 	"strings"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/introspect"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
@@ -27,13 +29,13 @@ func (p *planner) column(change *diff.Change) bool {
 		if !p.env.Safety.Exists(table) {
 			p.short(change, statement(change.SQL, safety.SetNotNull, table, ""))
 		} else {
-			p.notNull(change, table, change.Column, change.After, Expand)
+			p.notNull(change, table, change.Column, change.After, migrate.PhaseExpand)
 		}
 	case diff.AlterIdentity:
 		identity := statement(change.SQL, safety.AlterIdentity, table, "")
 		if p.notNulled[table+"."+change.Column] {
 			// An identity is added once the column is NOT NULL, in contract.
-			p.add(change, Contract, Short, identity)
+			p.add(change, migrate.PhaseContract, migrate.ClassShort, identity)
 		} else {
 			p.short(change, identity)
 		}
@@ -102,11 +104,11 @@ func (p *planner) addColumn(change *diff.Change) {
 	}
 
 	p.find(change, code, "added nullable, backfilled and made NOT NULL", true)
-	p.add(change, Expand, Short, p.newColumn(table, change.Column, &desired)...)
+	p.add(change, migrate.PhaseExpand, migrate.ClassShort, p.newColumn(table, change.Column, &desired)...)
 	p.backfill(change, fill)
 
 	if desired.NotNull != "" {
-		p.notNull(change, table, change.Column, desired.NotNull, Contract)
+		p.notNull(change, table, change.Column, desired.NotNull, migrate.PhaseContract)
 	}
 }
 
@@ -134,7 +136,7 @@ func (p *planner) fill(change *diff.Change, code string) *Fill {
 // backfill adds the batched fill step of a change.
 func (p *planner) backfill(change *diff.Change, fill *Fill) {
 	sql := "UPDATE " + fill.Table + " SET " + fill.Set + " WHERE " + fill.Where + ";"
-	p.add(change, Backfill, Batched, statement(sql, safety.Backfill, fill.Table, ""))
+	p.add(change, migrate.PhaseBackfill, migrate.ClassBatched, statement(sql, safety.Backfill, fill.Table, ""))
 	p.steps[len(p.steps)-1].Fill = fill
 }
 
@@ -206,17 +208,18 @@ func (p *planner) renameColumn(change *diff.Change) {
 		"; ELSE NEW." + change.Column + " := NEW." + old + "; END IF;"
 
 	sync := p.sync(table, change.Column, body)
-	p.add(change, Expand, Short, append(p.newColumn(table, change.Column, &desired), sync.create...)...)
+	p.add(change, migrate.PhaseExpand, migrate.ClassShort,
+		append(p.newColumn(table, change.Column, &desired), sync.create...)...)
 	p.backfill(change, &Fill{
 		Table: table, Key: key, Set: change.Column + " = " + old, Where: change.Column + " IS DISTINCT FROM " + old,
 	})
 
 	if desired.NotNull != "" {
-		p.notNull(change, table, change.Column, desired.NotNull, Expand)
+		p.notNull(change, table, change.Column, desired.NotNull, migrate.PhaseExpand)
 	}
 
 	p.late = append(p.late, Step{
-		Phase: Contract, Class: Short, Change: change.Key, Allow: p.allowed(change),
+		Phase: migrate.PhaseContract, Class: migrate.ClassShort, Change: change.Key, Allow: p.allowed(change),
 		Statements: append(sync.drop, statement("ALTER TABLE "+table+" DROP COLUMN "+old+";",
 			safety.DropColumn, table, "")),
 	})

@@ -11,13 +11,14 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
 	"github.com/gopherex/ratel/cmd/ratel/internal/devdb"
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/introspect"
 	"github.com/gopherex/ratel/cmd/ratel/internal/plan"
 	"github.com/gopherex/ratel/cmd/ratel/internal/probe"
-	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
 
 // planCase plans a diff case: data is inserted into the current database
@@ -231,7 +232,7 @@ func checkPlan(ctx context.Context, t *testing.T, server *devdb.Server, item pla
 func runStep(ctx context.Context, t *testing.T, database *devdb.Database, step *plan.Step) {
 	t.Helper()
 
-	if step.Tx == safety.OwnStatement {
+	if step.Tx == migrate.OwnStatement {
 		for _, statement := range step.Statements {
 			if _, err := database.Pool.Exec(ctx, statement.SQL); err != nil {
 				t.Fatalf("%s step %s: %v\n%s", step.Phase, step.Change, err, statement.SQL)

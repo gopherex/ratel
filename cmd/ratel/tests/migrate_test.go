@@ -11,11 +11,13 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/gopherex/ratel/migrate"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
 	"github.com/gopherex/ratel/cmd/ratel/internal/devdb"
 	"github.com/gopherex/ratel/cmd/ratel/internal/introspect"
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
@@ -70,7 +72,7 @@ ALTER TABLE cyc.a ADD FOREIGN KEY (b) REFERENCES cyc.b;`,
 			files := reversed(t, parser, tc.ddl)
 
 			got := database(ctx, t, server, func(connection *pgx.Conn) error {
-				return migrate.ApplySchema(ctx, connection, parser, files)
+				return authoring.ApplySchema(ctx, connection, parser, files)
 			}, tc.namespace)
 			want := database(ctx, t, server, func(connection *pgx.Conn) error {
 				_, err := connection.Exec(ctx, tc.ordered)
@@ -162,16 +164,16 @@ func TestApplyDev(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), startupTimeout)
 	defer cancel()
 
-	hand, err := migrate.Parse("1_hand.sql", `CREATE SCHEMA app;
+	hand, err := authoring.Parse(migrate.Source{Name: "1_hand.sql", SQL: `CREATE SCHEMA app;
 CREATE TABLE app.t (id int PRIMARY KEY, v int);
 CREATE INDEX CONCURRENTLY t_v ON app.t (v);
 -- ratel:step phase=backfill
-UPDATE app.t SET v = 1;`)
+UPDATE app.t SET v = 1;`})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	migrate.Classify(&hand, safety.NewClassifier(parser, safety.Env{}), parser)
+	authoring.Classify(&hand, safety.NewClassifier(parser, safety.Env{}), parser)
 
 	connection, err := pool.Acquire(ctx)
 	if err != nil {
@@ -180,7 +182,7 @@ UPDATE app.t SET v = 1;`)
 
 	defer connection.Release()
 
-	if err := migrate.ApplyDev(ctx, connection.Conn(), []migrate.File{hand}); err != nil {
+	if err := authoring.ApplyDev(ctx, connection.Conn(), []authoring.File{hand}); err != nil {
 		t.Fatal(err)
 	}
 

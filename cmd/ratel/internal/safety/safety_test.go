@@ -5,6 +5,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
 
@@ -35,7 +37,7 @@ func TestAssess(t *testing.T) {
 			operations: []safety.Operation{{Kind: safety.CreateIndex, Relation: "app.t"}},
 			env:        env,
 			want: safety.Safety{
-				Locks: []safety.RelLock{{"app.t", safety.Share}}, Effect: safety.IndexBuild,
+				Locks: []migrate.RelLock{{Relation: "app.t", Mode: migrate.Share}}, Effect: safety.IndexBuild,
 				Reasons: []string{"RTL-L02"},
 			},
 		},
@@ -48,7 +50,9 @@ func TestAssess(t *testing.T) {
 			},
 			env: existing("app.t", "app.x"),
 			want: safety.Safety{
-				Locks:  []safety.RelLock{{"app.t", safety.AccessExclusive}, {"app.x", safety.ShareRowExclusive}},
+				Locks: []migrate.RelLock{
+					{Relation: "app.t", Mode: migrate.AccessExclusive}, {Relation: "app.x", Mode: migrate.ShareRowExclusive},
+				},
 				Effect: safety.Scan, Compat: safety.Conditional, Reasons: []string{"RTL-C06"},
 			},
 		},
@@ -57,7 +61,7 @@ func TestAssess(t *testing.T) {
 			operations: []safety.Operation{{Kind: safety.AlterColumnType, Relation: "app.t", Rewrite: true}},
 			env:        env,
 			want: safety.Safety{
-				Locks: []safety.RelLock{{"app.t", safety.AccessExclusive}}, Effect: safety.Rewrite,
+				Locks: []migrate.RelLock{{Relation: "app.t", Mode: migrate.AccessExclusive}}, Effect: safety.Rewrite,
 				Compat: safety.Breaking, Reasons: []string{"RTL-C04", "RTL-R02"},
 			},
 		},
@@ -72,8 +76,8 @@ func TestAssess(t *testing.T) {
 			operations: []safety.Operation{{Kind: safety.CreateIndexConcurrently, Relation: "app.t"}},
 			env:        env,
 			want: safety.Safety{
-				Locks: []safety.RelLock{{"app.t", safety.ShareUpdateExclusive}}, Effect: safety.IndexBuild,
-				Tx: safety.OwnStatement, Waits: true,
+				Locks: []migrate.RelLock{{Relation: "app.t", Mode: migrate.ShareUpdateExclusive}}, Effect: safety.IndexBuild,
+				Tx: migrate.OwnStatement, Waits: true,
 			},
 		},
 		{
@@ -81,7 +85,7 @@ func TestAssess(t *testing.T) {
 			operations: []safety.Operation{{Kind: safety.AddColumn, Relation: "app.t", Codes: []string{"RTL-C03"}}},
 			env:        env,
 			want: safety.Safety{
-				Locks: []safety.RelLock{{"app.t", safety.AccessExclusive}}, Reasons: []string{"RTL-C03"},
+				Locks: []migrate.RelLock{{Relation: "app.t", Mode: migrate.AccessExclusive}}, Reasons: []string{"RTL-C03"},
 			},
 		},
 		{
@@ -89,7 +93,7 @@ func TestAssess(t *testing.T) {
 			operations: []safety.Operation{{Kind: safety.DropTable, Relation: "app.t"}},
 			env:        env,
 			want: safety.Safety{
-				Locks: []safety.RelLock{{"app.t", safety.AccessExclusive}}, Destroys: safety.Data,
+				Locks: []migrate.RelLock{{Relation: "app.t", Mode: migrate.AccessExclusive}}, Destroys: safety.Data,
 				Compat: safety.Breaking, Reasons: []string{"RTL-C02", "RTL-D01"},
 			},
 		},
@@ -109,10 +113,10 @@ func TestGrantLocksFrom18(t *testing.T) {
 
 	for _, tc := range []struct {
 		major int
-		want  []safety.RelLock
+		want  []migrate.RelLock
 	}{
 		{major: 17},
-		{major: 18, want: []safety.RelLock{{"app.t", safety.AccessShare}}},
+		{major: 18, want: []migrate.RelLock{{Relation: "app.t", Mode: migrate.AccessShare}}},
 	} {
 		t.Run(cmp.Diff(nil, tc.want), func(t *testing.T) {
 			t.Parallel()
@@ -125,64 +129,6 @@ func TestGrantLocksFrom18(t *testing.T) {
 				t.Errorf("locks on %d (-want +got):\n%s", tc.major, difference)
 			}
 		})
-	}
-}
-
-func TestLockMode(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		mode   safety.LockMode
-		name   string
-		blocks bool
-	}{
-		{safety.NoLock, "None", false},
-		{safety.AccessShare, "AccessShare", false},
-		{safety.RowShare, "RowShare", false},
-		{safety.RowExclusive, "RowExclusive", false},
-		{safety.ShareUpdateExclusive, "ShareUpdateExclusive", false},
-		{safety.Share, "Share", true},
-		{safety.ShareRowExclusive, "ShareRowExclusive", true},
-		{safety.Exclusive, "Exclusive", true},
-		{safety.AccessExclusive, "AccessExclusive", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			if tc.mode.String() != tc.name || tc.mode.Blocks() != tc.blocks {
-				t.Errorf("%d: %s, blocks %v", tc.mode, tc.mode, tc.mode.Blocks())
-			}
-		})
-	}
-}
-
-// TestConflicts checks the table against PostgreSQL's documented matrix.
-func TestConflicts(t *testing.T) {
-	t.Parallel()
-
-	// Each mode's row: the modes it conflicts with, weakest first.
-	matrix := map[safety.LockMode]string{
-		safety.NoLock:               "--------",
-		safety.AccessShare:          "-------X",
-		safety.RowShare:             "------XX",
-		safety.RowExclusive:         "----XXXX",
-		safety.ShareUpdateExclusive: "---XXXXX",
-		safety.Share:                "--XX-XXX",
-		safety.ShareRowExclusive:    "--XXXXXX",
-		safety.Exclusive:            "-XXXXXXX",
-		safety.AccessExclusive:      "XXXXXXXX",
-	}
-
-	for mode, row := range matrix {
-		for other := safety.AccessShare; other <= safety.AccessExclusive; other++ {
-			if want := row[other-1] == 'X'; mode.Conflicts(other) != want {
-				t.Errorf("%s vs %s = %v", mode, other, !want)
-			}
-		}
-
-		if mode.Conflicts(safety.NoLock) {
-			t.Errorf("%s conflicts with no lock", mode)
-		}
 	}
 }
 

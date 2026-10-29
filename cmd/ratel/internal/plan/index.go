@@ -3,6 +3,8 @@ package plan
 import (
 	"strings"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
@@ -38,8 +40,9 @@ func (p *planner) createIndex(change *diff.Change, name, sql string) {
 		p.partitionedIndex(change, table, schemaOf(nameOf(change.Key))+"."+name, sql)
 	default:
 		p.find(change, "RTL-L02", "built concurrently", true)
-		p.add(change, Expand, Long, statement(strings.Replace(sql, " INDEX ", " INDEX CONCURRENTLY ", 1),
-			safety.CreateIndexConcurrently, table, ""))
+		p.add(change, migrate.PhaseExpand, migrate.ClassLong,
+			statement(strings.Replace(sql, " INDEX ", " INDEX CONCURRENTLY ", 1),
+				safety.CreateIndexConcurrently, table, ""))
 	}
 }
 
@@ -50,7 +53,7 @@ func (p *planner) createIndex(change *diff.Change, name, sql string) {
 func (p *planner) partitionedIndex(change *diff.Change, table, index, sql string) {
 	sql = strings.Replace(sql, " ON ONLY "+table+" ", " ON "+table+" ", 1)
 	only := strings.Replace(sql, " ON "+table+" ", " ON ONLY "+table+" ", 1)
-	p.add(change, Expand, Short, statement(only, safety.CreateIndexOnly, table, ""))
+	p.add(change, migrate.PhaseExpand, migrate.ClassShort, statement(only, safety.CreateIndexOnly, table, ""))
 
 	for _, partition := range p.env.Safety.Relations[table].Partitions {
 		child := schemaOf(partition) + "." + generated(partition, "_"+unquote(lastPart(index)))
@@ -60,12 +63,14 @@ func (p *planner) partitionedIndex(change *diff.Change, table, index, sql string
 		if p.env.Safety.Relations[partition].Partitioned {
 			p.partitionedIndex(change, partition, child, partitionSQL)
 		} else {
-			p.add(change, Expand, Long, statement(strings.Replace(partitionSQL, " INDEX ", " INDEX CONCURRENTLY ", 1),
-				safety.CreateIndexConcurrently, partition, ""))
+			p.add(change, migrate.PhaseExpand, migrate.ClassLong,
+				statement(strings.Replace(partitionSQL, " INDEX ", " INDEX CONCURRENTLY ", 1),
+					safety.CreateIndexConcurrently, partition, ""))
 		}
 
-		p.add(change, Expand, Short, statement("ALTER INDEX "+index+" ATTACH PARTITION "+child+";",
-			safety.AttachIndex, index, ""))
+		p.add(change, migrate.PhaseExpand, migrate.ClassShort,
+			statement("ALTER INDEX "+index+" ATTACH PARTITION "+child+";",
+				safety.AttachIndex, index, ""))
 	}
 }
 
@@ -81,7 +86,7 @@ func (p *planner) dropIndex(change *diff.Change) {
 	}
 
 	p.find(change, "RTL-L03", "dropped concurrently", true)
-	p.add(change, Contract, Long, statement("DROP INDEX CONCURRENTLY "+index+";",
+	p.add(change, migrate.PhaseContract, migrate.ClassLong, statement("DROP INDEX CONCURRENTLY "+index+";",
 		safety.DropIndexConcurrently, change.Table, ""))
 }
 
@@ -93,8 +98,9 @@ func (p *planner) replaceIndex(drop, create *diff.Change) {
 
 	p.createIndex(create, temporary, create.SQL)
 	p.dropIndex(drop)
-	p.add(create, Contract, Short, statement("ALTER INDEX "+schemaOf(index)+"."+temporary+" RENAME TO "+
-		lastPart(index)+";", safety.RenameIndex, schemaOf(index)+"."+temporary, ""))
+	p.add(create, migrate.PhaseContract, migrate.ClassShort,
+		statement("ALTER INDEX "+schemaOf(index)+"."+temporary+" RENAME TO "+
+			lastPart(index)+";", safety.RenameIndex, schemaOf(index)+"."+temporary, ""))
 }
 
 // renamedIndex is a rendered CREATE INDEX under another name.

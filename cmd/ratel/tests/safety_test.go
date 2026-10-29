@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
 	"github.com/gopherex/ratel/cmd/ratel/internal/devdb"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
@@ -280,7 +282,7 @@ func TestLockTable(t *testing.T) {
 
 // observation is what one statement did.
 type observation struct {
-	locks     map[string]safety.LockMode
+	locks     map[string]migrate.LockMode
 	rewritten bool
 	waited    bool
 }
@@ -313,7 +315,7 @@ func checkLocks(ctx context.Context, t *testing.T, server *devdb.Server, major i
 	want := safety.Assess([]safety.Operation{item.operation}, env)
 
 	var got observation
-	if want.Tx == safety.OwnStatement {
+	if want.Tx == migrate.OwnStatement {
 		got = observeWaiting(ctx, t, database.Pool, item, names)
 	} else {
 		got = observeInTx(ctx, t, database.Pool, item, names)
@@ -325,19 +327,19 @@ func checkLocks(ctx context.Context, t *testing.T, server *devdb.Server, major i
 		t.Errorf("rewrite: PostgreSQL %v, table effect %s", got.rewritten, want.Effect)
 	}
 
-	if want.Tx == safety.OwnStatement && got.waited != want.Waits {
+	if want.Tx == migrate.OwnStatement && got.waited != want.Waits {
 		t.Errorf("waits: PostgreSQL %v, table %v", got.waited, want.Waits)
 	}
 }
 
-func modeOf(locks []safety.RelLock, relation string) safety.LockMode {
+func modeOf(locks []migrate.RelLock, relation string) migrate.LockMode {
 	for _, lock := range locks {
 		if lock.Relation == relation {
 			return lock.Mode
 		}
 	}
 
-	return safety.NoLock
+	return migrate.NoLock
 }
 
 // relations are the names of the fixture's relations by oid, read before the
@@ -395,7 +397,7 @@ const heldLocks = `SELECT l.relation, l.mode FROM pg_locks l
 func collectLocks(ctx context.Context, t *testing.T, query interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }, pid uint32, names map[uint32]string,
-) map[string]safety.LockMode {
+) map[string]migrate.LockMode {
 	t.Helper()
 
 	rows, err := query.Query(ctx, heldLocks, pid)
@@ -405,7 +407,7 @@ func collectLocks(ctx context.Context, t *testing.T, query interface {
 
 	defer rows.Close()
 
-	result := make(map[string]safety.LockMode)
+	result := make(map[string]migrate.LockMode)
 
 	for rows.Next() {
 		var (
@@ -425,14 +427,14 @@ func collectLocks(ctx context.Context, t *testing.T, query interface {
 	return result
 }
 
-func lockMode(name string) safety.LockMode {
-	for mode := safety.AccessShare; mode <= safety.AccessExclusive; mode++ {
+func lockMode(name string) migrate.LockMode {
+	for mode := migrate.AccessShare; mode <= migrate.AccessExclusive; mode++ {
 		if mode.String()+"Lock" == name {
 			return mode
 		}
 	}
 
-	return safety.NoLock
+	return migrate.NoLock
 }
 
 func relfilenode(ctx context.Context, t *testing.T, query interface {

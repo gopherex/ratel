@@ -10,6 +10,8 @@ import (
 type Piece struct {
 	Text    string
 	Comment bool
+	// Start is the offset of the text's first byte in the file.
+	Start int
 }
 
 // split cuts SQL into statements and the comment lines between them,
@@ -24,7 +26,7 @@ func split(sql string) []Piece {
 	for index := 0; index < len(sql); {
 		if strings.TrimSpace(sql[start:index]) == "" && strings.HasPrefix(sql[index:], "--") {
 			end := lineEnd(sql, index)
-			pieces = append(pieces, Piece{Text: strings.TrimSpace(sql[index:end]), Comment: true})
+			pieces = append(pieces, Piece{Text: strings.TrimSpace(sql[index:end]), Comment: true, Start: index})
 			index, start = end, end
 
 			continue
@@ -34,10 +36,7 @@ func split(sql string) []Piece {
 		case next > index:
 			index = next
 		case sql[index] == ';':
-			if text := strings.TrimSpace(sql[start:index]); text != "" {
-				pieces = append(pieces, Piece{Text: text})
-			}
-
+			pieces = appendStatement(pieces, sql, start, index)
 			index++
 			start = index
 		default:
@@ -45,11 +44,20 @@ func split(sql string) []Piece {
 		}
 	}
 
-	if text := strings.TrimSpace(sql[start:]); text != "" {
-		pieces = append(pieces, Piece{Text: text})
+	return appendStatement(pieces, sql, start, len(sql))
+}
+
+// appendStatement appends the statement in sql[start:end], trimmed, unless it
+// is blank.
+func appendStatement(pieces []Piece, sql string, start, end int) []Piece {
+	text := strings.TrimSpace(sql[start:end])
+	if text == "" {
+		return pieces
 	}
 
-	return pieces
+	leading := len(sql[start:end]) - len(strings.TrimLeft(sql[start:end], " \t\r\n\f\v"))
+
+	return append(pieces, Piece{Text: text, Start: start + leading})
 }
 
 // skip is the index after a quoted literal, identifier, dollar-quoted string

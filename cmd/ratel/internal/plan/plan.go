@@ -9,34 +9,11 @@ package plan
 import (
 	"slices"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/introspect"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
-)
-
-// Phase is when a step runs: expand and backfill with ratel migrate apply,
-// contract with ratel migrate contract.
-type Phase string
-
-// Phases in run order.
-const (
-	Expand   Phase = "expand"
-	Backfill Phase = "backfill"
-	Contract Phase = "contract"
-)
-
-// Class is how the runner guards a step.
-type Class string
-
-// Step classes.
-const (
-	// Short takes a blocking lock briefly, under lock_timeout and retries.
-	Short Class = "short"
-	// Long scans or builds without a blocking lock and may wait for older
-	// transactions.
-	Long Class = "long"
-	// Batched fills rows in key-ordered batches, one transaction each.
-	Batched Class = "backfill"
 )
 
 // Statement is one SQL statement and what it does.
@@ -56,9 +33,9 @@ type Fill struct {
 
 // Step is a unit of a plan.
 type Step struct {
-	Phase      Phase
-	Class      Class
-	Tx         safety.TxMode
+	Phase      migrate.Phase
+	Class      migrate.Class
+	Tx         migrate.TxMode
 	Statements []Statement
 	Fill       *Fill // backfill steps only
 	Safety     safety.Safety
@@ -152,13 +129,13 @@ type planner struct {
 	rebuilt map[string]bool
 	// floor is the earliest phase of each table's changes: a partition
 	// detached in contract changes after its detach.
-	floor map[string]Phase
+	floor map[string]migrate.Phase
 }
 
 func newPlanner(env *Env, intents Intents) *planner {
 	return &planner{
 		env: *env, intents: intents,
-		notNulled: make(map[string]bool), rebuilt: make(map[string]bool), floor: make(map[string]Phase),
+		notNulled: make(map[string]bool), rebuilt: make(map[string]bool), floor: make(map[string]migrate.Phase),
 	}
 }
 
@@ -202,7 +179,7 @@ func (p *planner) replace(drop, create *diff.Change) {
 		p.late = append(p.late, planned.late...)
 
 		for index := range planned.steps {
-			if planned.steps[index].Class != Short {
+			if planned.steps[index].Class != migrate.ClassShort {
 				// A step that cannot share a transaction keeps its own.
 				p.steps = append(p.steps, planned.steps...)
 
@@ -212,14 +189,14 @@ func (p *planner) replace(drop, create *diff.Change) {
 			statements = append(statements, planned.steps[index].Statements...)
 		}
 
-		p.add(drop, p.phaseOf(statements), Short, statements...)
+		p.add(drop, p.phaseOf(statements), migrate.ClassShort, statements...)
 	}
 }
 
 func (p *planner) plan() Plan {
 	p.steps = append(p.steps, p.late...)
 
-	phases := []Phase{Expand, Backfill, Contract}
+	phases := []migrate.Phase{migrate.PhaseExpand, migrate.PhaseBackfill, migrate.PhaseContract}
 
 	slices.SortStableFunc(p.steps, func(a, b Step) int {
 		return slices.Index(phases, a.Phase) - slices.Index(phases, b.Phase)
@@ -254,14 +231,14 @@ func creates(kind safety.Kind) bool {
 }
 
 // add appends a step for a change, allowing what the change's object allows.
-func (p *planner) add(change *diff.Change, phase Phase, class Class, statements ...Statement) {
-	mode := safety.InTx
-	if class == Long {
-		mode = safety.OwnStatement
+func (p *planner) add(change *diff.Change, phase migrate.Phase, class migrate.Class, statements ...Statement) {
+	mode := migrate.InTx
+	if class == migrate.ClassLong {
+		mode = migrate.OwnStatement
 	}
 
-	if p.floor[change.Table] == Contract {
-		phase = Contract
+	if p.floor[change.Table] == migrate.PhaseContract {
+		phase = migrate.PhaseContract
 	}
 
 	p.steps = append(p.steps, Step{
@@ -272,12 +249,12 @@ func (p *planner) add(change *diff.Change, phase Phase, class Class, statements 
 // short adds a short DDL step in the phase the change's compatibility puts
 // it in.
 func (p *planner) short(change *diff.Change, statements ...Statement) {
-	p.add(change, p.phaseOf(statements), Short, statements...)
+	p.add(change, p.phaseOf(statements), migrate.ClassShort, statements...)
 }
 
 // phaseOf places statements by what running code sees: breaking and
 // destroying ones go to contract, the rest to expand.
-func (p *planner) phaseOf(statements []Statement) Phase {
+func (p *planner) phaseOf(statements []Statement) migrate.Phase {
 	var operations []safety.Operation
 	for _, statement := range statements {
 		operations = append(operations, statement.Operations...)
@@ -285,10 +262,10 @@ func (p *planner) phaseOf(statements []Statement) Phase {
 
 	assessed := safety.Assess(operations, p.env.Safety)
 	if assessed.Compat == safety.Breaking || assessed.Destroys != safety.None {
-		return Contract
+		return migrate.PhaseContract
 	}
 
-	return Expand
+	return migrate.PhaseExpand
 }
 
 // find records a finding; an unfixed one fails the plan unless allowed.

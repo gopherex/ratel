@@ -70,7 +70,8 @@ PostgreSQL sees.
 | safety | `Assess(change, env)`: locks, effect, tx mode, destruction, compatibility | new |
 | planner | Rewrites changes into safe steps and phases | new |
 | lint | `RTL-*` rules over planned steps and hand-written SQL | new rule set |
-| migrate | Step runner with journal and lock guards | sqld `pkg/migrate`, reworked |
+| authoring | Writes, classifies and seals migration files; applies them to dev databases | new |
+| migrate | Public step runner with journal and lock guards, for the CLI and applications | sqld `pkg/migrate`, reworked |
 | plugin host | Runs output plugins (exec or wazero) | rewritten |
 | ratel-gen-go | Go output plugin: models, columns, scanners, relations, static queries | new |
 | runtime | `ratel` Go package: query builder, loader, executor port | new |
@@ -92,7 +93,7 @@ PostgreSQL sees.
 
 | Module | Contains | Depends on |
 |---|---|---|
-| `github.com/gopherex/ratel` | runtime package `ratel`, Go types of the IR and plugin protos, plugin SDK | pgx v5, OpenTelemetry API, protobuf runtime |
+| `github.com/gopherex/ratel` | runtime package `ratel`, migration runner `migrate`, Go types of the IR and plugin protos, plugin SDK | pgx v5, OpenTelemetry API, protobuf runtime |
 | `github.com/gopherex/ratel/rateltest` | user test helpers | the runtime module, testcontainers |
 | `github.com/gopherex/ratel/cmd/ratel` | host CLI, parser, catalog, inference, migration engine, `ratel-gen-go` linked in | the runtime module, wazero, go-pgquery, testcontainers |
 | `github.com/gopherex/ratel/cmd/protoc-gen-ratel` | proto frontend | protobuf, the options proto |
@@ -116,6 +117,7 @@ options/                                     generated Go for the ratel.proto op
 plugin/pluginpb/                             generated Go for the plugin protocol
 plugin/                                      Go SDK for output plugins
 ratel.go, query.go, col.go, rel.go, ...      runtime package ratel
+migrate/                                     migration runner for the CLI and applications
 rateltest/                                   user test helpers (own module)
 cmd/ratel/                                   host CLI module
 cmd/protoc-gen-ratel/                        proto frontend module

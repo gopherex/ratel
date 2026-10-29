@@ -3,6 +3,8 @@ package plan
 import (
 	"strings"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/pgname"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
@@ -45,11 +47,13 @@ func (p *planner) attach(change *diff.Change) {
 		name := generated(table, "_ratel_bound")
 
 		p.find(change, "RTL-L07", "a validated bound check lets ATTACH skip the scan", true)
-		p.add(change, Expand, Short, statement("ALTER TABLE "+table+" ADD CONSTRAINT "+name+" CHECK ("+check+") NOT VALID;",
-			safety.AddCheckNotValid, table, ""))
-		p.add(change, Expand, Long, statement("ALTER TABLE "+table+" VALIDATE CONSTRAINT "+name+";",
-			safety.ValidateConstraint, table, ""))
-		p.add(change, Expand, Short, attach,
+		p.add(change, migrate.PhaseExpand, migrate.ClassShort,
+			statement("ALTER TABLE "+table+" ADD CONSTRAINT "+name+" CHECK ("+check+") NOT VALID;",
+				safety.AddCheckNotValid, table, ""))
+		p.add(change, migrate.PhaseExpand, migrate.ClassLong,
+			statement("ALTER TABLE "+table+" VALIDATE CONSTRAINT "+name+";",
+				safety.ValidateConstraint, table, ""))
+		p.add(change, migrate.PhaseExpand, migrate.ClassShort, attach,
 			statement("ALTER TABLE "+table+" DROP CONSTRAINT "+name+";", safety.DropConstraint, table, ""))
 	}
 }
@@ -61,29 +65,31 @@ func (p *planner) attach(change *diff.Change) {
 func (p *planner) detach(change *diff.Change) {
 	parent := change.Table
 	table := nameOf(change.Key)
-	phase := Contract
+	phase := migrate.PhaseContract
 
 	if strings.Contains(change.After, " PARTITION OF ") {
-		phase = Expand
+		phase = migrate.PhaseExpand
 	} else {
 		// What changes on the table now plain follows its detach.
-		p.floor[table] = Contract
+		p.floor[table] = migrate.PhaseContract
 	}
 
 	if p.env.Safety.Relations[parent].DefaultPartition {
-		p.add(change, phase, Short, statement("ALTER TABLE "+parent+" DETACH PARTITION "+table+";",
+		p.add(change, phase, migrate.ClassShort, statement("ALTER TABLE "+parent+" DETACH PARTITION "+table+";",
 			safety.DetachPartition, parent, table))
 	} else {
-		p.add(change, phase, Long, statement("ALTER TABLE "+parent+" DETACH PARTITION "+table+" CONCURRENTLY;",
-			safety.DetachConcurrently, parent, table))
+		p.add(change, phase, migrate.ClassLong,
+			statement("ALTER TABLE "+parent+" DETACH PARTITION "+table+" CONCURRENTLY;",
+				safety.DetachConcurrently, parent, table))
 		// A concurrent detach keeps the partition bound as a check
 		// constraint, named as PostgreSQL names a check on the key.
-		p.add(change, phase, Short, statement("ALTER TABLE "+table+" DROP CONSTRAINT IF EXISTS "+
+		p.add(change, phase, migrate.ClassShort, statement("ALTER TABLE "+table+" DROP CONSTRAINT IF EXISTS "+
 			p.boundCheckName(parent, table)+";", safety.DropConstraint, table, ""))
 	}
 
 	if strings.Contains(change.SQL, "DROP TABLE ") {
-		p.add(change, Contract, Short, statement("DROP TABLE "+table+";", safety.DropTable, table, ""))
+		p.add(change, migrate.PhaseContract, migrate.ClassShort,
+			statement("DROP TABLE "+table+";", safety.DropTable, table, ""))
 	}
 }
 

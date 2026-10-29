@@ -3,6 +3,8 @@ package plan
 import (
 	"strings"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
@@ -64,9 +66,10 @@ func (p *planner) addConstraint(change *diff.Change, name, replaces string) {
 		}
 
 		p.find(change, "RTL-L04", "added NOT VALID and validated without a blocking lock", true)
-		p.add(change, Expand, Short, statement(add+" NOT VALID;", kind, table, other))
-		p.add(change, Contract, Long, statement("ALTER TABLE "+table+" VALIDATE CONSTRAINT "+name+";",
-			validate, table, other))
+		p.add(change, migrate.PhaseExpand, migrate.ClassShort, statement(add+" NOT VALID;", kind, table, other))
+		p.add(change, migrate.PhaseContract, migrate.ClassLong,
+			statement("ALTER TABLE "+table+" VALIDATE CONSTRAINT "+name+";",
+				validate, table, other))
 	case diff.AddUnique, diff.AddPrimaryKey:
 		p.unique(change, name, definition)
 	default:
@@ -77,7 +80,7 @@ func (p *planner) addConstraint(change *diff.Change, name, replaces string) {
 	}
 
 	if replaces != "" {
-		p.add(change, Contract, Short,
+		p.add(change, migrate.PhaseContract, migrate.ClassShort,
 			statement("ALTER TABLE "+table+" DROP CONSTRAINT "+replaces+";", safety.DropConstraint, table, ""),
 			statement("ALTER TABLE "+table+" RENAME CONSTRAINT "+name+" TO "+replaces+";",
 				safety.RenameConstraint, table, ""))
@@ -112,10 +115,12 @@ func (p *planner) unique(change *diff.Change, name, definition string) {
 	}
 
 	p.find(change, "RTL-L05", "index built concurrently and attached with USING INDEX", true)
-	p.add(change, Expand, Long, statement("CREATE UNIQUE INDEX CONCURRENTLY "+name+" ON "+table+" USING btree ("+
-		strings.Join(parts.columns, ", ")+")"+parts.index+";", safety.CreateIndexConcurrently, table, ""))
-	p.add(change, Contract, Short, statement("ALTER TABLE "+table+" ADD CONSTRAINT "+name+" "+parts.keyword+
-		" USING INDEX "+name+parts.deferrable+";", safety.AddConstraintIndex, table, ""))
+	p.add(change, migrate.PhaseExpand, migrate.ClassLong,
+		statement("CREATE UNIQUE INDEX CONCURRENTLY "+name+" ON "+table+" USING btree ("+
+			strings.Join(parts.columns, ", ")+")"+parts.index+";", safety.CreateIndexConcurrently, table, ""))
+	p.add(change, migrate.PhaseContract, migrate.ClassShort,
+		statement("ALTER TABLE "+table+" ADD CONSTRAINT "+name+" "+parts.keyword+
+			" USING INDEX "+name+parts.deferrable+";", safety.AddConstraintIndex, table, ""))
 }
 
 // requireNotNull plans NOT NULL on a column that lacks it.
@@ -130,7 +135,7 @@ func (p *planner) requireNotNull(change *diff.Change, table, column string) {
 		clause = desired.NotNull
 	}
 
-	p.notNull(change, table, column, clause, Expand)
+	p.notNull(change, table, column, clause, migrate.PhaseExpand)
 }
 
 // notNull sets NOT NULL on an existing column without scanning under the
@@ -138,7 +143,7 @@ func (p *planner) requireNotNull(change *diff.Change, table, column string) {
 // later, before 18 through a validated IS NOT NULL check that SET NOT NULL
 // trusts. The NOT VALID part goes to phase first: contract when old code may
 // still insert NULL.
-func (p *planner) notNull(change *diff.Change, table, column, clause string, first Phase) {
+func (p *planner) notNull(change *diff.Change, table, column, clause string, first migrate.Phase) {
 	if p.notNulled[table+"."+column] {
 		return
 	}
@@ -149,20 +154,24 @@ func (p *planner) notNull(change *diff.Change, table, column, clause string, fir
 	p.find(change, "RTL-L06", "NOT NULL proved by a validated constraint instead of a scan", true)
 
 	if p.env.Safety.Major >= postgres18 {
-		p.add(change, first, Short, statement(alter+"ADD CONSTRAINT "+notNullName(table, column, clause)+" NOT NULL "+
-			column+" NOT VALID;", safety.NotNullNotValid, table, ""))
-		p.add(change, Contract, Long, statement(alter+"VALIDATE CONSTRAINT "+notNullName(table, column, clause)+";",
-			safety.ValidateConstraint, table, ""))
+		p.add(change, first, migrate.ClassShort,
+			statement(alter+"ADD CONSTRAINT "+notNullName(table, column, clause)+" NOT NULL "+
+				column+" NOT VALID;", safety.NotNullNotValid, table, ""))
+		p.add(change, migrate.PhaseContract, migrate.ClassLong,
+			statement(alter+"VALIDATE CONSTRAINT "+notNullName(table, column, clause)+";",
+				safety.ValidateConstraint, table, ""))
 
 		return
 	}
 
 	check := generated(table, "_"+unquote(column)+"_ratel_not_null")
 
-	p.add(change, first, Short, statement(alter+"ADD CONSTRAINT "+check+" CHECK ("+column+" IS NOT NULL) NOT VALID;",
-		safety.AddCheckNotValid, table, ""))
-	p.add(change, Contract, Long, statement(alter+"VALIDATE CONSTRAINT "+check+";", safety.ValidateConstraint, table, ""))
-	p.add(change, Contract, Short,
+	p.add(change, first, migrate.ClassShort,
+		statement(alter+"ADD CONSTRAINT "+check+" CHECK ("+column+" IS NOT NULL) NOT VALID;",
+			safety.AddCheckNotValid, table, ""))
+	p.add(change, migrate.PhaseContract, migrate.ClassLong,
+		statement(alter+"VALIDATE CONSTRAINT "+check+";", safety.ValidateConstraint, table, ""))
+	p.add(change, migrate.PhaseContract, migrate.ClassShort,
 		statement(alter+"ALTER COLUMN "+column+" SET NOT NULL;", safety.SetNotNullChecked, table, ""),
 		statement(alter+"DROP CONSTRAINT "+check+";", safety.DropConstraint, table, ""))
 }

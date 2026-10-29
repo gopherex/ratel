@@ -1,12 +1,12 @@
-package migrate_test
+package authoring_test
 
 import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
@@ -31,7 +31,7 @@ func TestSchemaStatements(t *testing.T) {
 		{Name: "b.sql", SQL: "CREATE VIEW a.v AS SELECT 1; CREATE TABLE a.y (id int PRIMARY KEY)"},
 	}
 
-	got, err := migrate.SchemaStatements(parser, files)
+	got, err := authoring.SchemaStatements(parser, files)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func BenchmarkSchemaStatements(b *testing.B) {
 	files := []catalog.File{{Name: "a.sql", SQL: "CREATE TABLE a.x (id int PRIMARY KEY, y int REFERENCES a.y)"}}
 
 	for b.Loop() {
-		if _, err := migrate.SchemaStatements(parser, files); err != nil {
+		if _, err := authoring.SchemaStatements(parser, files); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -60,7 +60,7 @@ func detached(statement string) (pair, bool) {
 // resume is what to run of a statement an interrupted run may have left
 // half done: nothing when it took effect, its cleanup and itself, or the
 // statement that completes it.
-func (r *Runner) resume(ctx context.Context, statement string) (string, error) {
+func (r *runner) resume(ctx context.Context, statement string) (string, error) {
 	if index, ok := concurrentIndex(statement); ok {
 		return r.resumeIndex(ctx, index, statement)
 	}
@@ -91,7 +91,7 @@ func (r *Runner) resume(ctx context.Context, statement string) (string, error) {
 
 // resumeIndex skips a concurrent build that finished and rebuilds one
 // that left an invalid index.
-func (r *Runner) resumeIndex(ctx context.Context, index, statement string) (string, error) {
+func (r *runner) resumeIndex(ctx context.Context, index, statement string) (string, error) {
 	var valid *bool
 
 	err := r.pool.QueryRow(ctx, `SELECT indisvalid FROM pg_catalog.pg_index
@@ -113,7 +113,7 @@ func (r *Runner) resumeIndex(ctx context.Context, index, statement string) (stri
 }
 
 // resumeDetach finalizes a detach left pending and skips a finished one.
-func (r *Runner) resumeDetach(ctx context.Context, partition pair, statement string) (string, error) {
+func (r *runner) resumeDetach(ctx context.Context, partition pair, statement string) (string, error) {
 	var pending *bool
 
 	err := r.pool.QueryRow(ctx, `SELECT (SELECT inhdetachpending FROM pg_catalog.pg_inherits
@@ -133,7 +133,7 @@ func (r *Runner) resumeDetach(ctx context.Context, partition pair, statement str
 }
 
 // leftover drops the invalid index a failed concurrent build leaves.
-func (r *Runner) leftover(ctx context.Context, statement string) error {
+func (r *runner) leftover(ctx context.Context, statement string) error {
 	index, ok := concurrentIndex(statement)
 	if !ok {
 		return nil

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
+	"github.com/gopherex/ratel/migrate"
 )
 
 func TestReadAndVerify(t *testing.T) {

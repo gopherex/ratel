@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
+	"github.com/gopherex/ratel/migrate"
 )
 
 func TestSchedule(t *testing.T) {

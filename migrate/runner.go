@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"io"
+	"io/fs"
 	"math/big"
 	"slices"
 	"strings"
@@ -16,10 +16,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/gopherex/ratel/cmd/ratel/internal/config"
-	"github.com/gopherex/ratel/cmd/ratel/internal/plan"
-	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // LatestMajor is the newest PostgreSQL major version ratel supports.
@@ -34,20 +33,25 @@ const jitterSides = 2
 // ApplicationName is the application_name every step runs under.
 const ApplicationName = "ratel-migrate"
 
-// Runner errors.
+// Run errors.
 var (
 	// ErrBusy is another run holding the advisory lock of the database.
 	ErrBusy = errors.New("another ratel migrate run holds the lock of this database")
 	// ErrServer is a server whose major version a step was not planned for.
 	ErrServer = errors.New("server version does not match the plan")
-	// ErrBlocked is a step that could not take its locks within max_total_wait.
+	// ErrBlocked is a step that could not take its locks within MaxTotalWait.
 	ErrBlocked = errors.New("step blocked")
 	// ErrChanged is an applied step whose SQL changed since.
 	ErrChanged = errors.New("applied step changed")
+	// ErrUnsealed is a hand-written step without its header; ratel migrate
+	// hash writes it.
+	ErrUnsealed = errors.New("hand-written step is not sealed; run ratel migrate hash")
+	// ErrSettings is a non-positive timeout, batch size or replica lag.
+	ErrSettings = errors.New("invalid migrate settings")
 )
 
-// journal is the table recording each applied step.
-const journal = `
+// journalTable is the table recording each applied step.
+const journalTable = `
 CREATE SCHEMA IF NOT EXISTS ratel;
 CREATE TABLE IF NOT EXISTS ratel.migrations_journal (
 	step_id     text PRIMARY KEY,
@@ -60,39 +64,145 @@ CREATE TABLE IF NOT EXISTS ratel.migrations_journal (
 	resume_key  text
 )`
 
-// Runner applies migration steps to a target database under the guards of
-// docs/migrations.md.
-type Runner struct {
-	pool     *pgxpool.Pool
-	settings config.Migrate
-	report   io.Writer
+// Apply runs the pending steps of the expand and backfill phases of the
+// migrations, the directory ratel migrate plan writes with its ratel.sum,
+// file by file in name order. Deploy code that works with both schemas
+// before it, and run Contract once no code needs what contract removes.
+func Apply(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS, options ...Option) error {
+	return run(ctx, pool, migrations, configure(options), PhaseExpand, PhaseBackfill)
+}
+
+// Contract runs the pending steps of the contract phase.
+func Contract(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS, options ...Option) error {
+	return run(ctx, pool, migrations, configure(options), PhaseContract)
+}
+
+// runner applies steps under the guards of docs/migrations.md.
+type runner struct {
+	pool    *pgxpool.Pool
+	options options
 	// pause waits between attempts; jitter spreads a pause.
 	pause  func(context.Context, time.Duration) error
 	jitter func(time.Duration) time.Duration
 }
 
-// Connect opens the target pool every step runs on, its sessions named
-// ApplicationName.
-func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	settings, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		return nil, fmt.Errorf("target: %w", err)
+// run applies the phases on a pool of its own, built from the caller's
+// configuration with every session named ApplicationName, so the guards
+// tell the run's sessions from the ones it waits for.
+func run(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS, settings options, phases ...Phase) error {
+	if err := settings.settings.validate(); err != nil {
+		return err
 	}
 
-	settings.ConnConfig.RuntimeParams["application_name"] = ApplicationName
-
-	pool, err := pgxpool.NewWithConfig(ctx, settings)
+	files, err := load(migrations)
 	if err != nil {
-		return nil, fmt.Errorf("target: %w", err)
+		return err
 	}
 
-	return pool, nil
+	if err := sealed(files); err != nil {
+		return err
+	}
+
+	config := pool.Config()
+	config.ConnConfig.RuntimeParams["application_name"] = ApplicationName
+
+	own, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+
+	defer own.Close()
+
+	ctx, span := settings.tracer.Start(ctx, "ratel.migrate", trace.WithAttributes(phaseAttribute(phases)))
+	defer span.End()
+
+	err = (&runner{pool: own, options: settings, pause: sleep, jitter: spread}).apply(ctx, files, phases)
+	failed(span, err)
+
+	return err
 }
 
-// NewRunner runs steps on pool, whose connections carry ApplicationName,
-// reporting progress to report.
-func NewRunner(pool *pgxpool.Pool, settings config.Migrate, report io.Writer) *Runner {
-	return &Runner{pool: pool, settings: settings, report: report, pause: sleep, jitter: spread}
+func phaseAttribute(phases []Phase) attribute.KeyValue {
+	names := make([]string, 0, len(phases))
+	for _, phase := range phases {
+		names = append(names, string(phase))
+	}
+
+	return attribute.StringSlice("ratel.migrate.phases", names)
+}
+
+// failed marks a span with a run's failure; another run holding the lock is
+// an expected refusal, not a failure.
+func failed(span trace.Span, err error) {
+	if err == nil || errors.Is(err, ErrBusy) {
+		return
+	}
+
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+}
+
+func (s Settings) validate() error {
+	if s.LockTimeout <= 0 || s.MaxTotalWait <= 0 || s.StatementTimeout <= 0 || s.LongTxThreshold <= 0 ||
+		s.Backfill.Batch <= 0 || s.Backfill.Pause < 0 || s.Backfill.MaxReplicaLag <= 0 {
+		return ErrSettings
+	}
+
+	return nil
+}
+
+// Check verifies the migrations as Apply does before it connects: the
+// files match ratel.sum, every header reads, and every step is sealed.
+func Check(migrations fs.FS) error {
+	files, err := load(migrations)
+	if err != nil {
+		return err
+	}
+
+	return sealed(files)
+}
+
+// load reads, verifies and parses the migrations.
+func load(migrations fs.FS) ([]File, error) {
+	sources, err := Read(migrations)
+	if err != nil {
+		return nil, err
+	}
+
+	recorded, err := fs.ReadFile(migrations, SumFile)
+	if err != nil {
+		return nil, fmt.Errorf("migrations: %w", err)
+	}
+
+	if err := Verify(sources, recorded); err != nil {
+		return nil, err
+	}
+
+	files := make([]File, 0, len(sources))
+
+	for _, source := range sources {
+		file, err := Parse(source.Name, source.SQL)
+		if err != nil {
+			return nil, err
+		}
+
+		files = append(files, file)
+	}
+
+	return files, nil
+}
+
+// sealed refuses steps without the header the runner reads.
+func sealed(files []File) error {
+	for _, file := range files {
+		for index := range file.Steps {
+			if !file.Steps[index].Sealed {
+				return fmt.Errorf("%s step %s: %w", file.Name, file.Steps[index].ID, ErrUnsealed)
+			}
+		}
+	}
+
+	return nil
 }
 
 func sleep(ctx context.Context, duration time.Duration) error {
@@ -125,9 +235,9 @@ func spread(duration time.Duration) time.Duration {
 	return duration - quarter + time.Duration(offset.Int64())
 }
 
-// Apply runs the pending steps of the phases, file by file in name order,
-// holding the run's advisory lock.
-func (r *Runner) Apply(ctx context.Context, files []File, phases ...plan.Phase) error {
+// apply runs the pending steps of the phases, holding the run's advisory
+// lock.
+func (r *runner) apply(ctx context.Context, files []File, phases []Phase) error {
 	lock, err := r.lock(ctx)
 	if err != nil {
 		return err
@@ -135,7 +245,7 @@ func (r *Runner) Apply(ctx context.Context, files []File, phases ...plan.Phase) 
 
 	defer lock.Release()
 
-	if _, err := r.pool.Exec(ctx, journal); err != nil {
+	if _, err := r.pool.Exec(ctx, journalTable); err != nil {
 		return fmt.Errorf("journal: %w", err)
 	}
 
@@ -144,7 +254,7 @@ func (r *Runner) Apply(ctx context.Context, files []File, phases ...plan.Phase) 
 		return err
 	}
 
-	done, err := r.journal(ctx)
+	done, err := journal(ctx, r.pool)
 	if err != nil {
 		return err
 	}
@@ -171,8 +281,8 @@ type entry struct {
 	finished                  bool
 }
 
-func (r *Runner) journal(ctx context.Context) (map[string]entry, error) {
-	rows, err := r.pool.Query(ctx, `SELECT step_id, checksum, COALESCE(outcome, ''), finished_at IS NOT NULL,
+func journal(ctx context.Context, pool *pgxpool.Pool) (map[string]entry, error) {
+	rows, err := pool.Query(ctx, `SELECT step_id, checksum, COALESCE(outcome, ''), finished_at IS NOT NULL,
 		COALESCE(resume_key, '') FROM ratel.migrations_journal`)
 	if err != nil {
 		return nil, fmt.Errorf("journal: %w", err)
@@ -203,7 +313,7 @@ func (r *Runner) journal(ctx context.Context) (map[string]entry, error) {
 }
 
 // run applies one step unless the journal records it done.
-func (r *Runner) run(ctx context.Context, file string, step *Step, major int, recorded entry) error {
+func (r *runner) run(ctx context.Context, file string, step *Step, major int, recorded entry) error {
 	checksum := Checksum(step.Statements)
 
 	switch {
@@ -216,8 +326,23 @@ func (r *Runner) run(ctx context.Context, file string, step *Step, major int, re
 	default:
 	}
 
-	fmt.Fprintf(r.report, "%s %s %s %s\n", step.Phase, step.Class, file, step.ID)
+	ctx, span := r.options.tracer.Start(ctx, "ratel.migrate.step", trace.WithAttributes(
+		attribute.String("ratel.migrate.file", file), attribute.String("ratel.migrate.step", step.ID),
+		attribute.String("ratel.migrate.phase", string(step.Phase)),
+		attribute.String("ratel.migrate.class", string(step.Class)),
+	))
+	defer span.End()
 
+	r.options.logger.InfoContext(ctx, "migration step",
+		"phase", step.Phase, "class", step.Class, "file", file, "step", step.ID)
+
+	err := r.step(ctx, file, step, checksum, recorded)
+	failed(span, err)
+
+	return err
+}
+
+func (r *runner) step(ctx context.Context, file string, step *Step, checksum string, recorded entry) error {
 	if recorded.checksum == "" {
 		if err := r.start(ctx, file, step, checksum); err != nil {
 			return err
@@ -227,9 +352,9 @@ func (r *Runner) run(ctx context.Context, file string, step *Step, major int, re
 	var err error
 
 	switch {
-	case step.Phase == plan.Backfill:
+	case step.Phase == PhaseBackfill:
 		err = r.backfill(ctx, step, recorded.resume)
-	case step.Tx == safety.OwnStatement:
+	case step.Tx == OwnStatement:
 		err = r.long(ctx, step, recorded.checksum != "")
 	default:
 		err = r.short(ctx, step)
@@ -245,7 +370,7 @@ func Checksum(statements []string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (r *Runner) start(ctx context.Context, file string, step *Step, checksum string) error {
+func (r *runner) start(ctx context.Context, file string, step *Step, checksum string) error {
 	_, err := r.pool.Exec(ctx, `INSERT INTO ratel.migrations_journal (step_id, file, checksum, phase, started_at)
 		VALUES ($1, $2, $3, $4, now())
 		ON CONFLICT (step_id) DO UPDATE SET checksum = EXCLUDED.checksum, started_at = now(), outcome = NULL`,
@@ -259,7 +384,7 @@ func (r *Runner) start(ctx context.Context, file string, step *Step, checksum st
 
 // finish records the outcome; a failure is recorded without the step's
 // context, which may be what was canceled.
-func (r *Runner) finish(ctx context.Context, stepID string, failure error) error {
+func (r *runner) finish(ctx context.Context, stepID string, failure error) error {
 	outcome := outcomeDone
 	if failure != nil {
 		outcome = "failed"
@@ -271,7 +396,7 @@ func (r *Runner) finish(ctx context.Context, stepID string, failure error) error
 	return errors.Join(failure, err)
 }
 
-func (r *Runner) major(ctx context.Context) (int, error) {
+func (r *runner) major(ctx context.Context) (int, error) {
 	var major int
 
 	err := r.pool.QueryRow(ctx, `SELECT current_setting('server_version_num')::int / 10000`).Scan(&major)
@@ -292,7 +417,7 @@ func lockKey(database string) string {
 }
 
 // lock takes the run's session advisory lock on a dedicated connection.
-func (r *Runner) lock(ctx context.Context) (*pgxpool.Conn, error) {
+func (r *runner) lock(ctx context.Context) (*pgxpool.Conn, error) {
 	connection, err := r.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("lock: %w", err)

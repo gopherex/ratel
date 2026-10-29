@@ -5,6 +5,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
 
@@ -65,7 +67,7 @@ func TestNonBlockingLongDDL(t *testing.T) {
 
 	for _, kind := range kinds() {
 		got := safety.Assess([]safety.Operation{{Kind: kind, Relation: "app.t", Other: "app.u"}}, env)
-		if got.Tx != safety.OwnStatement {
+		if got.Tx != migrate.OwnStatement {
 			continue
 		}
 

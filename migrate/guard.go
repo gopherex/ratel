@@ -10,8 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-
-	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
 
 // lockNotAvailable is SQLSTATE 55P03, raised when lock_timeout expires.
@@ -19,22 +17,6 @@ const lockNotAvailable = "55P03"
 
 // transactionTimeout is the first major version with transaction_timeout.
 const transactionTimeout = 17
-
-// locks are the relation locks of a step: those its header records, or
-// those its operations take with every relation taken to exist.
-func locks(step *Step) []safety.RelLock {
-	if len(step.Locks) > 0 || step.Planned {
-		return step.Locks
-	}
-
-	env := safety.Env{Relations: make(map[string]safety.Relation)}
-	for _, operation := range step.Operations {
-		env.Relations[operation.Relation] = safety.Relation{}
-		env.Relations[operation.Other] = safety.Relation{}
-	}
-
-	return safety.Assess(step.Operations, env).Locks
-}
 
 // blockers are the other sessions a step would wait for: those holding a
 // lock conflicting with one it takes, and those in a transaction older than
@@ -60,17 +42,19 @@ func (s session) String() string {
 }
 
 // blocking lists the sessions a step would wait for.
-func (r *Runner) blocking(ctx context.Context, step *Step, checkLocks bool) ([]session, error) {
+func (r *runner) blocking(ctx context.Context, step *Step, checkLocks bool) ([]session, error) {
 	var relations, modes []string
 
 	if checkLocks {
-		for _, lock := range locks(step) {
+		for _, lock := range step.Locks {
 			relations = append(relations, lock.Relation)
 			modes = append(modes, conflicting(lock.Mode))
 		}
 	}
 
-	rows, err := r.pool.Query(ctx, blockers, relations, modes, ApplicationName, r.settings.LongTxThreshold.Seconds())
+	threshold := r.options.settings.LongTxThreshold.Seconds()
+
+	rows, err := r.pool.Query(ctx, blockers, relations, modes, ApplicationName, threshold)
 	if err != nil {
 		return nil, fmt.Errorf("pre-flight: %w", err)
 	}
@@ -101,10 +85,10 @@ func (r *Runner) blocking(ctx context.Context, step *Step, checkLocks bool) ([]s
 }
 
 // conflicting is the pg_locks names of the modes a mode conflicts with.
-func conflicting(mode safety.LockMode) string {
+func conflicting(mode LockMode) string {
 	var names []string
 
-	for other := safety.AccessShare; other <= safety.AccessExclusive; other++ {
+	for other := AccessShare; other <= AccessExclusive; other++ {
 		if mode.Conflicts(other) {
 			names = append(names, other.String()+"Lock")
 		}
@@ -115,8 +99,8 @@ func conflicting(mode safety.LockMode) string {
 
 // clear waits, without requesting any lock, until no session would block
 // the step, pausing on the retry schedule until the deadline.
-func (r *Runner) clear(ctx context.Context, step *Step, checkLocks bool, deadline time.Time) error {
-	attempts := schedule(r.settings.LockTimeout)
+func (r *runner) clear(ctx context.Context, step *Step, checkLocks bool, deadline time.Time) error {
+	attempts := schedule(r.options.settings.LockTimeout)
 
 	for index := 0; ; index++ {
 		found, err := r.blocking(ctx, step, checkLocks)
@@ -146,9 +130,9 @@ func blocked(found []session) error {
 // short runs a step that takes blocking locks briefly: after the pre-flight
 // it tries under a growing lock_timeout, pausing after each timeout, until
 // max_total_wait. The journal records it done in the step's transaction.
-func (r *Runner) short(ctx context.Context, step *Step) error {
-	deadline := time.Now().Add(r.settings.MaxTotalWait)
-	attempts := schedule(r.settings.LockTimeout)
+func (r *runner) short(ctx context.Context, step *Step) error {
+	deadline := time.Now().Add(r.options.settings.MaxTotalWait)
+	attempts := schedule(r.options.settings.LockTimeout)
 
 	for index := 0; ; index++ {
 		if err := r.clear(ctx, step, true, deadline); err != nil {
@@ -178,7 +162,7 @@ func (r *Runner) short(ctx context.Context, step *Step) error {
 
 // attempt runs a short step's statements in one transaction under the
 // guards, and records it done there.
-func (r *Runner) attempt(ctx context.Context, step *Step, lockTimeout time.Duration) error {
+func (r *runner) attempt(ctx context.Context, step *Step, lockTimeout time.Duration) error {
 	connection, err := r.pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
@@ -194,12 +178,12 @@ func (r *Runner) attempt(ctx context.Context, step *Step, lockTimeout time.Durat
 	return inTransaction(ctx, connection.Conn(), func(transaction pgx.Tx) error {
 		settings := []string{
 			"SET LOCAL lock_timeout = " + milliseconds(lockTimeout),
-			"SET LOCAL statement_timeout = " + milliseconds(r.settings.StatementTimeout),
+			"SET LOCAL statement_timeout = " + milliseconds(r.options.settings.StatementTimeout),
 			"SET LOCAL TimeZone = 'UTC'",
 		}
 
 		if major >= transactionTimeout {
-			total := lockTimeout + r.settings.StatementTimeout*time.Duration(len(step.Statements))
+			total := lockTimeout + r.options.settings.StatementTimeout*time.Duration(len(step.Statements))
 			settings = append(settings, "SET LOCAL transaction_timeout = "+milliseconds(total))
 		}
 
@@ -232,8 +216,8 @@ func firstLine(statement string) string {
 // long runs a step that cannot run in a transaction, statement by
 // statement without lock_timeout, after the pre-flight on old transactions.
 // A resumed step first checks what its interrupted run left.
-func (r *Runner) long(ctx context.Context, step *Step, resumed bool) error {
-	if err := r.clear(ctx, step, false, time.Now().Add(r.settings.MaxTotalWait)); err != nil {
+func (r *runner) long(ctx context.Context, step *Step, resumed bool) error {
+	if err := r.clear(ctx, step, false, time.Now().Add(r.options.settings.MaxTotalWait)); err != nil {
 		return err
 	}
 

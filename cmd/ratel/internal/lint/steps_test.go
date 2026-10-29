@@ -6,8 +6,10 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/gopherex/ratel/migrate"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/lint"
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
@@ -32,12 +34,12 @@ func target() safety.Env {
 func codes(t *testing.T, parser parse.Parser, sql string, policies map[string]bool) []string {
 	t.Helper()
 
-	file, err := migrate.Parse("1_x.sql", sql)
+	file, err := authoring.Parse(migrate.Source{Name: "1_x.sql", SQL: sql})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	migrate.Classify(&file, safety.NewClassifier(parser, target()), parser)
+	authoring.Classify(&file, safety.NewClassifier(parser, target()), parser)
 
 	findings := lint.Steps(&file, target(), policies)
 	result := make([]string, 0, len(findings))
@@ -113,19 +115,17 @@ func TestHandWrittenSteps(t *testing.T) {
 func TestPlannedSteps(t *testing.T) {
 	t.Parallel()
 
-	file := migrate.File{Name: "1_x.sql", Steps: []migrate.Step{
-		{
-			ID: "a", Planned: true, Phase: "expand", Statements: []string{"x"},
-			Operations: []safety.Operation{{Kind: safety.CreateIndex, Relation: "app.t"}},
-		},
-		{
-			ID: "b", Planned: true, Phase: "expand", Statements: []string{"x"},
-			Operations: []safety.Operation{{Kind: safety.RenameColumn, Relation: "app.t"}},
-		},
-		{
-			ID: "c", Planned: true, Phase: "contract", Statements: []string{"x"},
-			Operations: []safety.Operation{{Kind: safety.DropColumn, Relation: "app.t"}},
-		},
+	step := func(id string, phase migrate.Phase, kind safety.Kind) authoring.Step {
+		return authoring.Step{
+			Step:       migrate.Step{ID: id, Sealed: true, Phase: phase, Statements: []string{"x"}},
+			Operations: []safety.Operation{{Kind: kind, Relation: "app.t"}},
+		}
+	}
+
+	file := authoring.File{Name: "1_x.sql", Steps: []authoring.Step{
+		step("a", migrate.PhaseExpand, safety.CreateIndex),
+		step("b", migrate.PhaseExpand, safety.RenameColumn),
+		step("c", migrate.PhaseContract, safety.DropColumn),
 	}}
 
 	got := lint.Steps(&file, target(), nil)
@@ -137,13 +137,13 @@ func TestPlannedSteps(t *testing.T) {
 func BenchmarkSteps(b *testing.B) {
 	parser := newParser(b)
 
-	file, err := migrate.Parse("1_x.sql", "-- ratel:step\nALTER TABLE app.t ADD COLUMN c int;\n"+
-		"ALTER TABLE app.t VALIDATE CONSTRAINT k;\nSET lock_timeout = 0;")
+	file, err := authoring.Parse(migrate.Source{Name: "1_x.sql", SQL: "-- ratel:step\n" +
+		"ALTER TABLE app.t ADD COLUMN c int;\nALTER TABLE app.t VALIDATE CONSTRAINT k;\nSET lock_timeout = 0;"})
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	migrate.Classify(&file, safety.NewClassifier(parser, target()), parser)
+	authoring.Classify(&file, safety.NewClassifier(parser, target()), parser)
 
 	for b.Loop() {
 		lint.Steps(&file, target(), nil)

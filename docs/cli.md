@@ -12,8 +12,10 @@ One binary, `ratel`, installed with
 | `ratel generate` | `check`, then runs every configured plugin and writes their files | no |
 | `ratel dump [--format binpb\|json] [--plugin <name>]` | writes the Catalog, or the exact request for one plugin | no |
 | `ratel migrate plan <name>` | diffs the schema files against the state the existing migrations produce, then writes new planned steps | dev database |
+| `ratel migrate new <name>` | writes an empty hand-written migration file | no |
+| `ratel migrate hash` | seals hand-written steps with their classification and updates `ratel.sum` | no |
 | `ratel migrate lint [<file>...]` | runs the `RTL-*` rules over planned steps and hand-written migrations | dev database for rewrite probes |
-| `ratel migrate verify` | checks `ratel.sum` against the migrations directory | no |
+| `ratel migrate verify` | checks `ratel.sum` against the migrations directory and that every step is sealed | no |
 | `ratel migrate status --url <dsn>` | journal state: applied, pending, interrupted steps, current phase | target |
 | `ratel migrate apply --url <dsn>` | runs pending steps of the `expand` and `backfill` phases | target |
 | `ratel migrate contract --url <dsn>` | runs pending steps of the `contract` phase | target |
@@ -47,7 +49,7 @@ An existing `ratel.yaml` is never overwritten: `init` fails instead.
 Every `migrate` subcommand reads `ratel.yaml` (`--config <path>`) and the
 migrations directory, created when missing.
 
-- `plan <name>` first checks `ratel.sum`, then on the dev server applies the
+- `plan <name>` first runs `verify`, then on the dev server applies the
   existing migration files to one database and the schema files to another
   (in any order: foreign keys go last, other statements retry until their
   dependencies exist), renders both over the desired schemas and those the
@@ -55,13 +57,22 @@ migrations directory, created when missing.
   `<where> fixed|allowed|error <code>: <detail>`; with an `error` finding it
   writes nothing and exits `1`. Without changes it prints `no changes`.
   Otherwise it writes `<UTC timestamp>_<name>.sql` and the new `ratel.sum`.
+- `new <name>` writes `<UTC timestamp>_<name>.sql` holding a comment that
+  explains the hand-written format, records it in `ratel.sum` and prints
+  `wrote <file>`.
+- `hash` seals every hand-written step (see
+  [migrations.md](migrations.md#planned-files)), prints `sealed <file>` per
+  rewritten file and writes `ratel.sum`.
 - `lint [<file>...]` applies the files one by one to a dev database and
   lints each named file (all when none is named) against the state before
   it, then the desired schema.
-- `verify` checks the files against `ratel.sum`; a directory without files
-  needs no `ratel.sum`.
-- `status`, `apply`, `contract` and `drift` take `--url`. `apply` and
-  `contract` check `ratel.sum` first. `status` prints
+- `verify` runs `migrate.Check`: the files match `ratel.sum` and every step
+  is sealed; a directory without files needs no `ratel.sum`.
+- `status`, `apply`, `contract` and `drift` take `--url`. `status`, `apply`
+  and `contract` call `migrate.Status`, `migrate.Apply` and
+  `migrate.Contract` with the `migrate` settings; `apply` and `contract`
+  print `msg="migration step" phase=<phase> class=<class> file=<file>
+  step=<id>` per step started. `status` prints
   `pending|applied|interrupted|changed <phase> <file> <step>` per step.
   `drift` prints each difference as `<change kind> <key>` and exits `1` when
   there is one.

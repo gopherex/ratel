@@ -28,7 +28,7 @@ type keyColumn struct{ name, kind string }
 
 // backfill runs each UPDATE of a step in batches of the table's key order,
 // one transaction per batch, recording after each the last key it reached.
-func (r *Runner) backfill(ctx context.Context, step *Step, resume string) error {
+func (r *runner) backfill(ctx context.Context, step *Step, resume string) error {
 	var done progress
 
 	if resume != "" {
@@ -121,7 +121,7 @@ func topLevelWhere(statement string) int {
 
 // key is the batching key: the step's, or the table's primary key, with
 // the type of each column.
-func (r *Runner) key(ctx context.Context, table string, columns []string) ([]keyColumn, error) {
+func (r *runner) key(ctx context.Context, table string, columns []string) ([]keyColumn, error) {
 	rows, err := r.pool.Query(ctx, `
 SELECT quote_ident(a.attname), pg_catalog.format_type(a.atttypid, a.atttypmod)
 FROM pg_catalog.pg_attribute a
@@ -152,7 +152,7 @@ ORDER BY CASE WHEN cardinality($2::text[]) > 0 THEN array_position($2, quote_ide
 }
 
 // batches updates the rows after lower in batches until none are left.
-func (r *Runner) batches(
+func (r *runner) batches(
 	ctx context.Context, stepID string, statement int, update update, key []keyColumn, lower []string,
 ) error {
 	for {
@@ -175,7 +175,7 @@ func (r *Runner) batches(
 			return err
 		}
 
-		if err := r.pause(ctx, r.settings.Backfill.Pause); err != nil {
+		if err := r.pause(ctx, r.options.settings.Backfill.Pause); err != nil {
 			return err
 		}
 	}
@@ -212,7 +212,7 @@ func arguments(values []string) []any {
 
 // upper is the key of the last row of the next batch, or nil when the rows
 // after lower fit in one.
-func (r *Runner) upper(ctx context.Context, table string, key []keyColumn, lower []string) ([]string, error) {
+func (r *runner) upper(ctx context.Context, table string, key []keyColumn, lower []string) ([]string, error) {
 	texts := make([]string, 0, len(key))
 	for _, column := range key {
 		texts = append(texts, column.name+"::text")
@@ -224,7 +224,7 @@ func (r *Runner) upper(ctx context.Context, table string, key []keyColumn, lower
 	}
 
 	query += " ORDER BY " + strings.Trim(columns(key), "()") + " OFFSET " +
-		strconv.Itoa(r.settings.Backfill.Batch-1) + " LIMIT 1"
+		strconv.Itoa(r.options.settings.Backfill.Batch-1) + " LIMIT 1"
 
 	values := make([]string, len(key))
 	targets := make([]any, len(key))
@@ -247,7 +247,7 @@ func (r *Runner) upper(ctx context.Context, table string, key []keyColumn, lower
 
 // batch updates the rows after lower up to upper in one transaction and
 // records upper, retrying on lock timeouts like a short step.
-func (r *Runner) batch(
+func (r *runner) batch(
 	ctx context.Context, stepID string, statement int, update update, key []keyColumn, lower, upper []string,
 ) error {
 	values := append(append([]string(nil), lower...), upper...)
@@ -266,8 +266,8 @@ func (r *Runner) batch(
 		return fmt.Errorf("resume key: %w", err)
 	}
 
-	attempts := schedule(r.settings.LockTimeout)
-	deadline := time.Now().Add(r.settings.MaxTotalWait)
+	attempts := schedule(r.options.settings.LockTimeout)
+	deadline := time.Now().Add(r.options.settings.MaxTotalWait)
 
 	for index := 0; ; index++ {
 		err := r.batchOnce(ctx, stepID, query, values, string(resume), attempts[min(index, len(attempts)-1)].timeout)
@@ -283,7 +283,7 @@ func (r *Runner) batch(
 	}
 }
 
-func (r *Runner) batchOnce(ctx context.Context, stepID, query string, values []string, resume string,
+func (r *runner) batchOnce(ctx context.Context, stepID, query string, values []string, resume string,
 	lockTimeout time.Duration,
 ) error {
 	connection, err := r.pool.Acquire(ctx)
@@ -296,7 +296,7 @@ func (r *Runner) batchOnce(ctx context.Context, stepID, query string, values []s
 	return inTransaction(ctx, connection.Conn(), func(transaction pgx.Tx) error {
 		for _, setting := range []string{
 			"SET LOCAL lock_timeout = " + milliseconds(lockTimeout),
-			"SET LOCAL statement_timeout = " + milliseconds(r.settings.StatementTimeout),
+			"SET LOCAL statement_timeout = " + milliseconds(r.options.settings.StatementTimeout),
 			"SET LOCAL TimeZone = 'UTC'",
 		} {
 			if _, err := transaction.Exec(ctx, setting); err != nil {
@@ -320,7 +320,7 @@ func (r *Runner) batchOnce(ctx context.Context, stepID, query string, values []s
 
 // waitReplicas pauses while any streaming replica lags more than
 // max_replica_lag behind.
-func (r *Runner) waitReplicas(ctx context.Context) error {
+func (r *runner) waitReplicas(ctx context.Context) error {
 	for {
 		var lag float64
 
@@ -330,11 +330,11 @@ func (r *Runner) waitReplicas(ctx context.Context) error {
 			return fmt.Errorf("replica lag: %w", err)
 		}
 
-		if time.Duration(lag*float64(time.Second)) <= r.settings.Backfill.MaxReplicaLag {
+		if time.Duration(lag*float64(time.Second)) <= r.options.settings.Backfill.MaxReplicaLag {
 			return nil
 		}
 
-		if err := r.pause(ctx, max(r.settings.Backfill.Pause, r.settings.LockTimeout)); err != nil {
+		if err := r.pause(ctx, max(r.options.settings.Backfill.Pause, r.options.settings.LockTimeout)); err != nil {
 			return err
 		}
 	}

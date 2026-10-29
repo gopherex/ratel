@@ -11,12 +11,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/gopherex/ratel/migrate"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/devdb"
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/intent"
 	"github.com/gopherex/ratel/cmd/ratel/internal/introspect"
 	"github.com/gopherex/ratel/cmd/ratel/internal/lint"
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/plan"
 	"github.com/gopherex/ratel/cmd/ratel/internal/probe"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
@@ -102,11 +104,11 @@ func (s states) drop(ctx context.Context) {
 	}
 }
 
-func (w *workspace) states(ctx context.Context, server *devdb.Server, files []migrate.File) (states, error) {
+func (w *workspace) states(ctx context.Context, server *devdb.Server, files []authoring.File) (states, error) {
 	var result states
 
 	current, err := database(ctx, server, func(connection *pgx.Conn) error {
-		return migrate.ApplyDev(ctx, connection, files)
+		return authoring.ApplyDev(ctx, connection, files)
 	})
 	if err != nil {
 		return result, err
@@ -115,7 +117,7 @@ func (w *workspace) states(ctx context.Context, server *devdb.Server, files []mi
 	result.current = current
 
 	desired, err := database(ctx, server, func(connection *pgx.Conn) error {
-		return migrate.ApplySchema(ctx, connection, w.parser, w.schema)
+		return authoring.ApplySchema(ctx, connection, w.parser, w.schema)
 	})
 	if err != nil {
 		result.drop(ctx)
@@ -215,16 +217,16 @@ func (w *workspace) report(findings []lint.Finding) {
 // write saves a plan as a new migration file and records it in ratel.sum.
 func (w *workspace) write(name string, planned plan.Plan) error {
 	file := migrate.FileName(time.Now(), name)
-	contents := migrate.Write(file, planned, w.settings.Postgres.Version)
+	contents := authoring.Write(file, planned, w.settings.Postgres.Version)
 
 	if err := atomicWrite(filepath.Join(w.directory, file), contents, fileMode); err != nil {
 		return fmt.Errorf("write %s: %w", file, err)
 	}
 
-	sources := append(slices.Clone(w.sources), migrate.Source{Name: file, SQL: string(contents)})
+	w.sources = append(w.sources, migrate.Source{Name: file, SQL: string(contents)})
 
-	if err := atomicWrite(filepath.Join(w.directory, migrate.SumFile), migrate.Sum(sources), fileMode); err != nil {
-		return fmt.Errorf("write %s: %w", migrate.SumFile, err)
+	if err := w.writeSum(); err != nil {
+		return err
 	}
 
 	fmt.Fprintf(w.stdout, "wrote %s: %d steps\n", file, len(planned.Steps))
@@ -285,7 +287,7 @@ func (w *workspace) lint(ctx context.Context, selected []string) error {
 }
 
 // lintFile lints a file against the state of target before it.
-func (w *workspace) lintFile(ctx context.Context, target *pgxpool.Pool, file *migrate.File) ([]lint.Finding, error) {
+func (w *workspace) lintFile(ctx context.Context, target *pgxpool.Pool, file *authoring.File) ([]lint.Finding, error) {
 	names, err := w.namespaces(ctx, target)
 	if err != nil {
 		return nil, err
@@ -302,7 +304,7 @@ func (w *workspace) lintFile(ctx context.Context, target *pgxpool.Pool, file *mi
 	}
 
 	env.Safety.Major = w.settings.Postgres.Version
-	migrate.Classify(file, safety.NewClassifier(w.parser, env.Safety), w.parser)
+	authoring.Classify(file, safety.NewClassifier(w.parser, env.Safety), w.parser)
 
 	policies := make(map[string]bool)
 
@@ -315,7 +317,7 @@ func (w *workspace) lintFile(ctx context.Context, target *pgxpool.Pool, file *mi
 	return lint.Steps(file, env.Safety, policies), nil
 }
 
-func applyOn(ctx context.Context, pool *pgxpool.Pool, file migrate.File) error {
+func applyOn(ctx context.Context, pool *pgxpool.Pool, file authoring.File) error {
 	connection, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("dev database: %w", err)
@@ -323,7 +325,7 @@ func applyOn(ctx context.Context, pool *pgxpool.Pool, file migrate.File) error {
 
 	defer connection.Release()
 
-	return migrate.ApplyDev(ctx, connection.Conn(), []migrate.File{file})
+	return authoring.ApplyDev(ctx, connection.Conn(), []authoring.File{file})
 }
 
 // drift diffs the target against the state the migrations produce.
@@ -333,7 +335,7 @@ func (w *workspace) drift(ctx context.Context, url string) error {
 		return err
 	}
 
-	target, err := migrate.Connect(ctx, url)
+	target, err := connect(ctx, url)
 	if err != nil {
 		return err
 	}
@@ -342,7 +344,7 @@ func (w *workspace) drift(ctx context.Context, url string) error {
 
 	return w.withDev(ctx, func(server *devdb.Server) error {
 		expected, err := database(ctx, server, func(connection *pgx.Conn) error {
-			return migrate.ApplyDev(ctx, connection, files)
+			return authoring.ApplyDev(ctx, connection, files)
 		})
 		if err != nil {
 			return err

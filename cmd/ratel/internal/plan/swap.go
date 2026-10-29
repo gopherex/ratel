@@ -3,6 +3,8 @@ package plan
 import (
 	"strings"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/introspect"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
@@ -64,14 +66,15 @@ func (p *planner) swap(change *diff.Change, using string, dependents []introspec
 	expression := replaceIdentifier(using, column, "NEW."+column)
 	sync := p.sync(table, temporary, "NEW."+temporary+" := "+expression+";")
 
-	p.add(change, Expand, Short, append(p.newColumn(table, temporary, &desired), sync.create...)...)
+	p.add(change, migrate.PhaseExpand, migrate.ClassShort,
+		append(p.newColumn(table, temporary, &desired), sync.create...)...)
 	p.backfill(change, &Fill{
 		Table: table, Key: key, Set: temporary + " = " + using,
 		Where: temporary + " IS NULL AND " + column + " IS NOT NULL",
 	})
 
 	if desired.NotNull != "" {
-		p.notNull(change, table, temporary, " NOT NULL", Expand)
+		p.notNull(change, table, temporary, " NOT NULL", migrate.PhaseExpand)
 	}
 
 	swap := append([]Statement(nil), sync.drop...)
@@ -93,7 +96,7 @@ func (p *planner) swap(change *diff.Change, using string, dependents []introspec
 			safety.RenameConstraint, table, ""))
 	}
 
-	p.add(change, Contract, Short, append(swap, after...)...)
+	p.add(change, migrate.PhaseContract, migrate.ClassShort, append(swap, after...)...)
 }
 
 // copies builds, beside the old column, a copy of each index and constraint

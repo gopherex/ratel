@@ -4,8 +4,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
-	"github.com/gopherex/ratel/cmd/ratel/internal/plan"
+	"github.com/gopherex/ratel/migrate"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
 
@@ -18,7 +19,7 @@ const sameTransactionEnum = 17
 // A planned step is checked for its structure and for breaking changes in
 // expand, the planner having answered for its recipe; a hand-written step
 // also for every code its statements carry.
-func Steps(file *migrate.File, env safety.Env, policies map[string]bool) []Finding {
+func Steps(file *authoring.File, env safety.Env, policies map[string]bool) []Finding {
 	var findings []Finding
 
 	env.Created = make(map[string]bool)
@@ -32,7 +33,7 @@ func Steps(file *migrate.File, env safety.Env, policies map[string]bool) []Findi
 		var codes []string
 
 		for _, code := range assessed.Reasons {
-			if !step.Planned || step.Phase == plan.Expand && assessed.Compat == safety.Breaking &&
+			if !step.Planned() || step.Phase == migrate.PhaseExpand && assessed.Compat == safety.Breaking &&
 				strings.HasPrefix(code, "RTL-C") {
 				codes = append(codes, code)
 			}
@@ -40,7 +41,7 @@ func Steps(file *migrate.File, env safety.Env, policies map[string]bool) []Findi
 
 		codes = append(codes, structure(step, assessed, env)...)
 
-		if !step.Planned {
+		if !step.Planned() {
 			codes = append(codes, handWritten(step, env, policies)...)
 		}
 
@@ -68,7 +69,7 @@ func maps(policies map[string]bool) map[string]bool {
 }
 
 // track records what a step creates for the steps after it.
-func track(step *migrate.Step, env safety.Env, policies map[string]bool) {
+func track(step *authoring.Step, env safety.Env, policies map[string]bool) {
 	for _, operation := range step.Operations {
 		switch operation.Kind {
 		case safety.CreateTable, safety.CreateView, safety.CreateSequence:
@@ -83,10 +84,10 @@ func track(step *migrate.Step, env safety.Env, policies map[string]bool) {
 }
 
 // structure checks how a step's statements share a transaction.
-func structure(step *migrate.Step, assessed safety.Safety, env safety.Env) []string {
+func structure(step *authoring.Step, assessed safety.Safety, env safety.Env) []string {
 	var codes []string
 
-	if assessed.Tx == safety.OwnStatement && len(step.Statements) > 1 {
+	if assessed.Tx == migrate.OwnStatement && len(step.Statements) > 1 {
 		codes = append(codes, "RTL-T01")
 	}
 
@@ -107,7 +108,7 @@ func structure(step *migrate.Step, assessed safety.Safety, env safety.Env) []str
 		codes = append(codes, "RTL-T05")
 	}
 
-	if step.Class == plan.Long && blocking > 0 {
+	if step.Class == migrate.ClassLong && blocking > 0 {
 		codes = append(codes, "RTL-L01")
 	}
 
@@ -132,7 +133,7 @@ func setsTimeout(statement string) bool {
 // handWritten checks what only hand-written SQL can get wrong: slow work
 // after an exclusive lock, timeouts overriding the guards, and row security
 // enabled before any policy.
-func handWritten(step *migrate.Step, env safety.Env, policies map[string]bool) []string {
+func handWritten(step *authoring.Step, env safety.Env, policies map[string]bool) []string {
 	var codes []string
 
 	locked := false

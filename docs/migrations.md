@@ -190,9 +190,9 @@ A plan has up to three phases, recorded per step:
 - **contract** removes and tightens: drops of old columns, tables, triggers,
   `SET NOT NULL`, validations that old code could violate.
 
-`ratel migrate apply` runs expand and backfill. `ratel migrate contract` runs
-contract; it is a separate command because only the operator knows when old
-application versions are gone. Changes are placed by `Compat`: `Safe` goes to
+`ratel migrate apply` and `migrate.Apply` run expand and backfill;
+`ratel migrate contract` and `migrate.Contract` run contract, separately,
+because only the operator knows when old application versions are gone. Changes are placed by `Compat`: `Safe` goes to
 expand; `Breaking` and every change with `Destroys != None` go to contract;
 `Conditional` (constraint tightening that existing rows or old code may
 violate) goes to contract, with its `NOT VALID` part in expand when the recipe
@@ -217,25 +217,75 @@ CREATE INDEX CONCURRENTLY orders_user_id_idx ON app.orders (user_id);
 - A step id is the hash of the file name and the step's normalized SQL.
 - Header fields: `id`; `phase` (`expand`, `backfill`, `contract`); `tx`
   (`in`, or `own` for a statement that cannot run in a transaction);
-  `class` (`short`, `long`, `backfill`); `locks` (relation and mode, as
-  `Safety` gives them); `pg` (the `postgres.version` planned for); `allow`
-  (copied lint codes); `ops` (each operation as
-  `kind:relation:other:rewrite`, so a step is assessed again without parsing
-  its SQL, which may use syntax newer than the parser's grammar); `key` (the
-  batching key of a backfill). Names in `locks`, `ops` and `key` are
-  URL-query escaped.
+  `class` (`short`, `long`, `backfill`); `by` (`hand` on a sealed
+  hand-written step); `locks` (relation and mode, as `Safety` gives them);
+  `pg` (the `postgres.version` planned for); `allow` (copied lint codes);
+  `ops` (each operation as `kind:relation:other:rewrite`, so a step is
+  assessed again without parsing its SQL, which may use syntax newer than the
+  parser's grammar); `key` (the batching key of a backfill). Names in
+  `locks`, `ops` and `key` are URL-query escaped.
 - Statements are separated by `;` outside quotes, quoted identifiers,
-  dollar quotes and comments; splitting needs no parser.
-- A hand-written file may use headers without an `id`: a header starts a
-  step holding the statements up to the next one, with the given fields. A
-  statement outside any header is a step of its own in expand. Hand-written
-  steps are classified from their parse tree; a statement the parser cannot
-  read is assessed as the worst case.
+  dollar quotes, escape strings and nested comments, as the PostgreSQL lexer
+  separates them; splitting needs no parser.
+- A step whose header carries an `id` is **sealed**: the header records
+  everything the runner needs, so applying needs no parser.
+- `ratel migrate new <name>` writes an empty hand-written file with the same
+  name scheme and records it in `ratel.sum`. In a hand-written file a header
+  without an `id` starts a step holding the statements up to the next
+  header, with the given fields; a statement outside any header is a step of
+  its own in expand. `ratel migrate hash` classifies every hand-written step
+  from its parse tree (a statement the parser cannot read is assessed as the
+  worst case), writes its sealed header with `by=hand` in place, leaving the
+  statements and comments as they are, and updates `ratel.sum`. A sealed
+  hand-written step is classified again on every lint and hash: its id
+  follows its statements.
+- `ratel migrate verify`, `ratel migrate plan`, `migrate.Check` and every run
+  refuse a directory that does not match `ratel.sum` or holds an unsealed
+  step.
 - A step header carries every `@ratel.allow` that the planner copied from the
   schema object that caused the step. In hand-written files, `@ratel.allow`
-  is written in the comment directly before the statement.
+  is written in the comment directly before the statement; sealing copies
+  it into the header.
 - There are no down migrations. Going back is a forward plan to an earlier
   schema, through the same assessment and lint.
+
+## Applying from an application
+
+The runner is package `github.com/gopherex/ratel/migrate` in the runtime
+module; it needs pgx and nothing of the CLI. An application embeds its
+migrations directory with its `ratel.sum` and applies it on startup:
+
+```go
+//go:embed migrations
+var migrations embed.FS
+
+directory, err := fs.Sub(migrations, "migrations")
+if err != nil {
+	return err
+}
+
+if err := migrate.Apply(ctx, pool, directory); err != nil {
+	return err
+}
+```
+
+- `migrate.Apply` runs expand and backfill, `migrate.Contract` the contract
+  phase, `migrate.Status` lists every step with its journal state and
+  `migrate.Check` verifies a directory without a database. `ratel migrate
+  apply`, `contract` and `status` call the same functions.
+- A run uses a pool of its own, built from the caller's pool configuration
+  with `application_name = 'ratel-migrate'`, and closes it when done.
+- `migrate.WithSettings` replaces `migrate.DefaultSettings()`: lock timeout
+  100ms, max total wait 10m, statement timeout 5s, long transaction threshold
+  1m, backfill batch 1000, pause 50ms, max replica lag 10s; the CLI passes the
+  `migrate` section of `ratel.yaml`. A non-positive value fails with
+  `ErrSettings`.
+- `migrate.WithLogger` receives one record per step started (phase, class,
+  file, step); `migrate.WithTracerProvider` selects the provider of the run
+  span `ratel.migrate` and the step spans `ratel.migrate.step`. Another run
+  holding the lock (`ErrBusy`) is not a span error.
+- Errors: `ErrSum`, `ErrHeader`, `ErrUnsealed` (the directory), `ErrBusy`,
+  `ErrServer`, `ErrBlocked`, `ErrChanged`, `ErrBackfill` (a step).
 
 ## Apply guards
 

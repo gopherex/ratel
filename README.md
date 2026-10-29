@@ -36,6 +36,7 @@ queries/*.sql ─┘                │
 
 ```
 *.go                    runtime package ratel (module github.com/gopherex/ratel)
+migrate/                migration runner for applications and the CLI
 rateltest/              test helpers for applications (own module)
 cmd/ratel/              host CLI (own module)
   internal/parse        libpg_query (WASM) parser, one shared bound
@@ -48,7 +49,7 @@ cmd/ratel/              host CLI (own module)
   internal/plan         safe recipes and phases
   internal/probe        rewrite probes and dependencies on the dev database
   internal/lint         RTL-* rules
-  internal/migrate      step files, ratel.sum, dev apply, the runner
+  internal/authoring    planned and sealed step files, dev apply
   internal/cli          the commands
   tests/                integration suites (build tag `integration`)
 cmd/protoc-gen-ratel/   proto frontend: .proto options to schema DDL (own module)

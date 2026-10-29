@@ -6,7 +6,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
+	"github.com/gopherex/ratel/migrate"
 )
 
 func TestSplit(t *testing.T) {
@@ -60,10 +60,32 @@ func TestSplit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if difference := cmp.Diff(tc.want, migrate.Split(tc.sql), cmpopts.EquateEmpty()); difference != "" {
+			got := migrate.Split(tc.sql)
+			if difference := cmp.Diff(tc.want, got, cmpopts.EquateEmpty(),
+				cmpopts.IgnoreFields(migrate.Piece{}, "Start")); difference != "" {
 				t.Errorf("split() (-want +got):\n%s", difference)
 			}
 		})
+	}
+}
+
+// TestSplitStart checks the offsets: a comment at its dashes, a statement at
+// its first byte after the whitespace before it.
+func TestSplitStart(t *testing.T) {
+	t.Parallel()
+
+	sql := "-- a\n  SELECT 1;\n\n  -- b\nSELECT 2"
+	got := migrate.Split(sql)
+	want := []int{0, 7, 20, 25}
+
+	if len(got) != len(want) {
+		t.Fatalf("split() = %+v", got)
+	}
+
+	for index, piece := range got {
+		if piece.Start != want[index] {
+			t.Errorf("piece %q starts at %d, want %d", piece.Text, piece.Start, want[index])
+		}
 	}
 }
 

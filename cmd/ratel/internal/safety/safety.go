@@ -13,83 +13,9 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+
+	"github.com/gopherex/ratel/migrate"
 )
-
-// LockMode is a PostgreSQL table lock mode, weakest first.
-type LockMode int
-
-// Lock modes in the order of pg_locks conflicts.
-const (
-	NoLock LockMode = iota
-	AccessShare
-	RowShare
-	RowExclusive
-	ShareUpdateExclusive
-	Share
-	ShareRowExclusive
-	Exclusive
-	AccessExclusive
-)
-
-// String is the mode as pg_locks names it without the "Lock" suffix.
-func (m LockMode) String() string {
-	switch m {
-	case AccessShare:
-		return "AccessShare"
-	case RowShare:
-		return "RowShare"
-	case RowExclusive:
-		return "RowExclusive"
-	case ShareUpdateExclusive:
-		return "ShareUpdateExclusive"
-	case Share:
-		return "Share"
-	case ShareRowExclusive:
-		return "ShareRowExclusive"
-	case Exclusive:
-		return "Exclusive"
-	case AccessExclusive:
-		return "AccessExclusive"
-	default:
-		return "None"
-	}
-}
-
-// Blocks reports whether the mode blocks ordinary reads or writes: anything
-// stronger than ShareUpdateExclusive conflicts with RowExclusive.
-func (m LockMode) Blocks() bool { return m > ShareUpdateExclusive }
-
-// Conflicts reports whether two modes cannot be held on one relation by two
-// transactions, by PostgreSQL's table-level lock conflict table.
-func (m LockMode) Conflicts(other LockMode) bool {
-	if m == NoLock || other == NoLock {
-		return false
-	}
-
-	low, high := min(m, other), max(m, other)
-
-	switch low {
-	case AccessShare:
-		return high == AccessExclusive
-	case RowShare:
-		return high >= Exclusive
-	case RowExclusive:
-		return high >= Share
-	case ShareUpdateExclusive:
-		return high >= ShareUpdateExclusive
-	case Share:
-		return high != Share
-	default:
-		// ShareRowExclusive and stronger conflict with themselves and above.
-		return true
-	}
-}
-
-// RelLock is a lock on one relation.
-type RelLock struct {
-	Relation string // "schema.name"
-	Mode     LockMode
-}
 
 // Effect is the heaviest work a statement does under its locks.
 type Effect int
@@ -115,15 +41,6 @@ func (e Effect) String() string {
 	}
 }
 
-// TxMode is whether a statement can run inside a transaction.
-type TxMode int
-
-// Transaction modes.
-const (
-	InTx TxMode = iota
-	OwnStatement
-)
-
 // Destroys is what a statement removes irrecoverably.
 type Destroys int
 
@@ -146,9 +63,9 @@ const (
 
 // Safety is the assessment of one statement.
 type Safety struct {
-	Locks    []RelLock // strictest first, one per relation
+	Locks    []migrate.RelLock // strictest first, one per relation
 	Effect   Effect
-	Tx       TxMode
+	Tx       migrate.TxMode
 	Destroys Destroys
 	Compat   Compat
 	Reasons  []string // lint codes behind Effect, Destroys and Compat, in rule order
@@ -185,7 +102,7 @@ func (e Env) Exists(relation string) bool {
 func Assess(operations []Operation, env Env) Safety {
 	var result Safety
 
-	modes := make(map[string]LockMode)
+	modes := make(map[string]migrate.LockMode)
 
 	for index := range operations {
 		operation := &operations[index]
@@ -197,7 +114,7 @@ func Assess(operations []Operation, env Env) Safety {
 		}
 
 		for _, lock := range entry.locks(*operation) {
-			if lock.Relation != "" && lock.Mode != NoLock && env.Exists(lock.Relation) {
+			if lock.Relation != "" && lock.Mode != migrate.NoLock && env.Exists(lock.Relation) {
 				modes[lock.Relation] = max(modes[lock.Relation], lock.Mode)
 			}
 		}
@@ -212,8 +129,8 @@ func Assess(operations []Operation, env Env) Safety {
 		result.Compat = max(result.Compat, entry.compat)
 		result.Waits = result.Waits || entry.waits
 
-		if entry.tx == OwnStatement {
-			result.Tx = OwnStatement
+		if entry.tx == migrate.OwnStatement {
+			result.Tx = migrate.OwnStatement
 		}
 
 		for _, code := range entry.codes {
@@ -224,10 +141,10 @@ func Assess(operations []Operation, env Env) Safety {
 	}
 
 	for relation, mode := range modes {
-		result.Locks = append(result.Locks, RelLock{Relation: relation, Mode: mode})
+		result.Locks = append(result.Locks, migrate.RelLock{Relation: relation, Mode: mode})
 	}
 
-	slices.SortFunc(result.Locks, func(a, b RelLock) int {
+	slices.SortFunc(result.Locks, func(a, b migrate.RelLock) int {
 		return cmp.Or(cmp.Compare(b.Mode, a.Mode), cmp.Compare(a.Relation, b.Relation))
 	})
 	slices.Sort(result.Reasons)

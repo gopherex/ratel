@@ -11,14 +11,14 @@ import (
 	"path/filepath"
 
 	"github.com/gopherex/ratel/ir"
+	"github.com/gopherex/ratel/migrate"
 
+	"github.com/gopherex/ratel/cmd/ratel/internal/authoring"
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
 	"github.com/gopherex/ratel/cmd/ratel/internal/ident"
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
-	"github.com/gopherex/ratel/cmd/ratel/internal/plan"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
 
@@ -33,6 +33,7 @@ var (
 // Subcommands that take operands.
 const (
 	planCommand = "plan"
+	newCommand  = "new"
 	lintCommand = "lint"
 )
 
@@ -56,7 +57,7 @@ type arguments struct {
 }
 
 // migrateUsage names the subcommands.
-const migrateUsage = "usage: ratel migrate plan <name> | lint [<file>...] | verify | " +
+const migrateUsage = "usage: ratel migrate plan <name> | new <name> | hash | lint [<file>...] | verify | " +
 	"status --url <dsn> | apply --url <dsn> | contract --url <dsn> | drift --url <dsn>"
 
 // migrateCommand runs one migrate subcommand.
@@ -101,14 +102,15 @@ func migrateFlags(args []string, stderr io.Writer) (arguments, bool) {
 
 	parsed := arguments{command: args[0], config: *configPath, url: *url, operands: flags.Args()}
 	needsURL, known := map[string]bool{
-		"status": true, "apply": true, "contract": true, "drift": true, planCommand: false, lintCommand: false,
-		"verify": false,
+		"status": true, "apply": true, "contract": true, "drift": true, planCommand: false, newCommand: false,
+		"hash": false, lintCommand: false, "verify": false,
 	}[parsed.command]
+	named := parsed.command == planCommand || parsed.command == newCommand
 
 	switch {
 	case !known,
-		parsed.command == planCommand && len(parsed.operands) != 1,
-		parsed.command != planCommand && parsed.command != lintCommand && len(parsed.operands) != 0,
+		named && len(parsed.operands) != 1,
+		!named && parsed.command != lintCommand && len(parsed.operands) != 0,
 		needsURL != (parsed.url != ""):
 		fmt.Fprintln(stderr, migrateUsage)
 
@@ -175,14 +177,18 @@ func (w *workspace) run(ctx context.Context, parsed arguments) error {
 		return w.verify()
 	case planCommand:
 		return w.plan(ctx, parsed.operands[0])
+	case newCommand:
+		return w.create(parsed.operands[0])
+	case "hash":
+		return w.hash()
 	case lintCommand:
 		return w.lint(ctx, parsed.operands)
 	case "status":
 		return w.status(ctx, parsed.url)
 	case "apply":
-		return w.apply(ctx, parsed.url, plan.Expand, plan.Backfill)
+		return w.apply(ctx, parsed.url, migrate.Apply)
 	case "contract":
-		return w.apply(ctx, parsed.url, plan.Contract)
+		return w.apply(ctx, parsed.url, migrate.Contract)
 	case "drift":
 		return w.drift(ctx, parsed.url)
 	default:
@@ -190,33 +196,29 @@ func (w *workspace) run(ctx context.Context, parsed arguments) error {
 	}
 }
 
-// verify checks the migration files against ratel.sum; a directory without
-// files needs none.
+// verify checks what apply checks: the migration files against ratel.sum
+// and every step sealed. A directory without files needs no ratel.sum.
 func (w *workspace) verify() error {
-	recorded, err := os.ReadFile(filepath.Join(w.directory, migrate.SumFile))
+	_, err := os.Stat(filepath.Join(w.directory, migrate.SumFile))
 	if errors.Is(err, os.ErrNotExist) && len(w.sources) == 0 {
 		return nil
 	}
 
-	if err != nil {
-		return fmt.Errorf("%s: %w", migrate.SumFile, err)
-	}
-
-	return migrate.Verify(w.sources, recorded)
+	return migrate.Check(os.DirFS(w.directory))
 }
 
 // files parses and classifies the migration files.
-func (w *workspace) files() ([]migrate.File, error) {
+func (w *workspace) files() ([]authoring.File, error) {
 	classifier := safety.NewClassifier(w.parser, safety.Env{})
-	files := make([]migrate.File, 0, len(w.sources))
+	files := make([]authoring.File, 0, len(w.sources))
 
 	for _, source := range w.sources {
-		file, err := migrate.Parse(source.Name, source.SQL)
+		file, err := authoring.Parse(source)
 		if err != nil {
 			return nil, err
 		}
 
-		migrate.Classify(&file, classifier, w.parser)
+		authoring.Classify(&file, classifier, w.parser)
 		files = append(files, file)
 	}
 

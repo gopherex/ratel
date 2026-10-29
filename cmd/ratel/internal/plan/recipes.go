@@ -3,6 +3,8 @@ package plan
 import (
 	"strings"
 
+	"github.com/gopherex/ratel/migrate"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/diff"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
 )
@@ -27,16 +29,16 @@ func (p *planner) object(change *diff.Change) bool {
 		p.short(change, statement(change.SQL, kind, "", ""))
 	case change.Kind == diff.RenameEnumValue:
 		// Renamed by intent, before the values added next to it.
-		p.add(change, Expand, Short, statement(change.SQL, safety.RenameEnumValue, "", ""))
+		p.add(change, migrate.PhaseExpand, migrate.ClassShort, statement(change.SQL, safety.RenameEnumValue, "", ""))
 		p.steps[len(p.steps)-1].Allow = append(p.steps[len(p.steps)-1].Allow, "RTL-C01")
 	case change.Kind == diff.RenameType:
 		// Renamed by intent and first: later changes name the new type.
-		p.add(change, Expand, Short, statement(change.SQL, safety.RenameType, "", ""))
+		p.add(change, migrate.PhaseExpand, migrate.ClassShort, statement(change.SQL, safety.RenameType, "", ""))
 		p.steps[len(p.steps)-1].Allow = append(p.steps[len(p.steps)-1].Allow, "RTL-C01")
 		p.env.Current = diff.Requalified(p.env.Current, nameOf(change.Before), nameOf(change.Key))
 	case change.Kind == diff.AddEnumValue:
 		// A value is usable only after its transaction commits: its own step.
-		p.add(change, Expand, Short, statement(change.SQL, safety.AddEnumValue, "", ""))
+		p.add(change, migrate.PhaseExpand, migrate.ClassShort, statement(change.SQL, safety.AddEnumValue, "", ""))
 	case change.Kind == diff.RemoveEnumValue:
 		p.unsafe(change, "RTL-D05", "PostgreSQL cannot drop or reorder enum values; write a hand-written migration")
 	case change.Kind == diff.SetDomainNotNull:
@@ -46,10 +48,12 @@ func (p *planner) object(change *diff.Change) bool {
 		domain, _, _ := strings.Cut(strings.TrimPrefix(change.SQL, "ALTER DOMAIN "), " ")
 		name := checkName(change.SQL, " ADD CONSTRAINT ")
 
-		p.add(change, Expand, Short, statement(strings.TrimSuffix(change.SQL, ";")+" NOT VALID;",
-			safety.DomainCheckNotValid, "", ""))
-		p.add(change, Contract, Long, statement("ALTER DOMAIN "+domain+" VALIDATE CONSTRAINT "+name+";",
-			safety.DomainValidate, "", ""))
+		p.add(change, migrate.PhaseExpand, migrate.ClassShort,
+			statement(strings.TrimSuffix(change.SQL, ";")+" NOT VALID;",
+				safety.DomainCheckNotValid, "", ""))
+		p.add(change, migrate.PhaseContract, migrate.ClassLong,
+			statement("ALTER DOMAIN "+domain+" VALIDATE CONSTRAINT "+name+";",
+				safety.DomainValidate, "", ""))
 	case change.Kind == diff.CreateSequence, change.Kind == diff.AlterSequence, change.Kind == diff.DropSequence:
 		p.short(change, statement(change.SQL, sequenceKind(change.Kind), nameOf(change.Key), ""))
 	default:
@@ -150,7 +154,7 @@ func (p *planner) relation(change *diff.Change) {
 func (p *planner) renameTable(change *diff.Change) {
 	from, target := change.Table, nameOf(change.Key)
 
-	p.add(change, Expand, Short, statement(change.SQL, safety.RenameTable, from, ""))
+	p.add(change, migrate.PhaseExpand, migrate.ClassShort, statement(change.SQL, safety.RenameTable, from, ""))
 	p.steps[len(p.steps)-1].Allow = append(p.steps[len(p.steps)-1].Allow, "RTL-C01")
 
 	// The planner reads the current state under the new name; both names

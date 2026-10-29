@@ -3,7 +3,7 @@ package migrate_test
 import (
 	"testing"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
+	"github.com/gopherex/ratel/migrate"
 )
 
 func TestConcurrentIndex(t *testing.T) {

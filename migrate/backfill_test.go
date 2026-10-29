@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/migrate"
+	"github.com/gopherex/ratel/migrate"
 )
 
 func TestSplitUpdate(t *testing.T) {

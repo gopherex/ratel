@@ -174,7 +174,48 @@ func TestMigrateCommands(t *testing.T) {
 		t.Fatalf("drift = %+v", drift)
 	}
 
+	checkHandWritten(t, proj, target, url)
 	checkTamper(t, proj)
+}
+
+// checkHandWritten writes a migration by hand: new creates it, verify and
+// apply refuse it until hash seals it.
+func checkHandWritten(t *testing.T, proj project, target *pgxpool.Pool, url string) {
+	t.Helper()
+
+	created := proj.must("new", "lower_emails")
+
+	name, ok := strings.CutPrefix(strings.TrimSpace(created), "wrote ")
+	if !ok {
+		t.Fatalf("new = %q", created)
+	}
+
+	path := filepath.Join(proj.root, "migrations", name)
+
+	template, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	write(t, path, string(template)+"-- ratel:step phase=backfill\nUPDATE app.users SET email = upper(email);\n")
+
+	if verify := proj.ratel("verify"); verify.code != 1 || !strings.Contains(verify.output, "ratel.sum") {
+		t.Fatalf("verify of an edited file = %+v", verify)
+	}
+
+	if sealed := proj.must("hash"); !strings.Contains(sealed, "sealed "+name) {
+		t.Fatalf("hash = %q", sealed)
+	}
+
+	proj.must("verify")
+	proj.must("apply", "--url", url)
+
+	var upper bool
+
+	err = target.QueryRow(t.Context(), `SELECT bool_and(email = upper(email)) FROM app.users`).Scan(&upper)
+	if err != nil || !upper {
+		t.Fatalf("hand-written backfill: %v, %v", upper, err)
+	}
 }
 
 // checkTamper edits a planned file and adds a hand-written one breaking a
