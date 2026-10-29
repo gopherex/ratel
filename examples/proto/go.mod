@@ -3,7 +3,7 @@ module github.com/gopherex/ratel/examples/proto
 go 1.27.3
 
 require (
-	github.com/gopherex/ratel v0.0.0-20261029170419-b0513b3c50d3
+	github.com/gopherex/ratel v0.1.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0

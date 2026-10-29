@@ -6,7 +6,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-cmp v0.7.0
-	github.com/gopherex/ratel v0.0.0-20261029134138-0f0f137cd0a4
+	github.com/gopherex/ratel v0.1.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jinzhu/inflection v1.0.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.2

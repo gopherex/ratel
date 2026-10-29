@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/bufbuild/protocompile v0.14.1
-	github.com/gopherex/ratel v0.0.0-20261028115519-e8cad066ce54
+	github.com/gopherex/ratel v0.1.0
 	github.com/wasilibs/go-pgquery v0.0.0-20260519030130-725a785941e3
 	google.golang.org/protobuf v1.36.12
 )

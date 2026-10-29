@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	entgo.io/ent v0.14.6
-	github.com/gopherex/ratel v0.0.0-20261028224306-c67372024363
+	github.com/gopherex/ratel v0.1.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
