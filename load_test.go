@@ -9,8 +9,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/gopherex/ratel"
 )
@@ -407,34 +405,33 @@ func TestLoadDeepFailurePreservesExisting(t *testing.T) {
 	}
 }
 
-func TestLoadTelemetry(t *testing.T) {
+// TestLoadOutcomes checks that a technical failure, including one closing
+// the batch after a cardinality refusal, reaches the caller.
+func TestLoadOutcomes(t *testing.T) {
 	t.Parallel()
 
-	failure := errors.New("sensitive driver failure")
+	failure := errors.New("driver failure")
 	for _, tc := range []struct {
 		name         string
 		values       [][]any
 		failure      error
 		closeFailure error
 		want         error
-		status       codes.Code
 	}{
-		{name: "success", values: [][]any{{1, int64(11), int64(1)}}, status: codes.Unset},
-		{name: "technical", failure: failure, want: failure, status: codes.Error},
+		{name: "success", values: [][]any{{1, int64(11), int64(1)}}},
+		{name: "technical", failure: failure, want: failure},
 		{
 			name: "cardinality refusal", values: [][]any{{1, int64(11), int64(1)}, {1, int64(12), int64(1)}},
-			want: ratel.ErrMultipleRows, status: codes.Unset,
+			want: ratel.ErrMultipleRows,
 		},
 		{
 			name: "refusal followed by technical close", values: [][]any{{1, int64(11), int64(1)}, {1, int64(12), int64(1)}},
-			closeFailure: failure, want: failure, status: codes.Error,
+			closeFailure: failure, want: failure,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			var spans []*observedSpan
-			provider := observedProvider{TracerProvider: noop.NewTracerProvider(), spans: &spans}
 			_, orders := relationDescriptors()
 			relation := ratel.NewRel(orders, ratel.RelOne, []ratel.RelKey[relationUser]{
 				{
@@ -455,37 +452,11 @@ func TestLoadTelemetry(t *testing.T) {
 				}
 			}}
 
-			err := ratel.New(executor, ratel.WithTracerProvider(provider)).Load(t.Context(), []relationUser{{ID: 1}}, relation)
-			if !errors.Is(err, tc.want) {
-				t.Fatal(err)
+			err := ratel.New(executor).Load(t.Context(), []relationUser{{ID: 1}}, relation)
+			if !errors.Is(err, tc.want) || tc.want == nil && err != nil {
+				t.Fatalf("Load() = %v, want %v", err, tc.want)
 			}
-
-			if len(spans) != 2 {
-				t.Fatalf("spans=%d", len(spans))
-			}
-
-			assertLoadSpanStatus(t, spans, tc.status)
 		})
-	}
-}
-
-func assertLoadSpanStatus(t *testing.T, spans []*observedSpan, status codes.Code) {
-	t.Helper()
-
-	for _, span := range spans {
-		if !span.ended || span.status != status {
-			t.Fatalf("ended=%v status=%v", span.ended, span.status)
-		}
-
-		attributes := make(map[string]string)
-		for _, attribute := range span.attributes {
-			attributes[string(attribute.Key)] = attribute.Value.AsString()
-		}
-
-		expected := map[string]string{"db.system.name": "postgresql", "db.operation.name": "SELECT"}
-		if !reflect.DeepEqual(attributes, expected) {
-			t.Fatalf("database span attributes: %v", attributes)
-		}
 	}
 }
 

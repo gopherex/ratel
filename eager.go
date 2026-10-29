@@ -70,17 +70,12 @@ func (q EagerSelect[M]) List(ctx context.Context, options ...CallOption) ([]M, e
 		return nil, err
 	}
 
-	ctx, span := q.query.db.tracer.Start(ctx, "ratel.select.with", q.query.spanOptions()...)
-	defer span.End()
-
 	models, err := q.query.List(ctx, options...)
 	if err == nil {
 		err = q.loadModels(ctx, models)
 	}
 
 	if err != nil {
-		recordFailure(span, err)
-
 		return nil, err
 	}
 
@@ -124,17 +119,12 @@ func (q EagerSelect[M]) single(ctx context.Context, limit int, options []CallOpt
 		return zero, err
 	}
 
-	ctx, span := q.query.db.tracer.Start(ctx, "ratel.select.with.single", q.query.spanOptions()...)
-	defer span.End()
-
 	if !q.query.verbatim() && (!q.query.limit.Set || q.query.limit.V > limit) {
 		q.query = q.query.Limit(limit)
 	}
 	// Check cardinality before loading children, so invalid One results do no eager I/O.
-	models, err := q.query.collect(ctx, "ratel.select.parents", limit, options)
+	models, err := q.query.collect(ctx, limit, options)
 	if err != nil {
-		recordFailure(span, err)
-
 		return zero, err
 	}
 
@@ -147,8 +137,6 @@ func (q EagerSelect[M]) single(ctx context.Context, limit int, options []CallOpt
 	}
 
 	if err := q.loadModels(ctx, models); err != nil {
-		recordFailure(span, err)
-
 		return zero, err
 	}
 
@@ -165,16 +153,12 @@ func (q EagerSelect[M]) Chunks(ctx context.Context, size int, options ...CallOpt
 			return
 		}
 
-		ctx, span := q.query.db.tracer.Start(ctx, "ratel.select.with.chunks", q.query.spanOptions()...)
-		defer span.End()
-
 		for models, err := range q.query.Chunks(ctx, size, options...) {
 			if err == nil {
 				err = q.loadModels(ctx, models)
 			}
 
 			if err != nil {
-				recordFailure(span, err)
 				yield(nil, err)
 
 				return

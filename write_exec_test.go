@@ -8,9 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/gopherex/ratel"
 )
@@ -89,43 +86,6 @@ func checkWriteResult(t *testing.T, models []readUser, err error, count int, wan
 
 	if err != nil || len(models) != count || models == nil {
 		t.Fatalf("%+v %v", models, err)
-	}
-}
-
-func TestWriteTelemetry(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name    string
-		failure error
-		status  codes.Code
-	}{
-		{"success", nil, codes.Unset},
-		{"refusal", &pgconn.PgError{Code: "23505", Message: "secret"}, codes.Unset},
-		{"technical", errors.New("secret"), codes.Error},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			recorder := tracetest.NewSpanRecorder()
-
-			provider := trace.NewTracerProvider(trace.WithSpanProcessor(recorder))
-			defer provider.Shutdown(t.Context())
-
-			executor := writeExecutor{exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
-				return pgconn.NewCommandTag("DELETE 1"), tc.failure
-			}}
-			_, _ = ratel.New(executor, ratel.WithTracerProvider(provider)).Delete(writeDescriptor()).All().Exec(t.Context())
-
-			spans := recorder.Ended()
-			if len(spans) != 1 || spans[0].Status().Code != tc.status {
-				t.Fatalf("%+v", spans)
-			}
-
-			if strings.Contains(spans[0].Status().Description, "secret") || len(spans[0].Events()) != 0 {
-				t.Fatal("sensitive error recorded")
-			}
-		})
 	}
 }
 

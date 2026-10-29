@@ -147,16 +147,12 @@ func (q Select[M]) scalar(ctx context.Context, operation, prefix, suffix string,
 		return err
 	}
 
-	ctx, span := q.db.tracer.Start(ctx, operation, q.spanOptions()...)
-	defer span.End()
-
 	err = q.db.executor.QueryRow(ctx, statement.SQL, q.db.arguments(options, statement.Args)...).Scan(target)
 	if err != nil {
-		err = fmt.Errorf("ratel: %s: %w", operation, err)
-		recordFailure(span, err)
+		return fmt.Errorf("ratel: %s: %w", operation, err)
 	}
 
-	return err
+	return nil
 }
 
 // Plucked is one column of a SELECT's result.
@@ -228,12 +224,8 @@ func (p Plucked[V]) All(ctx context.Context, options ...CallOption) iter.Seq2[V,
 			return
 		}
 
-		ctx, span := p.db.tracer.Start(ctx, "ratel.select.pluck", spanOptions("SELECT", "")...)
-		defer span.End()
-
 		rows, err := p.db.executor.Query(ctx, statement.SQL, p.db.arguments(options, statement.Args)...)
 		if err != nil {
-			recordFailure(span, err)
 			yield(zero, fmt.Errorf("ratel: pluck: %w", err))
 
 			return
@@ -244,7 +236,6 @@ func (p Plucked[V]) All(ctx context.Context, options ...CallOption) iter.Seq2[V,
 		for rows.Next() {
 			var value V
 			if err := rows.Scan(&value); err != nil {
-				recordFailure(span, err)
 				yield(zero, fmt.Errorf("ratel: scan pluck: %w", err))
 
 				return
@@ -256,7 +247,6 @@ func (p Plucked[V]) All(ctx context.Context, options ...CallOption) iter.Seq2[V,
 		}
 
 		if err := rows.Err(); err != nil {
-			recordFailure(span, err)
 			yield(zero, fmt.Errorf("ratel: iterate pluck: %w", err))
 		}
 	}

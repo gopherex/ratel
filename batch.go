@@ -41,9 +41,6 @@ func (db *DB) Batch(ctx context.Context, items ...BatchItem) error {
 		return nil
 	}
 
-	ctx, span := db.tracer.Start(ctx, "ratel.batch", spanOptions("BATCH", "")...)
-	defer span.End()
-
 	results := db.executor.SendBatch(ctx, batch)
 
 	var err error
@@ -58,11 +55,7 @@ func (db *DB) Batch(ctx context.Context, items ...BatchItem) error {
 		err = fmt.Errorf("ratel: batch: %w", closeErr)
 	}
 
-	if err != nil {
-		return failure(span, err)
-	}
-
-	return nil
+	return err
 }
 
 // Batch is the SELECT as a batch item that collects every row into dest.

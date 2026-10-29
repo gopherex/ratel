@@ -1,11 +1,6 @@
 package ratel
 
-import (
-	"context"
-
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-)
+import "context"
 
 // WithBatchRows bounds rows per insert statement. Default: 1000. Nonpositive
 // values reject inserts before execution. Chunk atomicity belongs to the executor.
@@ -18,25 +13,19 @@ type writeResult[M any] struct {
 	models []M
 }
 
-func executeWrite[M any](ctx context.Context, database *DB, table Table[M], operation string,
+func executeWrite[M any](ctx context.Context, database *DB, table Table[M],
 	statements []Statement, returning bool, options []CallOption,
 ) (writeResult[M], error) {
 	if database == nil {
 		return writeResult[M]{}, ErrInvalidQuery
 	}
 
-	ctx, span := database.tracer.Start(ctx, "ratel.write", trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(attribute.String("db.system.name", "postgresql"),
-			attribute.String("db.operation.name", operation),
-			attribute.String("db.collection.name", table.schema+"."+table.name)))
-	defer span.End()
-
 	result := writeResult[M]{models: make([]M, 0)}
 
 	for _, statement := range statements {
 		next, err := executeWriteStatement(ctx, database, table, statement, returning, options)
 		if err != nil {
-			return writeResult[M]{}, failure(span, err)
+			return writeResult[M]{}, err
 		}
 
 		result.count += next.count

@@ -3,6 +3,7 @@ module github.com/gopherex/ratel
 go 1.27.3
 
 require (
+	github.com/google/go-cmp v0.7.0
 	github.com/gopherex/pgtx v1.1.4
 	github.com/jackc/pgx/v5 v5.11.0
 	go.opentelemetry.io/otel v1.44.0

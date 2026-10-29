@@ -1,4 +1,8 @@
 // Package ratel provides PostgreSQL data access over a caller-owned executor.
+//
+// ratel builds SQL and scans rows; it emits no telemetry of its own. Trace
+// the queries at the driver (a pgx tracer such as otelpgx on the executor's
+// connection config) and the operations in the calling code.
 package ratel
 
 import (
@@ -6,8 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Executor provides the native pgx operations used by ratel.
@@ -21,11 +23,9 @@ type Executor interface {
 
 // DB executes operations on a caller-owned executor.
 type DB struct {
-	executor    Executor
-	tracer      trace.Tracer
-	execMode    Opt[pgx.QueryExecMode]
-	batchRows   int
-	readOptions []trace.SpanStartOption
+	executor  Executor
+	execMode  Opt[pgx.QueryExecMode]
+	batchRows int
 }
 
 // Option configures a database before it is shared with callers.
@@ -34,11 +34,6 @@ type Option func(*DB)
 // WithExecMode selects the pgx protocol mode for every query.
 func WithExecMode(mode pgx.QueryExecMode) Option {
 	return func(db *DB) { db.execMode = OptFrom(mode) }
-}
-
-// WithTracerProvider selects the provider used for database operation spans.
-func WithTracerProvider(provider trace.TracerProvider) Option {
-	return func(db *DB) { db.tracer = provider.Tracer("github.com/gopherex/ratel") }
 }
 
 // CallOption configures a single terminal operation.
@@ -55,14 +50,11 @@ func ExecMode(mode pgx.QueryExecMode) CallOption {
 	}
 }
 
-// New constructs a database using the supplied executor and the global tracer provider.
+// New constructs a database using the supplied executor.
 func New(executor Executor, options ...Option) *DB {
 	const defaultBatchRows = 1000
 
-	database := &DB{
-		executor: executor, tracer: otel.GetTracerProvider().Tracer("github.com/gopherex/ratel"),
-		batchRows: defaultBatchRows, readOptions: readSpanOptions("", ""),
-	}
+	database := &DB{executor: executor, batchRows: defaultBatchRows}
 	for _, option := range options {
 		option(database)
 	}

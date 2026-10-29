@@ -25,9 +25,6 @@ func (q Select[M]) Chunks(ctx context.Context, size int, options ...CallOption) 
 			return
 		}
 
-		ctx, span := q.db.tracer.Start(ctx, "ratel.select.chunks", q.spanOptions()...)
-		defer span.End()
-
 		q.pages(ctx, size, options, yield)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/gopherex/ratel"
 )
@@ -153,44 +152,6 @@ func TestEagerInvalidRelation(t *testing.T) {
 			_, err := eagerTerminal(t.Context(), query, terminal)
 			if !errors.Is(err, ratel.ErrInvalidQuery) {
 				t.Fatal(err)
-			}
-		})
-	}
-}
-
-func TestEagerTelemetry(t *testing.T) {
-	t.Parallel()
-
-	for _, terminal := range []string{"list", "one", "first", "chunks"} {
-		t.Run(terminal, func(t *testing.T) {
-			t.Parallel()
-
-			var spans []*observedSpan
-			provider := observedProvider{TracerProvider: noop.NewTracerProvider(), spans: &spans}
-			executor := relationExecutor{
-				readExecutor: readExecutor{query: func(context.Context, string, ...any) (pgx.Rows, error) {
-					return &readRows{ids: []int64{1}}, nil
-				}},
-				send: func(context.Context, *pgx.Batch) pgx.BatchResults {
-					depth := spans[len(spans)-1]
-					if depth.Span != spans[0] {
-						t.Fatal("depth is not a child of the eager operation")
-					}
-
-					return &relationBatch{rows: []*relationRows{{}}}
-				},
-			}
-			users, _ := relationDescriptors()
-
-			query := ratel.New(executor, ratel.WithTracerProvider(provider)).From(users).With(users.Orders).Limit(1)
-			if _, err := eagerTerminal(t.Context(), query, terminal); err != nil {
-				t.Fatal(err)
-			}
-
-			for _, span := range spans {
-				if !span.ended {
-					t.Fatal("span did not end")
-				}
 			}
 		})
 	}

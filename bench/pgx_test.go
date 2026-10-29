@@ -18,11 +18,12 @@ func pgxLibrary(conn connections) library {
 	return library{
 		name: "pgx",
 		one: func(ctx context.Context, id int64) (string, error) {
-			var email string
+			var user pgxUser
 
-			err := pool.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, id).Scan(&email)
+			err := pool.QueryRow(ctx, `SELECT id, email, name, created_at FROM users WHERE id = $1`, id).
+				Scan(&user.ID, &user.Email, &user.Name, &user.CreatedAt)
 
-			return email, err
+			return user.Email, err
 		},
 		list: func(ctx context.Context, after int64) ([]string, error) {
 			rows, err := pool.Query(ctx, `SELECT id, email, name, created_at FROM users WHERE id > $1 ORDER BY id LIMIT $2`,

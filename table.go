@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Scanner is generated code that reads one model in descriptor column order.
@@ -37,7 +36,6 @@ type Table[M any] struct {
 	constraints []ConstraintError
 	projection  string
 	selectSQL   string
-	readOptions []trace.SpanStartOption
 }
 
 // TableOption supplies generated table metadata.
@@ -94,7 +92,6 @@ func (t Table[M]) renderProjection() string {
 
 func (t Table[M]) withSchema(schema string) Table[M] {
 	t.schema = schema
-	t.readOptions = readSpanOptions(schema, t.name)
 	t.selectSQL = ""
 
 	if t.valid() && validIdentifier(schema) && validIdentifier(t.name) {

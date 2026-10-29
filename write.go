@@ -133,7 +133,7 @@ func (q Write[M]) Exec(ctx context.Context, options ...CallOption) (int64, error
 		return 0, err
 	}
 
-	result, err := executeWrite(ctx, q.db, q.table, q.operation, []Statement{statement}, false, options)
+	result, err := executeWrite(ctx, q.db, q.table, []Statement{statement}, false, options)
 	if err == nil && result.count == 0 && q.missing != "" {
 		return 0, q.missing
 	}
@@ -148,7 +148,7 @@ func (q Write[M]) Returning(ctx context.Context, options ...CallOption) ([]M, er
 		return nil, err
 	}
 
-	result, err := executeWrite(ctx, q.db, q.table, q.operation, []Statement{statement}, true, options)
+	result, err := executeWrite(ctx, q.db, q.table, []Statement{statement}, true, options)
 	if err == nil && len(result.models) == 0 && q.missing != "" {
 		return nil, q.missing
 	}

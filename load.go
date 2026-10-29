@@ -248,16 +248,7 @@ func (db *DB) Load[M any](ctx context.Context, models []M, relations ...Relation
 		return err
 	}
 
-	ctx, span := db.tracer.Start(ctx, "ratel.load", db.readOptions...)
-	defer span.End()
-
-	if err := db.load(ctx, jobs); err != nil {
-		recordFailure(span, err)
-
-		return err
-	}
-
-	return nil
+	return db.load(ctx, jobs)
 }
 
 func (db *DB) load(ctx context.Context, jobs []loadJob) error {
@@ -295,23 +286,13 @@ func (db *DB) load(ctx context.Context, jobs []loadJob) error {
 }
 
 func (db *DB) loadDepth(ctx context.Context, jobs []loadJob) error {
-	ctx, span := db.tracer.Start(ctx, "ratel.load.depth", db.readOptions...)
-	defer span.End()
-
 	batch := &pgx.Batch{}
 
 	for _, job := range jobs {
 		batch.Queue(job.statement.SQL, job.statement.Args...)
 	}
 
-	results := db.executor.SendBatch(ctx, batch)
-
-	err := consumeRelations(results, jobs)
-	if err != nil {
-		recordFailure(span, err)
-	}
-
-	return err
+	return consumeRelations(db.executor.SendBatch(ctx, batch), jobs)
 }
 
 func (db *DB) validateLoadMode(options []CallOption) error {

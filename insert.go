@@ -346,7 +346,7 @@ func (q Insert[M, I]) Exec(ctx context.Context, options ...CallOption) (int64, e
 		return 0, err
 	}
 
-	result, err := executeWrite(ctx, q.db, q.table.Table, "INSERT", statements, false, options)
+	result, err := executeWrite(ctx, q.db, q.table.Table, statements, false, options)
 
 	return result.count, err
 }
@@ -359,7 +359,7 @@ func (q Insert[M, I]) Returning(ctx context.Context, options ...CallOption) ([]M
 		return nil, err
 	}
 
-	result, err := executeWrite(ctx, q.db, q.table.Table, "INSERT", statements, true, options)
+	result, err := executeWrite(ctx, q.db, q.table.Table, statements, true, options)
 
 	return result.models, err
 }

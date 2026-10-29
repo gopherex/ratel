@@ -2,25 +2,21 @@ package ratel
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"iter"
 
 	"github.com/jackc/pgx/v5"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // All lazily streams rows. Breaking iteration always releases the cursor.
 // Errors are yielded once with a zero model; no further rows follow an error.
 func (q Select[M]) All(ctx context.Context, options ...CallOption) iter.Seq2[M, error] {
 	return func(yield func(M, error) bool) {
-		q.iterate(ctx, "ratel.select.all", options, yield)
+		q.iterate(ctx, options, yield)
 	}
 }
 
-func (q Select[M]) iterate(ctx context.Context, operation string, options []CallOption, yield func(M, error) bool) {
+func (q Select[M]) iterate(ctx context.Context, options []CallOption, yield func(M, error) bool) {
 	var zero M
 
 	if q.db == nil {
@@ -29,12 +25,8 @@ func (q Select[M]) iterate(ctx context.Context, operation string, options []Call
 		return
 	}
 
-	ctx, span := q.db.tracer.Start(ctx, operation, q.spanOptions()...)
-	defer span.End()
-
 	rows, err := q.rows(ctx, options)
 	if err != nil {
-		recordFailure(span, err)
 		yield(zero, err)
 
 		return
@@ -45,9 +37,7 @@ func (q Select[M]) iterate(ctx context.Context, operation string, options []Call
 	for rows.Next() {
 		model, scanErr := q.source.table.scan(rows)
 		if scanErr != nil {
-			err = fmt.Errorf("ratel: scan SELECT: %w", scanErr)
-			recordFailure(span, err)
-			yield(zero, err)
+			yield(zero, fmt.Errorf("ratel: scan SELECT: %w", scanErr))
 
 			return
 		}
@@ -58,9 +48,7 @@ func (q Select[M]) iterate(ctx context.Context, operation string, options []Call
 	}
 
 	if err = rows.Err(); err != nil {
-		err = fmt.Errorf("ratel: iterate SELECT: %w", err)
-		recordFailure(span, err)
-		yield(zero, err)
+		yield(zero, fmt.Errorf("ratel: iterate SELECT: %w", err))
 	}
 }
 
@@ -81,22 +69,17 @@ func (q Select[M]) rows(ctx context.Context, options []CallOption) (pgx.Rows, er
 // List collects the result. Empty results are a non-nil empty slice.
 // An error returns no partial result.
 func (q Select[M]) List(ctx context.Context, options ...CallOption) ([]M, error) {
-	return q.collect(ctx, "ratel.select.list", 0, options)
+	return q.collect(ctx, 0, options)
 }
 
 // collect reads the result; a positive atMost stops after that many rows.
-func (q Select[M]) collect(ctx context.Context, operation string, atMost int, options []CallOption) ([]M, error) {
+func (q Select[M]) collect(ctx context.Context, atMost int, options []CallOption) ([]M, error) {
 	if q.db == nil {
 		return nil, ErrInvalidQuery
 	}
 
-	ctx, span := q.db.tracer.Start(ctx, operation, q.spanOptions()...)
-	defer span.End()
-
 	rows, err := q.rows(ctx, options)
 	if err != nil {
-		recordFailure(span, err)
-
 		return nil, err
 	}
 
@@ -105,12 +88,9 @@ func (q Select[M]) collect(ctx context.Context, operation string, atMost int, op
 	models := make([]M, 0)
 
 	for rows.Next() {
-		model, scanErr := q.source.table.scan(rows)
-		if scanErr != nil {
-			err = fmt.Errorf("ratel: scan SELECT: %w", scanErr)
-			recordFailure(span, err)
-
-			return nil, err
+		model, err := q.source.table.scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("ratel: scan SELECT: %w", err)
 		}
 
 		models = append(models, model)
@@ -119,11 +99,8 @@ func (q Select[M]) collect(ctx context.Context, operation string, atMost int, op
 		}
 	}
 
-	if err = rows.Err(); err != nil {
-		err = fmt.Errorf("ratel: iterate SELECT: %w", err)
-		recordFailure(span, err)
-
-		return nil, err
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ratel: iterate SELECT: %w", err)
 	}
 
 	return models, nil
@@ -134,17 +111,23 @@ func (q Select[M]) collect(ctx context.Context, operation string, atMost int, op
 func (q Select[M]) One(ctx context.Context, options ...CallOption) (M, error) {
 	const detectMultiple = 2
 
-	return q.single(ctx, "ratel.select.one", detectMultiple, options)
+	return q.single(ctx, detectMultiple, options)
 }
 
 // First returns the first row in query order, or ErrNotFound. Without OrderBy,
 // PostgreSQL chooses the row; callers needing determinism must supply an order.
 func (q Select[M]) First(ctx context.Context, options ...CallOption) (M, error) {
-	return q.single(ctx, "ratel.select.first", 1, options)
+	return q.single(ctx, 1, options)
 }
 
-func (q Select[M]) single(ctx context.Context, operation string, limit int, options []CallOption) (M, error) {
+// single reads the first row, then, when limit allows a second, checks that
+// there is none.
+func (q Select[M]) single(ctx context.Context, limit int, options []CallOption) (M, error) {
 	var zero M
+
+	if q.db == nil {
+		return zero, ErrInvalidQuery
+	}
 
 	// A static query runs verbatim and stops reading instead: its SQL may be
 	// DML with RETURNING, which takes no LIMIT.
@@ -152,64 +135,33 @@ func (q Select[M]) single(ctx context.Context, operation string, limit int, opti
 		q = q.Limit(limit)
 	}
 
-	models, err := q.collect(ctx, operation, limit, options)
+	rows, err := q.rows(ctx, options)
 	if err != nil {
 		return zero, err
 	}
 
-	if len(models) == 0 {
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return zero, fmt.Errorf("ratel: iterate SELECT: %w", err)
+		}
+
 		return zero, ErrNotFound
 	}
 
-	if len(models) > 1 {
+	model, err := q.source.table.scan(rows)
+	if err != nil {
+		return zero, fmt.Errorf("ratel: scan SELECT: %w", err)
+	}
+
+	if limit > 1 && rows.Next() {
 		return zero, ErrMultipleRows
 	}
 
-	return models[0], nil
-}
-
-func (q Select[M]) spanOptions() []trace.SpanStartOption {
-	return q.source.table.readOptions
-}
-
-func readSpanOptions(schema, table string) []trace.SpanStartOption {
-	attributes := []attribute.KeyValue{
-		attribute.String("db.system.name", "postgresql"),
-		attribute.String("db.operation.name", "SELECT"),
-		attribute.String("db.collection.name", schema+"."+table),
-	}
-	if table == "" {
-		attributes = attributes[:len(attributes)-1]
+	if err := rows.Err(); err != nil {
+		return zero, fmt.Errorf("ratel: iterate SELECT: %w", err)
 	}
 
-	return []trace.SpanStartOption{
-		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(attributes...),
-	}
-}
-
-func readRefusal(err error) bool {
-	// A refusal must not hide technical failures from later batch results.
-	var joined interface{ Unwrap() []error }
-	if errors.As(err, &joined) {
-		causes := joined.Unwrap()
-		for _, child := range causes {
-			if !readRefusal(child) {
-				return false
-			}
-		}
-
-		return len(causes) > 0
-	}
-
-	return errors.Is(err, ErrInvalidQuery) || errors.Is(err, ErrMultipleRows) || errors.Is(err, ErrNotFound)
-}
-
-func recordFailure(span trace.Span, err error) {
-	if readRefusal(err) {
-		return
-	}
-
-	// Driver errors can contain query values, so telemetry records no error text.
-	span.SetStatus(codes.Error, "database operation failed")
+	return model, nil
 }

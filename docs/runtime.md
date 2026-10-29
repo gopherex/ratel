@@ -24,7 +24,7 @@ type Executor interface {
 	CopyFrom(ctx context.Context, table pgx.Identifier, cols []string, src pgx.CopyFromSource) (int64, error)
 }
 
-db := ratel.New(exec, ratel.WithTracerProvider(tp), ratel.WithExecMode(pgx.QueryExecModeCacheDescribe))
+db := ratel.New(exec, ratel.WithExecMode(pgx.QueryExecModeCacheDescribe))
 ```
 
 - `*pgxpool.Pool`, `*pgx.Conn`, `pgx.Tx` and `github.com/gopherex/pgtx`'s
@@ -43,8 +43,8 @@ db := ratel.New(exec, ratel.WithTracerProvider(tp), ratel.WithExecMode(pgx.Query
   in transaction mode. Default: pgx's default. Eager relation loading uses
   `SendBatch`, whose mode can only be configured on the executor's connections;
   see the explicit-mode restriction under Relations.
-- `WithTracerProvider` defaults to the global OpenTelemetry provider. ratel
-  never logs and records no metrics; pool metrics belong to the pool owner.
+- ratel emits no telemetry: no spans, logs or metrics (see Telemetry); pool
+  metrics belong to the pool owner.
 - There are no hooks or interceptors. Data invariants such as `updated_at`
   belong in the schema (defaults, `BEFORE` triggers): values set by a `BEFORE`
   trigger are returned by `RETURNING`, and they hold for every writer.
@@ -205,8 +205,8 @@ non-null key. Static `NewQuery` sources carry no primary-key metadata and
 cannot use `Chunks`; a nested builder SELECT preserves its source's key.
 Constructor inputs are copied;
 descriptors and SELECT builders are immutable and can be shared concurrently.
-Table descriptors precompute their quoted projection, plain SELECT SQL and read
-span options. `InSchema` recomputes schema-dependent SQL and span attributes;
+Table descriptors precompute their quoted projection and plain SELECT SQL.
+`InSchema` recomputes schema-dependent SQL;
 rendering an unmodified table SELECT reuses its SQL without a per-call cache.
 The caller must not mutate argument values (for example, bound slices) while
 an operation uses them, following pgx's argument ownership rules.
@@ -693,7 +693,7 @@ error and `pgconn.PgError`. Generated sentinels are `*ConstraintError` values;
 Generated `ratel.Constraints[M](values...)` table metadata supplies column lists
 for named constraints. Without it, only the driver's `ColumnName` is known;
 ratel never parses error details for columns or bound values. Constraint errors
-are refusals and do not mark operation spans as technical failures.
+are refusals, not technical failures.
 
 ratel does not capture stacks; it never turns an unrecognized failure into a
 refusal, including serialization failures, cancellation and connection loss.
@@ -713,14 +713,12 @@ refusal, including serialization failures, cancellation and connection loss.
 
 ## Telemetry
 
-Each terminal operation is one span; each relation loading step is a child
-span. Attributes follow the OpenTelemetry database conventions (system,
-operation, collection name when the physical collection is known). SQL text,
-arguments and driver error messages never go into spans: driver errors can
-contain bound values. Technical read failures set the span status to error;
-expected empty or multiple-row outcomes do not. `Chunks` creates a parent
-operation span with a child span for each page read. Iterator spans end on
-exhaustion, failure or early break.
+ratel builds SQL and scans rows; it emits no spans of its own. Every query,
+batch and COPY it sends goes through the executor, so the driver traces them:
+set a pgx tracer (for example `otelpgx`) on the connection config of the pool
+the executor uses. The operation around a ratel call (a request handler, a
+use case) is the caller's span. A span per terminal on top of the driver's
+would duplicate the query spans and cost every call allocations.
 
 ## Performance gates
 
@@ -739,7 +737,7 @@ exhaustion, failure or early break.
 - `go -C tests test -tags integration -run '^$' -bench '^BenchmarkRelationLoad$' -benchmem`
   compares complete batched relation loads on the real driver: four parent
   models and five child rows, including empty and composite-key parents.
-  The generated path builds SQL, traces, scans through generated field
+  The generated path builds SQL, scans through generated field
   addresses and attaches loaded values; the handwritten baseline uses the
   same ordinal-key join in one `pgx.Batch` and scans and attaches directly.
 - Compare changes with ten samples from each revision, using identical commands:
