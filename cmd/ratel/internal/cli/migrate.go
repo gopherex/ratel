@@ -6,9 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+
+	tclog "github.com/testcontainers/testcontainers-go/log"
 
 	"github.com/gopherex/ratel/ir"
 	"github.com/gopherex/ratel/migrate"
@@ -17,6 +20,7 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
+	"github.com/gopherex/ratel/cmd/ratel/internal/devdb"
 	"github.com/gopherex/ratel/cmd/ratel/internal/ident"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
@@ -30,11 +34,13 @@ var (
 	errUnknownCommand = errors.New("unknown subcommand")
 )
 
-// Subcommands that take operands.
+// Subcommands named more than once: those taking operands, and those using
+// the dev server.
 const (
-	planCommand = "plan"
-	newCommand  = "new"
-	lintCommand = "lint"
+	planCommand  = "plan"
+	newCommand   = "new"
+	lintCommand  = "lint"
+	driftCommand = "drift"
 )
 
 // workspace is what every migrate command reads: the configuration, the
@@ -48,17 +54,20 @@ type workspace struct {
 	sources   []migrate.Source
 	quoter    *ident.Quoter
 	stdout    io.Writer
+	log       *slog.Logger // progress and diagnostics, on stderr
 }
 
 // arguments are a migrate subcommand's flags and operands.
 type arguments struct {
 	command, config, url string
+	level                slog.Level
 	operands             []string
 }
 
 // migrateUsage names the subcommands.
 const migrateUsage = "usage: ratel migrate plan <name> | new <name> | hash | lint [<file>...] | verify | " +
-	"status --url <dsn> | apply --url <dsn> | contract --url <dsn> | drift --url <dsn>"
+	"status --url <dsn> | apply --url <dsn> | contract --url <dsn> | drift --url <dsn> " +
+	"[--log-level debug|info|warn|error]"
 
 // migrateCommand runs one migrate subcommand.
 func migrateCommand(args []string, stdout, stderr io.Writer) int {
@@ -70,7 +79,16 @@ func migrateCommand(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	space, err := openWorkspace(parsed.config, stdout)
+	log := newLogger(stderr, parsed.level)
+
+	if parsed.command == planCommand || parsed.command == lintCommand || parsed.command == driftCommand {
+		// testcontainers prints its Docker banner and some container
+		// messages through its process-wide default logger; this process
+		// runs one command, so the command sets it.
+		tclog.SetDefault(devdb.DebugLogger(log))
+	}
+
+	space, err := openWorkspace(parsed.config, stdout, log)
 	if err == nil {
 		err = space.run(ctx, parsed)
 	}
@@ -96,13 +114,17 @@ func migrateFlags(args []string, stderr io.Writer) (arguments, bool) {
 	configPath := flags.String("config", "ratel.yaml", "configuration file")
 	url := flags.String("url", "", "target database")
 
-	if err := flags.Parse(args[1:]); err != nil {
+	level := slog.LevelInfo
+	flags.TextVar(&level, "log-level", slog.LevelInfo, "debug, info, warn or error")
+
+	operands, err := parseInterspersed(flags, args[1:])
+	if err != nil {
 		return arguments{}, false
 	}
 
-	parsed := arguments{command: args[0], config: *configPath, url: *url, operands: flags.Args()}
+	parsed := arguments{command: args[0], config: *configPath, url: *url, level: level, operands: operands}
 	needsURL, known := map[string]bool{
-		"status": true, "apply": true, "contract": true, "drift": true, planCommand: false, newCommand: false,
+		"status": true, "apply": true, "contract": true, driftCommand: true, planCommand: false, newCommand: false,
 		"hash": false, lintCommand: false, "verify": false,
 	}[parsed.command]
 	named := parsed.command == planCommand || parsed.command == newCommand
@@ -120,7 +142,42 @@ func migrateFlags(args []string, stderr io.Writer) (arguments, bool) {
 	}
 }
 
-func openWorkspace(configPath string, stdout io.Writer) (*workspace, error) {
+// parseInterspersed parses flags placed before, between or after the
+// operands, as in "plan init --log-level debug"; the flag package stops at
+// the first operand.
+func parseInterspersed(flags *flag.FlagSet, args []string) ([]string, error) {
+	var operands []string
+
+	for {
+		if err := flags.Parse(args); err != nil {
+			return nil, fmt.Errorf("flags: %w", err)
+		}
+
+		if flags.NArg() == 0 {
+			return operands, nil
+		}
+
+		operands = append(operands, flags.Arg(0))
+		args = flags.Args()[1:]
+	}
+}
+
+// newLogger writes records at level and above to out, one line each,
+// without time.
+func newLogger(out io.Writer, level slog.Level) *slog.Logger {
+	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, attribute slog.Attr) slog.Attr {
+			if len(groups) == 0 && attribute.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+
+			return attribute
+		},
+	}))
+}
+
+func openWorkspace(configPath string, stdout io.Writer, log *slog.Logger) (*workspace, error) {
 	settings, err := config.Load(configPath)
 	if err != nil {
 		return nil, err
@@ -167,7 +224,7 @@ func openWorkspace(configPath string, stdout io.Writer) (*workspace, error) {
 
 	return &workspace{
 		settings: settings, parser: parser, schema: files, catalog: built, directory: directory, sources: sources,
-		quoter: ident.New(parser), stdout: stdout,
+		quoter: ident.New(parser), stdout: stdout, log: log,
 	}, nil
 }
 
@@ -189,7 +246,7 @@ func (w *workspace) run(ctx context.Context, parsed arguments) error {
 		return w.apply(ctx, parsed.url, migrate.Apply)
 	case "contract":
 		return w.apply(ctx, parsed.url, migrate.Contract)
-	case "drift":
+	case driftCommand:
 		return w.drift(ctx, parsed.url)
 	default:
 		return fmt.Errorf("%w %q", errUnknownCommand, parsed.command)

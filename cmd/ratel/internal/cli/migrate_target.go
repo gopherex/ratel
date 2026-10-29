@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,18 +65,5 @@ func (w *workspace) apply(ctx context.Context, url string, run runFunc) error {
 		},
 	}
 
-	return run(ctx, target, os.DirFS(w.directory), migrate.WithSettings(settings), migrate.WithLogger(w.logger()))
-}
-
-// logger writes one line per record to stdout, without time and level.
-func (w *workspace) logger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(w.stdout, &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, attribute slog.Attr) slog.Attr {
-			if len(groups) == 0 && (attribute.Key == slog.TimeKey || attribute.Key == slog.LevelKey) {
-				return slog.Attr{}
-			}
-
-			return attribute
-		},
-	}))
+	return run(ctx, target, os.DirFS(w.directory), migrate.WithSettings(settings), migrate.WithLogger(w.log))
 }

@@ -47,7 +47,12 @@ An existing `ratel.yaml` is never overwritten: `init` fails instead.
 ### Migrate
 
 Every `migrate` subcommand reads `ratel.yaml` (`--config <path>`) and the
-migrations directory, created when missing.
+migrations directory, created when missing. Flags may come before or after
+the operands. Results go to stdout; progress goes to stderr as `slog` text
+records at `--log-level` (`debug`, `info`, `warn` or `error`; default
+`info`). At `info` a command using the dev server logs which one
+(`msg="dev database" image=<image>`, or `host=<host>` for `dev.url`, never
+its credentials); testcontainers' own messages are logged at `debug`.
 
 - `plan <name>` first runs `verify`, then on the dev server applies the
   existing migration files to one database and the schema files to another
@@ -71,8 +76,8 @@ migrations directory, created when missing.
 - `status`, `apply`, `contract` and `drift` take `--url`. `status`, `apply`
   and `contract` call `migrate.Status`, `migrate.Apply` and
   `migrate.Contract` with the `migrate` settings; `apply` and `contract`
-  print `msg="migration step" phase=<phase> class=<class> file=<file>
-  step=<id>` per step started. `status` prints
+  log `level=INFO msg="migration step" phase=<phase> class=<class>
+  file=<file> step=<id>` per step started. `status` prints
   `pending|applied|interrupted|changed <phase> <file> <step>` per step.
   `drift` prints each difference as `<change kind> <key>` and exits `1` when
   there is one.

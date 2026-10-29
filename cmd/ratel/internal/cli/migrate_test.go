@@ -25,6 +25,7 @@ func TestMigrateUsage(t *testing.T) {
 		{"verify", "--url", "postgres://x"},
 		{"status", "extra", "--url", "postgres://x"},
 		{"verify", "--unknown"},
+		{"verify", "--log-level", "loud"},
 		{"rollback"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -129,6 +130,25 @@ func TestMigrateNewHash(t *testing.T) {
 
 	if hash := run("hash"); hash != "0: " {
 		t.Fatalf("second hash = %s", hash)
+	}
+}
+
+// TestMigrateFlagsAfterOperands accepts flags after the operands, as in
+// "ratel migrate new add_index --config ratel.yaml".
+func TestMigrateFlagsAfterOperands(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	config := filepath.Join(root, "ratel.yaml")
+
+	writeFile(t, config, "version: 1\nschema: []\n")
+
+	var output bytes.Buffer
+
+	code := cli.Main([]string{"ratel", "migrate", "new", "late", "--config", config, "--log-level", "warn"},
+		&output, &output)
+	if code != 0 || !strings.Contains(output.String(), "_late.sql") {
+		t.Fatalf("new with trailing flags = %d: %s", code, output.String())
 	}
 }
 

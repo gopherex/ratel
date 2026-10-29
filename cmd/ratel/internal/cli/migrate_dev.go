@@ -33,7 +33,7 @@ WHERE nspname !~ '^pg_' AND nspname NOT IN ('information_schema', 'ratel') ORDER
 
 // withDev runs body with a dev server, stopped afterwards.
 func (w *workspace) withDev(ctx context.Context, body func(*devdb.Server) error) error {
-	server, err := devdb.Start(ctx, w.settings.Dev)
+	server, err := devdb.Start(ctx, w.settings.Dev, w.log)
 	if err != nil {
 		return err
 	}

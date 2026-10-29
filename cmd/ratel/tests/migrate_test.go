@@ -4,6 +4,7 @@ package tests_test
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"slices"
 	"testing"
@@ -41,7 +42,7 @@ func TestApplySchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server, err := devdb.Start(ctx, config.Dev{URL: pool.Config().ConnString()})
+	server, err := devdb.Start(ctx, config.Dev{URL: pool.Config().ConnString()}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

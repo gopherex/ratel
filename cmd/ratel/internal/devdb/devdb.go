@@ -10,11 +10,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
+	tclog "github.com/testcontainers/testcontainers-go/log"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -41,8 +43,9 @@ type Server struct {
 }
 
 // Start connects to dev.url or starts a container from dev.image. The
-// context bounds the startup.
-func Start(ctx context.Context, settings config.Dev) (*Server, error) {
+// context bounds the startup. It logs which server it uses at info, and
+// testcontainers' own messages at debug.
+func Start(ctx context.Context, settings config.Dev, logger *slog.Logger) (*Server, error) {
 	address := settings.URL
 
 	var container testcontainers.Container
@@ -52,7 +55,10 @@ func Start(ctx context.Context, settings config.Dev) (*Server, error) {
 			return nil, errNoServer
 		}
 
+		logger.InfoContext(ctx, "dev database", "image", settings.Image)
+
 		started, err := postgres.Run(ctx, settings.Image,
+			testcontainers.WithLogger(DebugLogger(logger)),
 			testcontainers.WithWaitStrategy(wait.ForLog(readyLog).WithOccurrence(readyOccurrences)))
 		if err != nil {
 			return nil, fmt.Errorf("dev: start %s: %w", settings.Image, err)
@@ -71,12 +77,26 @@ func Start(ctx context.Context, settings config.Dev) (*Server, error) {
 		return nil, fmt.Errorf("dev: url: %w", err)
 	}
 
+	if container == nil {
+		// The address carries credentials; only its host is logged.
+		logger.InfoContext(ctx, "dev database", "host", parsed.Host)
+	}
+
 	admin, err := pgxpool.New(ctx, address)
 	if err != nil {
 		return nil, fmt.Errorf("dev: connect: %w", err)
 	}
 
 	return &Server{admin: admin, address: parsed, container: container}, nil
+}
+
+// DebugLogger passes testcontainers' messages to logger at debug.
+func DebugLogger(logger *slog.Logger) tclog.Logger { return debugLogger{logger: logger} }
+
+type debugLogger struct{ logger *slog.Logger }
+
+func (l debugLogger) Printf(format string, arguments ...any) {
+	l.logger.Debug(fmt.Sprintf(format, arguments...))
 }
 
 // Major is the server's PostgreSQL major version.
