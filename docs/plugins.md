@@ -83,6 +83,22 @@ message PluginResponse {
 7. **Replay.** `ratel dump --plugin <name>` writes the exact request to a file,
    so `ratel-gen-x < request.binpb` reproduces a run without the host.
 
+## Diagnostic codes
+
+| Code | Raised by | Meaning |
+|---|---|---|
+| `RTL-H01` | SDK, host | invalid envelope, identity, encoding or response |
+| `RTL-H02` | SDK, host | the protocol version ranges of host and plugin do not overlap |
+| `RTL-H03` | SDK | a generator error without its own `*plugin.Error` code |
+| `RTL-H04` | SDK, host | an output path that is unsafe, duplicate, or also a directory |
+| `RTL-H05` | host | a `builtin: true` plugin name that the host does not ship |
+| `RTL-H06` | host | a downloaded plugin whose sha256 differs from the configured one |
+| `RTL-H07` | host | a plugin download that fails |
+
+`ratel-gen-go` raises `RTL-G*` ([runtime.md](runtime.md#diagnostic-codes));
+the migration engine `RTL-P*`, `RTL-L*` and the other codes of
+[migrations.md](migrations.md).
+
 ## Go SDK
 
 Package `github.com/gopherex/ratel/plugin` supplies `Read`, `Write`, `Negotiate`,
@@ -91,7 +107,7 @@ parse `--format` with a default of `binpb`, then call
 `plugin.Serve(ctx, os.Stdin, os.Stdout, format, generator)`. `Serve` handles one
 exchange and returns only transport errors. Generator errors become `ERROR`
 diagnostics. Return `*plugin.Error` to preserve a stable code and source span;
-other errors use `RTL-P03`. Plugins must honor the passed context. `Info` must
+other errors use `RTL-H03`. Plugins must honor the passed context. `Info` must
 be side-effect-free: the SDK also calls it locally to validate Generate's version.
 
 The host package `cmd/ratel/internal/plugin` exposes `Prepare` (negotiate and

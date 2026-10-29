@@ -17,7 +17,7 @@ func ValidateFiles(files []*pluginpb.File) error {
 		name := file.GetPath()
 		if name == "" || name == "." || strings.ContainsAny(name, "\\:\x00") || path.IsAbs(name) ||
 			path.Clean(name) != name || strings.HasPrefix(name, "../") || name == ".." || seen[name] {
-			return &Error{Code: "RTL-P04", Message: fmt.Sprintf("unsafe or duplicate output path %q", name)}
+			return &Error{Code: "RTL-H04", Message: fmt.Sprintf("unsafe or duplicate output path %q", name)}
 		}
 
 		seen[name] = true
@@ -28,7 +28,7 @@ func ValidateFiles(files []*pluginpb.File) error {
 
 		for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
 			if seen[parent] {
-				return &Error{Code: "RTL-P04", Message: fmt.Sprintf("output file %q is also a directory", parent)}
+				return &Error{Code: "RTL-H04", Message: fmt.Sprintf("output file %q is also a directory", parent)}
 			}
 		}
 	}

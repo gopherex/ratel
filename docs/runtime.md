@@ -799,6 +799,23 @@ are refusals, not technical failures.
 ratel does not capture stacks; it never turns an unrecognized failure into a
 refusal, including serialization failures, cancellation and connection loss.
 
+## Diagnostic codes
+
+`ratel-gen-go` reports these codes; every one but `RTL-G10` stops generation.
+
+| Code | Meaning |
+|---|---|
+| `RTL-G01` | invalid plugin options, or no `import_path` |
+| `RTL-G02` | the generated Go does not parse: a generator bug |
+| `RTL-G03` | an invalid `@go.*` annotation, or a proto model missing a field's or its message's annotation |
+| `RTL-G04` | no Go type for a PostgreSQL type: set `options.types` or `@go.type` |
+| `RTL-G05` | two sources map to one Go identifier (columns, relations, generated members) |
+| `RTL-G06` | a query without a package |
+| `RTL-G07` | a `:copyfrom` query that is not `INSERT ... VALUES` with one row of parameters |
+| `RTL-G08` | two result columns, or two joined tables, map to one Row field |
+| `RTL-G09` | a shared `@ratel.row` type declared with another shape |
+| `RTL-G10` | warning: two queries return the same row shape; share it with `@ratel.row` |
+
 ## Schemas and tenants
 
 - Generated SQL always qualifies tables with their schema.

@@ -111,8 +111,9 @@ func TestProtoAnnotations(t *testing.T) {
 				return
 			}
 
-			if !plugin.HasErrors(response) || !strings.Contains(response.GetDiagnostics()[0].GetMessage(), tc.failure) {
-				t.Fatalf("diagnostics = %v, want %q", response.GetDiagnostics(), tc.failure)
+			if !plugin.HasErrors(response) || !strings.Contains(response.GetDiagnostics()[0].GetMessage(), tc.failure) ||
+				response.GetDiagnostics()[0].GetCode() != "RTL-G03" {
+				t.Fatalf("diagnostics = %v, want RTL-G03 %q", response.GetDiagnostics(), tc.failure)
 			}
 		})
 	}

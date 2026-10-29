@@ -1,6 +1,7 @@
 package safety_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -53,6 +54,37 @@ func TestEveryKindHasARule(t *testing.T) {
 			got := safety.Assess([]safety.Operation{{Kind: kind, Relation: "app.t", Other: "app.u"}}, env)
 			if cmp.Equal(got, unknown) {
 				t.Errorf("%s has no rule: %+v", kind, got)
+			}
+		})
+	}
+}
+
+// TestReasonCodes checks the lint code each operation on an existing table
+// reports, as docs/migrations.md lists them.
+func TestReasonCodes(t *testing.T) {
+	t.Parallel()
+
+	env := existing("app.t", "app.u")
+
+	for _, tc := range []struct {
+		kind safety.Kind
+		code string
+	}{
+		{safety.Truncate, "RTL-D02"},
+		{safety.DropIndex, "RTL-L03"},
+		{safety.DropConstraint, "RTL-D04"},
+		{safety.AddUnique, "RTL-L05"},
+		{safety.DetachPartition, "RTL-L08"},
+		{safety.AddExclusion, "RTL-L09"},
+		{safety.CreateIndex, "RTL-L02"},
+		{safety.Reindex, "RTL-L10"},
+	} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			t.Parallel()
+
+			got := safety.Assess([]safety.Operation{{Kind: tc.kind, Relation: "app.t", Other: "app.u"}}, env)
+			if !slices.Contains(got.Reasons, tc.code) {
+				t.Errorf("%s reasons = %v, want %s", tc.kind, got.Reasons, tc.code)
 			}
 		})
 	}

@@ -31,7 +31,7 @@ type artifact struct {
 func (h *Host) resolve(ctx context.Context, entry config.Plugin) (artifact, error) {
 	if entry.Builtin {
 		if h.builtins[entry.Name] == nil {
-			return artifact{}, &sdk.Error{Code: "RTL-P05", Message: "unknown builtin " + entry.Name}
+			return artifact{}, &sdk.Error{Code: "RTL-H05", Message: "unknown builtin " + entry.Name}
 		}
 
 		return artifact{key: "builtin:" + entry.Name}, nil
@@ -57,7 +57,7 @@ func (h *Host) resolve(ctx context.Context, entry config.Plugin) (artifact, erro
 
 	digest := hex.EncodeToString(sum[:])
 	if entry.SHA256 != "" && !strings.EqualFold(entry.SHA256, digest) {
-		return artifact{}, &sdk.Error{Code: "RTL-P06", Message: "plugin sha256 mismatch"}
+		return artifact{}, &sdk.Error{Code: "RTL-H06", Message: "plugin sha256 mismatch"}
 	}
 
 	result := artifact{path: location, key: entry.Name + ":" + digest}
@@ -91,7 +91,7 @@ func readArtifact(ctx context.Context, location string) ([]byte, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return nil, &sdk.Error{Code: "RTL-P07", Message: "plugin download: " + response.Status}
+		return nil, &sdk.Error{Code: "RTL-H07", Message: "plugin download: " + response.Status}
 	}
 
 	data, err := io.ReadAll(response.Body)

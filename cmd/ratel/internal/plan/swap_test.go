@@ -57,6 +57,41 @@ func TestRetype(t *testing.T) {
 	})
 }
 
+// TestRetypeCodes checks the finding of a type change without @ratel.retype:
+// RTL-R02 when the probe rewrites the table, RTL-R04 when it only rebuilds
+// indexes.
+func TestRetypeCodes(t *testing.T) {
+	t.Parallel()
+
+	retype := diff.Change{
+		Kind: diff.AlterColumnType, Key: "column app.t.v", Table: "app.t", Column: "v",
+		SQL: "ALTER TABLE app.t ALTER COLUMN v TYPE bigint;",
+	}
+
+	for _, tc := range []struct {
+		name     string
+		rewrites bool
+		code     string
+	}{
+		{"rewrite", true, "RTL-R02"},
+		{"index rebuild", false, "RTL-R04"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := keyed(18, []introspect.Column{{Key: "app.t.v", Type: "integer"}},
+				[]introspect.Column{{Key: "app.t.v", Type: "bigint"}})
+			env.Rewrites["column app.t.v"] = tc.rewrites
+			env.Reindexes["column app.t.v"] = !tc.rewrites
+
+			planned := plan.Build([]diff.Change{retype}, env, plan.Intents{})
+			if len(planned.Findings) != 1 || planned.Findings[0].Code != tc.code {
+				t.Fatalf("findings = %+v, want %s", planned.Findings, tc.code)
+			}
+		})
+	}
+}
+
 func TestReplaceIdentifier(t *testing.T) {
 	t.Parallel()
 

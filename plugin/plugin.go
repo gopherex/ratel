@@ -23,7 +23,7 @@ const (
 	MinVersion uint32 = 1
 	MaxVersion uint32 = 1
 	// InvalidMessage identifies invalid envelopes, identities and encodings.
-	InvalidMessage = "RTL-P01"
+	InvalidMessage = "RTL-H01"
 )
 
 // Error is a protocol or generator refusal with a stable diagnostic code.
@@ -98,7 +98,7 @@ func Write(writer io.Writer, format Format, message proto.Message) error {
 func Negotiate(hostMin, hostMax, pluginMin, pluginMax uint32) (uint32, error) {
 	if hostMin == 0 || pluginMin == 0 || hostMin > hostMax || pluginMin > pluginMax ||
 		max(hostMin, pluginMin) > min(hostMax, pluginMax) {
-		return 0, &Error{Code: "RTL-P02", Message: fmt.Sprintf(
+		return 0, &Error{Code: "RTL-H02", Message: fmt.Sprintf(
 			"incompatible protocol ranges host [%d,%d], plugin [%d,%d]", hostMin, hostMax, pluginMin, pluginMax,
 		)}
 	}
@@ -120,7 +120,7 @@ func HasErrors(response *pluginpb.PluginResponse) bool {
 // Failure translates an error to data. Typed errors retain their code and span.
 func Failure(err error) *pluginpb.PluginResponse {
 	diagnostic := &ir.Diagnostic{
-		Severity: ir.DiagnosticSeverity_DIAGNOSTIC_SEVERITY_ERROR, Code: "RTL-P03", Message: err.Error(),
+		Severity: ir.DiagnosticSeverity_DIAGNOSTIC_SEVERITY_ERROR, Code: "RTL-H03", Message: err.Error(),
 	}
 
 	var refusal *Error

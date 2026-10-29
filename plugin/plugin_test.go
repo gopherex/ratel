@@ -38,6 +38,28 @@ func (d diagnosing) Generate(context.Context, *pluginpb.GenerateRequest) (*plugi
 	return &pluginpb.GenerateResponse{Diagnostics: []*ir.Diagnostic{{Severity: d.severity, Code: "X-1"}}}, nil
 }
 
+// failing returns a plain error, without a code of its own.
+type failing struct{ generator }
+
+func (failing) Generate(context.Context, *pluginpb.GenerateRequest) (*pluginpb.GenerateResponse, error) {
+	return nil, errors.New("disk full")
+}
+
+// TestPlainErrorCode checks a generator error without a code gets RTL-H03.
+func TestPlainErrorCode(t *testing.T) {
+	t.Parallel()
+
+	response := plugin.Dispatch(t.Context(), failing{}, &pluginpb.PluginRequest{
+		ProtocolVersion: 1,
+		Request:         &pluginpb.PluginRequest_Generate{Generate: &pluginpb.GenerateRequest{ProtocolVersion: 1}},
+	})
+
+	if !plugin.HasErrors(response) || response.GetDiagnostics()[0].GetCode() != "RTL-H03" ||
+		response.GetDiagnostics()[0].GetMessage() != "disk full" {
+		t.Fatalf("Dispatch() = %v", response)
+	}
+}
+
 func TestDispatchDiagnostics(t *testing.T) {
 	t.Parallel()
 
@@ -109,8 +131,8 @@ func TestDispatch(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		version uint32
-		fail    bool
-	}{{"supported", 2, false}, {"zero", 0, true}, {"unsupported", 3, true}} {
+		code    string
+	}{{"supported", 2, ""}, {"zero", 0, "RTL-H02"}, {"unsupported", 3, "RTL-H02"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -121,7 +143,8 @@ func TestDispatch(t *testing.T) {
 			}
 
 			response := plugin.Dispatch(t.Context(), generator{}, request)
-			if plugin.HasErrors(response) != tc.fail {
+			if plugin.HasErrors(response) != (tc.code != "") ||
+				(tc.code != "" && response.GetDiagnostics()[0].GetCode() != tc.code) {
 				t.Fatal(response)
 			}
 		})
@@ -143,6 +166,11 @@ func TestNegotiate(t *testing.T) {
 			if got != tc.want || (err != nil) != (tc.want == 0) {
 				t.Fatalf("%d %v", got, err)
 			}
+
+			var failure *plugin.Error
+			if err != nil && (!errors.As(err, &failure) || failure.Code != "RTL-H02") {
+				t.Fatalf("error = %v, want RTL-H02", err)
+			}
 		})
 	}
 }
@@ -162,8 +190,15 @@ func TestCodec(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if err := plugin.Read(bytes.NewBufferString(tc.data), tc.format, new(pluginpb.PluginRequest)); err == nil {
+			err := plugin.Read(bytes.NewBufferString(tc.data), tc.format, new(pluginpb.PluginRequest))
+			if err == nil {
 				t.Fatal("accepted invalid input")
+			}
+
+			var failure *plugin.Error
+			if tc.format != plugin.Binary && tc.format != plugin.JSON &&
+				(!errors.As(err, &failure) || failure.Code != plugin.InvalidMessage) {
+				t.Fatalf("error = %v, want %s", err, plugin.InvalidMessage)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package plugin_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gopherex/ratel/plugin"
@@ -36,8 +37,14 @@ func TestValidateFiles(t *testing.T) {
 				files = append(files, &pluginpb.File{Path: name})
 			}
 
-			if err := plugin.ValidateFiles(files); (err != nil) != tc.fail {
+			err := plugin.ValidateFiles(files)
+			if (err != nil) != tc.fail {
 				t.Fatal(err)
+			}
+
+			var failure *plugin.Error
+			if tc.fail && (!errors.As(err, &failure) || failure.Code != "RTL-H04") {
+				t.Fatalf("error = %v, want RTL-H04", err)
 			}
 		})
 	}

@@ -3,6 +3,7 @@ package gengo_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,10 +68,26 @@ func TestOptions(t *testing.T) {
 			_, err := gengo.Generator{}.Generate(context.Background(), &pluginpb.GenerateRequest{
 				Options: []byte(tc.options),
 			})
-			if err == nil || !strings.Contains(err.Error(), tc.failure) {
-				t.Fatalf("Generate() error = %v, want %q", err, tc.failure)
+
+			var failure *plugin.Error
+			if !errors.As(err, &failure) || failure.Code != "RTL-G01" || !strings.Contains(err.Error(), tc.failure) {
+				t.Fatalf("Generate() error = %v, want RTL-G01 %q", err, tc.failure)
 			}
 		})
+	}
+}
+
+// TestQueryWithoutPackage checks a query the host gave no package is RTL-G06.
+func TestQueryWithoutPackage(t *testing.T) {
+	t.Parallel()
+
+	_, err := gengo.Generator{}.Generate(context.Background(), &pluginpb.GenerateRequest{
+		Options: []byte(options), Catalog: &ir.Catalog{}, Queries: []*ir.Query{{Name: "Orphan"}},
+	})
+
+	var failure *plugin.Error
+	if !errors.As(err, &failure) || failure.Code != "RTL-G06" {
+		t.Fatalf("Generate() error = %v, want RTL-G06", err)
 	}
 }
 
@@ -95,8 +112,59 @@ func TestNameCollisions(t *testing.T) {
 			}
 
 			response := respond(t, parser, path)
-			if !plugin.HasErrors(response) || !strings.Contains(response.GetDiagnostics()[0].GetMessage(), tc.failure) {
-				t.Fatalf("diagnostics = %v, want %q", response.GetDiagnostics(), tc.failure)
+			if !plugin.HasErrors(response) || !strings.Contains(response.GetDiagnostics()[0].GetMessage(), tc.failure) ||
+				response.GetDiagnostics()[0].GetCode() != "RTL-G05" {
+				t.Fatalf("diagnostics = %v, want RTL-G05 %q", response.GetDiagnostics(), tc.failure)
+			}
+		})
+	}
+}
+
+// TestDiagnosticCodes checks the code of each generation error a schema or
+// query can cause (docs/runtime.md, Diagnostic codes).
+func TestDiagnosticCodes(t *testing.T) {
+	parser := newParser(t)
+
+	t.Parallel()
+
+	const items = "CREATE SCHEMA app;\nCREATE TABLE app.items (id bigint PRIMARY KEY, name text NOT NULL);\n"
+
+	for _, tc := range []struct{ name, schema, queries, code string }{
+		{
+			name: "no Go type", schema: "CREATE SCHEMA app;\nCREATE TABLE app.docs (id bigint PRIMARY KEY, body tsvector);\n",
+			code: "RTL-G04",
+		},
+		{
+			name: "copyfrom without VALUES", schema: items, code: "RTL-G07",
+			queries: "-- name: Load :copyfrom\nINSERT INTO app.items (id, name) SELECT @id, @name;\n",
+		},
+		{
+			name: "duplicate result column", schema: items, code: "RTL-G08",
+			queries: "-- name: Twice :many\nSELECT id, id FROM app.items;\n",
+		},
+		{
+			name: "shared row of another shape", schema: items, code: "RTL-G09",
+			queries: "-- name: First :many\n-- @ratel.row Shared\nSELECT id FROM app.items;\n\n" +
+				"-- name: Second :many\n-- @ratel.row Shared\nSELECT name FROM app.items;\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "schema.sql"), []byte(tc.schema), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if tc.queries != "" {
+				if err := os.WriteFile(filepath.Join(dir, "queries.sql"), []byte(tc.queries), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			response := respond(t, parser, filepath.Join(dir, "schema.sql"))
+			if !plugin.HasErrors(response) || response.GetDiagnostics()[0].GetCode() != tc.code {
+				t.Fatalf("diagnostics = %v, want %s", response.GetDiagnostics(), tc.code)
 			}
 		})
 	}
