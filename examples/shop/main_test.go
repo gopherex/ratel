@@ -23,15 +23,12 @@ const containerWait = 5 * time.Minute
 func TestShop(t *testing.T) {
 	t.Parallel()
 
-	image := os.Getenv("RATEL_PG_IMAGE")
-	if image == "" {
-		image = "postgres:18-alpine"
-	}
-
 	ctx, cancel := context.WithTimeout(t.Context(), containerWait)
 	defer cancel()
 
-	container, err := postgres.Run(ctx, image, testcontainers.WithWaitStrategy(
+	// The example's migrations are planned for PostgreSQL 18 (ratel.yaml), and
+	// migrate.Apply refuses an older server, so RATEL_PG_IMAGE does not apply.
+	container, err := postgres.Run(ctx, "postgres:18-alpine", testcontainers.WithWaitStrategy(
 		wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(containerWait),
 	))
 	if err != nil {
