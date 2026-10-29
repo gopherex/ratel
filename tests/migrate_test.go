@@ -127,9 +127,6 @@ func TestMigrate(t *testing.T) {
 
 	admin := migrateServer(t)
 
-	ctx, cancel := context.WithTimeout(t.Context(), containerWait)
-	t.Cleanup(cancel)
-
 	for name, check := range map[string]func(context.Context, *testing.T, *pgxpool.Pool){
 		"phases and journal": checkPhases, "blocked then free": checkBlocked, "resume": checkResume,
 		"busy": checkBusy, "server version": checkServerVersion, "refused directories": checkRefused,
@@ -137,6 +134,11 @@ func TestMigrate(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
+			// The deadline starts here: a parallel subtest waits for a free slot
+			// after its parent returns, and that wait must not eat its budget.
+			ctx, cancel := context.WithTimeout(t.Context(), containerWait)
+			defer cancel()
 
 			check(ctx, t, admin)
 		})

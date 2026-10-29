@@ -35,19 +35,19 @@ func TestApplySchema(t *testing.T) {
 
 	pool := postgresPool(t, 18)
 
-	ctx, cancel := context.WithTimeout(t.Context(), startupTimeout)
-	t.Cleanup(cancel)
+	setup, cancelSetup := context.WithTimeout(t.Context(), startupTimeout)
+	t.Cleanup(cancelSetup)
 
-	if _, err := pool.Exec(ctx, `CREATE ROLE ratel_reader`); err != nil {
+	if _, err := pool.Exec(setup, `CREATE ROLE ratel_reader`); err != nil {
 		t.Fatal(err)
 	}
 
-	server, err := devdb.Start(ctx, config.Dev{URL: pool.Config().ConnString()}, slog.New(slog.DiscardHandler))
+	server, err := devdb.Start(setup, config.Dev{URL: pool.Config().ConnString()}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { _ = server.Close(context.WithoutCancel(ctx)) })
+	t.Cleanup(func() { _ = server.Close(context.WithoutCancel(setup)) })
 
 	cycle := `CREATE TABLE cyc.a (id int PRIMARY KEY, b int REFERENCES cyc.b);
 CREATE TABLE cyc.b (id int PRIMARY KEY, a int, CONSTRAINT b_a FOREIGN KEY (a) REFERENCES cyc.a);
@@ -69,6 +69,11 @@ ALTER TABLE cyc.a ADD FOREIGN KEY (b) REFERENCES cyc.b;`,
 			parser := newParser(t)
 
 			t.Parallel()
+
+			// The deadline starts here: a parallel subtest waits for a free slot
+			// after its parent returns, and that wait must not eat its budget.
+			ctx, cancel := context.WithTimeout(t.Context(), startupTimeout)
+			defer cancel()
 
 			files := reversed(t, parser, tc.ddl)
 
