@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -190,12 +191,6 @@ func TestLoadFailureAtomicAttachment(t *testing.T) {
 			name: "invalid ordinal", want: ratel.ErrInvalidQuery,
 			result: &relationBatch{rows: []*relationRows{{values: [][]any{{0, int64(1), int64(1)}}}}},
 		},
-		{
-			name: "unordered ordinals", want: ratel.ErrInvalidQuery,
-			result: &relationBatch{rows: []*relationRows{{values: [][]any{
-				{2, int64(2), int64(2)}, {1, int64(1), int64(1)},
-			}}}},
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -216,6 +211,50 @@ func TestLoadFailureAtomicAttachment(t *testing.T) {
 	}
 }
 
+// rowOrderByParent is the child ids of relation rows (parent ordinal, id,
+// user id) grouped by parent, each parent's ids in row order.
+func rowOrderByParent(rows [][]any) []int64 {
+	sorted := slices.Clone(rows)
+	slices.SortStableFunc(sorted, func(left, right []any) int {
+		leftParent, _ := left[0].(int)
+		rightParent, _ := right[0].(int)
+
+		return leftParent - rightParent
+	})
+
+	ids := make([]int64, 0, len(sorted))
+
+	for _, row := range sorted {
+		id, _ := row[1].(int64)
+		ids = append(ids, id)
+	}
+
+	return ids
+}
+
+// assertAttached checks each parent's children: their count, a capacity that
+// ends at the parent's own children, and the child ids in order.
+func assertAttached(t *testing.T, models []relationUser, counts []int, want []int64) {
+	t.Helper()
+
+	var got []int64
+
+	for index, count := range counts {
+		children, err := models[index].Orders()
+		if err != nil || children == nil || len(children) != count || cap(children) != count {
+			t.Fatalf("parent %d: children=%v capacity=%d err=%v", index, children, cap(children), err)
+		}
+
+		for _, child := range children {
+			got = append(got, child.ID)
+		}
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("children = %v, want %v", got, want)
+	}
+}
+
 func TestLoadGroupOwnership(t *testing.T) {
 	t.Parallel()
 
@@ -231,6 +270,23 @@ func TestLoadGroupOwnership(t *testing.T) {
 			{1, int64(12), int64(1)},
 			{3, int64(31), int64(3)},
 		}, []int{2, 0, 1}},
+		// Rows arrive in any parent order; each parent keeps its rows in row
+		// order, the child order the SQL requested.
+		{"ungrouped", [][]any{
+			{3, int64(32), int64(3)},
+			{1, int64(12), int64(1)},
+			{3, int64(31), int64(3)},
+			{1, int64(11), int64(1)},
+			{3, int64(33), int64(3)},
+		}, []int{2, 0, 3}},
+		{"grouped then not", [][]any{
+			{1, int64(11), int64(1)},
+			{1, int64(12), int64(1)},
+			{2, int64(21), int64(2)},
+			{3, int64(31), int64(3)},
+			{1, int64(13), int64(1)},
+			{2, int64(22), int64(2)},
+		}, []int{3, 2, 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -257,12 +313,7 @@ func TestLoadGroupOwnership(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				for index, count := range tc.counts {
-					children, err := models[index].Orders()
-					if err != nil || children == nil || len(children) != count || cap(children) != count {
-						t.Fatalf("parent %d: children=%v capacity=%d err=%v", index, children, cap(children), err)
-					}
-				}
+				assertAttached(t, models, tc.counts, rowOrderByParent(tc.rows))
 			}
 		})
 	}

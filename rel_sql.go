@@ -280,8 +280,7 @@ func (r Rel[M, R]) appendJoined(writer *sqlWriter) {
 	r.appendColumns(writer, "q")
 	writer.WriteString(" FROM ")
 	r.appendBody(writer)
-	writer.WriteString(` ORDER BY "p"."__ratel_parent"`)
-	r.appendChildOrder(writer, "q", true)
+	r.appendChildOrder(writer, "q", false)
 }
 
 func (r Rel[M, R]) appendChildOrder(writer *sqlWriter, alias string, comma bool) {
@@ -316,8 +315,8 @@ func (r Rel[M, R]) appendLateral(writer *sqlWriter) {
 	r.appendFilter(writer)
 	r.appendChildOrder(writer, "q", false)
 	r.query.appendPagination(writer)
-	writer.WriteString(`) AS "c" ORDER BY "p"."__ratel_parent"`)
-	r.appendChildOrder(writer, "c", true)
+	writer.WriteString(`) AS "c"`)
+	r.appendChildOrder(writer, "c", false)
 }
 
 func (r Rel[M, R]) appendWindow(writer *sqlWriter) {
@@ -352,10 +351,12 @@ func (r Rel[M, R]) appendWindow(writer *sqlWriter) {
 		writer.param(r.query.limit.V)
 	}
 
-	writer.WriteString(" ORDER BY ")
-	writer.qualifiedColumn("w", parent)
-	writer.WriteString(", ")
-	writer.qualifiedColumn("w", rank)
+	// The rank is the child order within each parent; grouping by parent is
+	// left to the loader.
+	if len(r.query.orders) > 0 {
+		writer.WriteString(" ORDER BY ")
+		writer.qualifiedColumn("w", rank)
+	}
 }
 
 func (r Rel[M, R]) appendCount(writer *sqlWriter) {

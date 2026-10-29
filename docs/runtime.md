@@ -612,9 +612,12 @@ Generated descriptors construct each edge with
   The parent-key input uses `WITH ORDINALITY`; its ordinal identifies the
   destination model, preserving duplicate parent keys and NULL FK semantics
   without reflection or Go-key comparability requirements. Row-load SQL orders
-  by parent ordinal, allowing attachments to use capacity-bounded slices of the
-  scanned model buffer without copying children. Appending to one parent's
-  loaded slice cannot overwrite another parent's children.
+  only by the relation's own child order; the loader groups the rows by parent
+  ordinal in one stable counting pass, so each parent keeps the child order,
+  and rows that arrive grouped are not copied (sorting by parent on the server
+  measured slower than the pass). Attachments are capacity-bounded slices of
+  one model buffer: appending to one parent's loaded slice cannot overwrite
+  another parent's children.
 - Each batch and every result cursor closes before the next depth starts.
   Nested relations load before results are attached to parents. Attachments
   happen deepest first, only after the entire graph succeeds. A failed

@@ -16,10 +16,14 @@ type loadJob struct {
 }
 
 type relationResult[R any] struct {
-	models      []R
-	counts      []int
+	models  []R
+	counts  []int
+	grouped bool // rows arrived in parent order so far
+	// last is the parent of the last row while the rows are grouped.
+	last int
+	// parents is the parent of each model once the rows stop being grouped.
+	parents     []int
 	parentCount int
-	lastParent  int
 }
 
 type relationRow struct {
@@ -50,7 +54,7 @@ func (r Rel[M, R]) ratelRelation(models []M) (loadJob, error) {
 
 	result := &relationResult[R]{
 		parentCount: len(models), counts: make([]int, len(models)),
-		models: make([]R, 0, len(models)),
+		models: make([]R, 0, len(models)), grouped: true,
 	}
 
 	scan, columns, cardinality := r.query.source.table.scan, len(r.query.source.table.columns), r.cardinality
@@ -76,7 +80,7 @@ func readRelated[R any](rows pgx.Rows, result *relationResult[R], scan Scanner[R
 			return fmt.Errorf("ratel: scan related model: %w", err)
 		}
 
-		if row.parent <= 0 || row.parent > result.parentCount || row.parent < result.lastParent {
+		if row.parent <= 0 || row.parent > result.parentCount {
 			return ErrInvalidQuery
 		}
 
@@ -87,20 +91,76 @@ func readRelated[R any](rows pgx.Rows, result *relationResult[R], scan Scanner[R
 			return ErrMultipleRows
 		}
 
-		result.models = append(result.models, model)
-		result.lastParent = row.parent
+		result.add(model, parent)
 	}
 
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("ratel: iterate relation: %w", err)
 	}
 
+	result.group()
+
 	return nil
 }
 
+// add records a model of a parent whose count is already incremented.
+// While rows arrive in parent order no parent list is kept: the parents of
+// the rows so far follow from the counts.
+func (result *relationResult[R]) add(model R, parent int) {
+	switch {
+	case result.grouped && parent >= result.last:
+		result.last = parent
+	case result.grouped:
+		result.grouped = false
+		result.parents = make([]int, 0, cap(result.models))
+
+		for earlier, count := range result.counts {
+			if earlier == parent {
+				count-- // the current row is not appended yet
+			}
+
+			for range count {
+				result.parents = append(result.parents, earlier)
+			}
+		}
+
+		result.parents = append(result.parents, parent)
+	default:
+		result.parents = append(result.parents, parent)
+	}
+
+	result.models = append(result.models, model)
+}
+
+// group orders the models by parent, keeping each parent's rows in row
+// order, which is the child order the SQL requested. The SQL leaves the
+// grouping to it: sorting rows by parent on the server costs more than one
+// counting pass here. Rows that arrived grouped are not copied.
+func (result *relationResult[R]) group() {
+	if result.grouped {
+		return
+	}
+
+	next := make([]int, len(result.counts))
+	offset := 0
+
+	for parent, count := range result.counts {
+		next[parent] = offset
+		offset += count
+	}
+
+	grouped := make([]R, len(result.models))
+	for row, parent := range result.parents {
+		grouped[next[parent]] = result.models[row]
+		next[parent]++
+	}
+
+	result.models, result.grouped = grouped, true
+}
+
 func attachRelated[M, R any](models []M, result *relationResult[R], attach func(*M, []R)) {
-	// Every row-load strategy orders by parent ordinal. Keep each group's capacity
-	// bounded so appending to one loaded relation cannot overwrite another.
+	// The models are grouped by parent. Keep each group's capacity bounded so
+	// appending to one loaded relation cannot overwrite another.
 	children := result.models
 
 	for index, count := range result.counts {

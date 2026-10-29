@@ -151,14 +151,14 @@ func TestRelOrderBy(t *testing.T) {
 			build: func(rel ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder] {
 				return rel.OrderBy(byID.Desc())
 			},
-			want: `ORDER BY "p"."__ratel_parent", "q"."id" DESC`,
+			want: `ORDER BY "q"."id" DESC`, forbidden: `ORDER BY "p"`,
 		},
 		{
 			name: "several terms",
 			build: func(rel ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder] {
 				return rel.OrderBy(byID.Asc(), owner.Desc())
 			},
-			want: `ORDER BY "p"."__ratel_parent", "q"."id" ASC, "q"."user_id" DESC`,
+			want: `ORDER BY "q"."id" ASC, "q"."user_id" DESC`,
 		},
 		{
 			name: "calls append",
@@ -172,8 +172,8 @@ func TestRelOrderBy(t *testing.T) {
 			build: func(rel ratel.Rel[relationUser, relationOrder]) ratel.Rel[relationUser, relationOrder] {
 				return rel.OrderBy()
 			},
-			want:      `ORDER BY "p"."__ratel_parent"`,
-			forbidden: ` ASC`,
+			want:      `ANY($1)`,
+			forbidden: `ORDER BY`,
 		},
 		{
 			name: "invalid column",

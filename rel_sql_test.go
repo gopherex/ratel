@@ -180,17 +180,18 @@ func TestRelationSQLShapes(t *testing.T) {
 				Limit(2).Offset(1).OrderBy(byID.Asc(), owner.Desc()),
 			fragments: []string{
 				`WHERE "q"."user_id" = "p"."k0" ORDER BY "q"."id" ASC, "q"."user_id" DESC LIMIT $2 OFFSET $3) AS "c"`,
-				`AS "c" ORDER BY "p"."__ratel_parent", "c"."id" ASC, "c"."user_id" DESC`,
+				`AS "c" ORDER BY "c"."id" ASC, "c"."user_id" DESC`,
 			},
-			args: 3,
+			absent: []string{`ORDER BY "p"`},
+			args:   3,
 		},
 		{
 			name:     "lateral unordered",
 			relation: ratel.NewRel(relTable(plain, []string{"id"}), ratel.RelMany, relInt64Keys("user_id"), attach).Limit(2),
 			fragments: []string{
-				`WHERE "q"."user_id" = "p"."k0" LIMIT $2) AS "c" ORDER BY "p"."__ratel_parent"`,
+				`WHERE "q"."user_id" = "p"."k0" LIMIT $2) AS "c"`,
 			},
-			absent: []string{"ASC", "DESC"},
+			absent: []string{"ASC", "DESC", "ORDER BY"},
 			args:   2,
 		},
 		{
@@ -199,7 +200,7 @@ func TestRelationSQLShapes(t *testing.T) {
 				Limit(3).OrderBy(byID.Desc()).Strategy(ratel.Window()),
 			fragments: []string{
 				`row_number() OVER (PARTITION BY "p"."__ratel_parent" ORDER BY "q"."id" DESC) AS "__ratel_rank"`,
-				`WHERE "w"."__ratel_rank" > $2 AND "w"."__ratel_rank" - $3 <= $4`,
+				`WHERE "w"."__ratel_rank" > $2 AND "w"."__ratel_rank" - $3 <= $4 ORDER BY "w"."__ratel_rank"`,
 			},
 			args: 4,
 		},
@@ -212,9 +213,9 @@ func TestRelationSQLShapes(t *testing.T) {
 				`SELECT "w"."__ratel_parent_", `,
 				`"p"."__ratel_parent" AS "__ratel_parent_"`,
 				`AS "__ratel_rank_" FROM`,
-				`ORDER BY "w"."__ratel_parent_", "w"."__ratel_rank_"`,
 			},
-			args: 2,
+			absent: []string{`ORDER BY "w"`},
+			args:   2,
 		},
 		{
 			name: "window avoids repeated collisions",
