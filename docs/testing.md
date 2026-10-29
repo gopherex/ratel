@@ -177,6 +177,22 @@ Gates, in order; a gate starts only after the previous one passes:
    exercised through its public API on testcontainers; extended as each module
    lands.
 
+### Comparison with other libraries
+
+Module `bench` runs one schema and seed (1000 users, 10 orders each) through
+pgx by hand, ratel, sqlc, GORM, bun and ent: a row by key, a page of 100, the
+page with its orders, an insert, a bulk insert of 100 and an update by key.
+Each library is configured as its documentation advises for speed and uses
+its own idiom (sqlc's and pgx's bulk insert is `COPY`); the database/sql
+libraries run on pgx's stdlib driver over the same pool. PostgreSQL runs with
+`fsync`, `synchronous_commit`, `full_page_writes` and autovacuum off and every
+library is warmed up first, so the numbers measure the libraries, not the
+disk. `TestLibrariesAgree` (in `make test-integration`) checks that all six
+read and write the same data. `make bench-gen` regenerates the ratel, sqlc
+(Docker image `sqlc/sqlc`) and ent code; `make bench-compare` runs
+`BENCH_COUNT` (default 10) repetitions into `bench/results.txt` and tabulates
+them with benchstat into `bench/results-table.txt`.
+
 ### Output-plugin SDK and host
 
 The public conformance helpers live in `plugin/plugintest`. Authors run
