@@ -719,8 +719,11 @@ Generated descriptors construct each edge with
   `ExecMode` with `ErrInvalidQuery` before any SQL is sent. Silently ignoring a
   requested protocol mode would be unsafe behind PgBouncer. Plain SELECT and
   write operations retain their per-call exec-mode support.
-- Parent filters: `Has`, `HasNone`, `HasCount(op, n)` and `Every`. `Every` is
-  true for a parent with no children, as documented on the method.
+- Parent filters: `Has(cond)` (correlated `EXISTS`), `HasNone(cond)`,
+  `Every(cond)` and `HasCount()` with `Eq`, `Ne`, `Lt`, `Lte`, `Gt`, `Gte`
+  (`app.Users.Orders.HasCount().Gt(3)`, a correlated `count(*)`). All apply
+  the relation's own `Where` predicates. `Every` is true for a parent with no
+  children, as documented on the method.
 - A query with `With` returns a type that has no `All` iterator: relations need
   the parent keys first, and loading per row would hold the cursor open. For
   streaming with relations it has `Chunks(ctx, n) iter.Seq2[[]M, error]`, which

@@ -94,7 +94,7 @@ func relOrderTable() ratel.Table[relOrder] {
 
 func relUserKeys(projectID func(relUser) int64) []ratel.RelKey[relUser] {
 	return []ratel.RelKey[relUser]{
-		{Column: "tenant", Type: pgx.Identifier{"pg_catalog", "int8"}, Values: func(models []relUser) any {
+		{Column: "tenant", Parent: "tenant", Type: pgx.Identifier{"pg_catalog", "int8"}, Values: func(models []relUser) any {
 			values := make([]int64, len(models))
 			for index := range models {
 				values[index] = models[index].Tenant
@@ -102,7 +102,7 @@ func relUserKeys(projectID func(relUser) int64) []ratel.RelKey[relUser] {
 
 			return values
 		}},
-		{Column: "user_id", Type: pgx.Identifier{"pg_catalog", "int8"}, Values: func(models []relUser) any {
+		{Column: "user_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"}, Values: func(models []relUser) any {
 			values := make([]int64, len(models))
 			for index := range models {
 				values[index] = projectID(models[index])
@@ -123,7 +123,7 @@ func relDescriptors() (relUsers, relOrders) {
 		func(model *relUser, children []relOrder) { model.R.Orders = ratel.LoadedFrom(children) },
 		ratel.RelCount[relUser, relOrder](func(model *relUser, count int64) { model.R.OrderCount = ratel.LoadedFrom(count) }))
 	managerKeys := relUserKeys(func(model relUser) int64 { return model.ID })
-	managerKeys[1].Column = "id"
+	managerKeys[1].Column, managerKeys[1].Parent = "id", "manager_id"
 	managerKeys[1].Values = func(models []relUser) any {
 		values := make([]pgtype.Int8, len(models))
 		for index := range models {
@@ -270,6 +270,7 @@ func TestRelationsRuntime(t *testing.T) {
 		{"connection protocols", relationsProtocols},
 		{"single key ANY", relationsSingleKey},
 		{"composite join table target", relationsCompositeThrough},
+		{"parent filters", relationsParentFilters},
 		{"connection kill mid-batch", relationsChaos},
 	} {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); tc.run(t, pool) })
@@ -345,6 +346,45 @@ func assertRelDetails(t *testing.T, models []relUser) {
 	tags, err := models[0].R.Tags.Get()
 	if err != nil || len(tags) != 2 {
 		t.Fatalf("tags=%v err=%v", tags, err)
+	}
+}
+
+// relationsParentFilters checks Has, HasNone, Every and HasCount against the
+// seed: user (1,1) has orders 11, 12, 13 and tags 10, 11; (1,2) has order 21;
+// (1,3) has none; (2,1) has order 11.
+func relationsParentFilters(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+
+	users, orders := relDescriptors()
+	database := ratel.New(pool)
+
+	for _, tc := range []struct {
+		name      string
+		condition ratel.Cond[relUser]
+		want      [][2]int64
+	}{
+		{"has", users.Orders.Has(orders.ID.Gt(12)), [][2]int64{{1, 1}, {1, 2}}},
+		{"has none", users.Orders.HasNone(orders.ID.Gt(12)), [][2]int64{{1, 3}, {2, 1}}},
+		{"every, empty included", users.Orders.Every(orders.ID.Gt(12)), [][2]int64{{1, 2}, {1, 3}}},
+		{"count at least", users.Orders.HasCount().Gte(2), [][2]int64{{1, 1}}},
+		{"count zero", users.Orders.HasCount().Eq(0), [][2]int64{{1, 3}}},
+		{"count with relation where", users.Orders.Where(orders.ID.Lt(13)).HasCount().Eq(2), [][2]int64{{1, 1}}},
+		{"count through join table", users.Tags.HasCount().Eq(2), [][2]int64{{1, 1}}},
+	} {
+		models, err := database.Run(users.Select().Where(tc.condition).
+			OrderBy(users.Tenant.Asc(), users.ID.Asc())).List(t.Context())
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+
+		got := make([][2]int64, 0, len(models))
+		for index := range models {
+			got = append(got, [2]int64{models[index].Tenant, models[index].ID})
+		}
+
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("%s = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

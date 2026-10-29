@@ -43,6 +43,29 @@ func TestHas(t *testing.T) {
 			[]any{int64(9), int64(5)},
 		},
 		{
+			"none", ratel.From(users).Where(users.Orders.HasNone(orderID.Gt(5))),
+			where + `NOT (EXISTS (SELECT 1 FROM "app"."orders" AS "h0" WHERE "h0"."user_id" = "q"."id" AND "h0"."id" > $1))`,
+			[]any{int64(5)},
+		},
+		{
+			"every", ratel.From(users).Where(users.Orders.Every(orderID.Gt(5))),
+			where + `NOT (EXISTS (SELECT 1 FROM "app"."orders" AS "h0" WHERE "h0"."user_id" = "q"."id" AND ` +
+				`NOT ("h0"."id" > $1)))`,
+			[]any{int64(5)},
+		},
+		{
+			"count", ratel.From(users).Where(users.Orders.Where(orderID.Lt(9)).HasCount().Gte(2)),
+			where + `(SELECT count(*) FROM "app"."orders" AS "h0" WHERE "h0"."user_id" = "q"."id" AND ` +
+				`("h0"."id" < $1 AND TRUE)) >= $2`,
+			[]any{int64(9), int64(2)},
+		},
+		{
+			"count through", ratel.From(users).Where(join.HasCount().Eq(0)),
+			where + `(SELECT count(*) FROM "app"."orders" AS "h0" JOIN "app"."user_orders" AS "h0l" ON ` +
+				`"h0l"."order_id" = "h0"."id" WHERE "h0l"."user_id" = "q"."id" AND TRUE) = $1`,
+			[]any{int64(0)},
+		},
+		{
 			"through", ratel.From(users).Where(join.Has(ratel.Cond[relationOrder]{})),
 			where + `EXISTS (SELECT 1 FROM "app"."orders" AS "h0" JOIN "app"."user_orders" AS "h0l" ON ` +
 				`"h0l"."order_id" = "h0"."id" WHERE "h0l"."user_id" = "q"."id" AND TRUE)`,
@@ -66,6 +89,34 @@ func TestHas(t *testing.T) {
 
 	if _, err := build(ratel.From(users).Where(unkeyed.Has(orderID.Gt(1)))); !errors.Is(err, ratel.ErrInvalidQuery) {
 		t.Fatalf("Has without a parent column = %v", err)
+	}
+}
+
+func TestHasCountOperators(t *testing.T) {
+	t.Parallel()
+
+	users, _ := relationDescriptors()
+	count := users.Orders.HasCount()
+
+	for _, tc := range []struct {
+		operator  string
+		condition ratel.Cond[relationUser]
+	}{
+		{"=", count.Eq(1)},
+		{"<>", count.Ne(1)},
+		{"<", count.Lt(1)},
+		{"<=", count.Lte(1)},
+		{">", count.Gt(1)},
+		{">=", count.Gte(1)},
+	} {
+		t.Run(tc.operator, func(t *testing.T) {
+			t.Parallel()
+
+			statement, err := build(ratel.From(users).Where(tc.condition))
+			if err != nil || !strings.HasSuffix(statement.SQL, ") "+tc.operator+" $1") {
+				t.Fatalf("got %+v, %v", statement, err)
+			}
+		})
 	}
 }
 
@@ -109,6 +160,7 @@ func BenchmarkHas(b *testing.B) {
 	}{
 		{"direct", ratel.From(users).Where(users.Orders.Has(orderID.Gt(5)))},
 		{"through", ratel.From(users).Where(join.Has(orderID.Gt(5)))},
+		{"count", ratel.From(users).Where(users.Orders.HasCount().Gt(3))},
 	}
 
 	for index := range cases {
