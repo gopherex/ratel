@@ -2,18 +2,41 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"runtime/debug"
+
+	"github.com/spf13/cobra"
 )
 
 // Exit codes of the ratel command (docs/cli.md).
 const (
-	exitOK    = 0
-	exitUsage = 2
-	// program name plus one command.
-	minArgs = 2
+	exitOK          = 0
+	exitDiagnostics = 1
+	exitUsage       = 2
 )
+
+// commandError is a command that ran and failed (exit 1). Any other error
+// cobra returns, such as an unknown flag or a missing operand, is a usage
+// error (exit 2).
+type commandError struct{ err error }
+
+func (e commandError) Error() string { return e.err.Error() }
+
+func (e commandError) Unwrap() error { return e.err }
+
+// failure marks err, when set, as the failure of a command that ran.
+func failure(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return commandError{err: err}
+}
 
 // Version returns the module version the binary was built from: "(devel)" for
 // a go build or go run without a version stamp.
@@ -36,38 +59,65 @@ func VersionOf(info *debug.BuildInfo) string {
 }
 
 // Main runs the ratel command with the given arguments and writers and returns
-// its exit code.
+// its exit code. An interrupt cancels the running command.
 func Main(args []string, stdout, stderr io.Writer) int {
-	if len(args) < minArgs {
-		usage(stderr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 
-		return exitUsage
-	}
+	root := rootCommand(stdout, stderr)
+	root.SetArgs(args[1:])
 
-	switch args[1] {
-	case "init":
-		return initProject(args[2:], stdout, stderr)
-	case "check":
-		return check(args[2:], stderr)
-	case "generate":
-		return generate(args[2:], stderr)
-	case "dump":
-		return dump(args[2:], stdout, stderr)
-	case "migrate":
-		return migrateCommand(args[2:], stdout, stderr)
-	case "version":
-		fmt.Fprintln(stdout, Version())
+	command, err := root.ExecuteContextC(ctx)
 
+	var failed commandError
+
+	switch {
+	case err == nil:
 		return exitOK
+	case errors.As(err, &failed):
+		fmt.Fprintf(stderr, "%s: %v\n", command.CommandPath(), failed.err)
+
+		return exitDiagnostics
 	default:
-		fmt.Fprintf(stderr, "ratel: unknown command %q\n", args[1])
-		usage(stderr)
+		fmt.Fprintf(stderr, "%s: %v\nRun '%s --help' for usage.\n", command.CommandPath(), err, command.CommandPath())
 
 		return exitUsage
 	}
 }
 
-func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: ratel <command> [flags]")
-	fmt.Fprintln(w, "commands: version, init, check, generate, dump, migrate")
+func rootCommand(stdout, stderr io.Writer) *cobra.Command {
+	root := &cobra.Command{
+		Use:   "ratel",
+		Short: "PostgreSQL data access for Go: code from SQL and migrations that never lock",
+		Long: `ratel generates typed Go code from PostgreSQL schema and query files and
+plans migrations from the schema files, so that applying them never blocks
+traffic. Every command reads ratel.yaml; docs: https://gopherex.github.io/ratel/`,
+		Version:       Version(),
+		SilenceErrors: true,
+		SilenceUsage:  true,
+	}
+
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetVersionTemplate("{{.Version}}\n")
+	root.AddCommand(versionCommand(), initCommand(), checkCommand(), generateCommand(), dumpCommand(),
+		migrateCommand())
+
+	return root
+}
+
+func versionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version the binary was built from",
+		Args:  cobra.NoArgs,
+		Run: func(command *cobra.Command, _ []string) {
+			fmt.Fprintln(command.OutOrStdout(), Version())
+		},
+	}
+}
+
+// configFlag adds --config to command.
+func configFlag(command *cobra.Command) *string {
+	return command.Flags().String("config", "ratel.yaml", "configuration file")
 }

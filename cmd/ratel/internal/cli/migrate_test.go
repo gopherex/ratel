@@ -15,7 +15,6 @@ func TestMigrateUsage(t *testing.T) {
 	t.Parallel()
 
 	for _, args := range [][]string{
-		{},
 		{"plan"},
 		{"plan", "a", "b"},
 		{"new"},

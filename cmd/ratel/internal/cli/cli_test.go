@@ -31,16 +31,46 @@ func TestMain(t *testing.T) {
 			wantOut: "(devel)",
 		},
 		{
-			name:    "no command is a usage error",
+			name:    "version flag prints the module version",
+			args:    []string{"ratel", "--version"},
+			code:    codeOK,
+			wantOut: "(devel)",
+		},
+		{
+			name:    "no command prints help",
 			args:    []string{"ratel"},
-			code:    codeUsage,
-			wantErr: "usage: ratel",
+			code:    codeOK,
+			wantOut: "Available Commands:",
+		},
+		{
+			name:    "help flag prints help",
+			args:    []string{"ratel", "--help"},
+			code:    codeOK,
+			wantOut: "Usage:",
+		},
+		{
+			name:    "subcommand help",
+			args:    []string{"ratel", "migrate", "apply", "--help"},
+			code:    codeOK,
+			wantOut: "--url string",
+		},
+		{
+			name:    "migrate without a subcommand prints help",
+			args:    []string{"ratel", "migrate"},
+			code:    codeOK,
+			wantOut: "Available Commands:",
 		},
 		{
 			name:    "unknown command is a usage error",
 			args:    []string{"ratel", "bogus"},
 			code:    codeUsage,
 			wantErr: `unknown command "bogus"`,
+		},
+		{
+			name:    "unknown flag is a usage error",
+			args:    []string{"ratel", "check", "--bogus"},
+			code:    codeUsage,
+			wantErr: "Run 'ratel check --help' for usage.",
 		},
 	}
 

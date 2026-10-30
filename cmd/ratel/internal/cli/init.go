@@ -2,12 +2,12 @@ package cli
 
 import (
 	"errors"
-	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 // errConfigured is a directory that already has a ratel.yaml.
@@ -62,25 +62,29 @@ const noPlugins = `plugins: []                   # the Go generator, once the mo
 // starterSchema keeps the schema pattern matching a file.
 const starterSchema = "-- CREATE SCHEMA, CREATE TABLE and other DDL of the application.\n"
 
-// initProject writes ratel.yaml and the source directories.
-func initProject(args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("init", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	directory := flags.String("dir", ".", "project directory")
+func initCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "init",
+		Short: "Write a commented ratel.yaml and the source directories",
+		Long: `init writes a commented ratel.yaml with the default values and creates
+schema/, queries/ and migrations/. With a go.mod in the directory it
+configures the Go generator for <module>/internal/db. An existing ratel.yaml
+is never overwritten.`,
+		Args: cobra.NoArgs,
+	}
+	directory := command.Flags().String("dir", ".", "project directory")
 
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		return exitUsage
+	command.RunE = func(command *cobra.Command, _ []string) error {
+		if err := scaffold(*directory); err != nil {
+			return failure(err)
+		}
+
+		fmt.Fprintln(command.OutOrStdout(), "wrote", filepath.Join(*directory, "ratel.yaml"))
+
+		return nil
 	}
 
-	if err := scaffold(*directory); err != nil {
-		fmt.Fprintln(stderr, "ratel init:", err)
-
-		return exitDiagnostics
-	}
-
-	fmt.Fprintln(stdout, "wrote", filepath.Join(*directory, "ratel.yaml"))
-
-	return exitOK
+	return command
 }
 
 func scaffold(directory string) error {

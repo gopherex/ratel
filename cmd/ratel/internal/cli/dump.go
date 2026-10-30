@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"flag"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -22,37 +23,34 @@ import (
 	host "github.com/gopherex/ratel/cmd/ratel/internal/plugin"
 )
 
-func dump(args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("dump", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	configPath := flags.String("config", "ratel.yaml", "configuration file")
-	format := flags.String("format", "binpb", "binpb or json")
-	name := flags.String("plugin", "", "dump the negotiated request for this plugin")
+// errFormat is a --format other than binpb or json.
+var errFormat = errors.New("format must be binpb or json")
 
-	if err := flags.Parse(args); err != nil {
-		return exitUsage
+func dumpCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "dump",
+		Short: "Write the catalog, or the exact request for one plugin, to stdout",
+		Long: `dump builds the catalog and infers every configured query, then writes the
+Catalog, or with --plugin the PluginRequest that plugin would receive, to
+stdout. It does not run the plugin: the output replays it.`,
+		Example: `  ratel dump --format json > catalog.json
+  ratel dump --plugin go > request.binpb`,
+		Args: cobra.NoArgs,
+	}
+	configPath := configFlag(command)
+	format := command.Flags().String("format", "binpb", "binpb or json")
+	name := command.Flags().String("plugin", "", "dump the negotiated request for this plugin")
+
+	command.RunE = func(command *cobra.Command, _ []string) error {
+		encoding := sdk.Format(*format)
+		if encoding != sdk.Binary && encoding != sdk.JSON {
+			return errFormat
+		}
+
+		return failure(dumpCatalog(*configPath, *name, encoding, command.OutOrStdout(), command.ErrOrStderr()))
 	}
 
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "ratel dump: unexpected positional arguments")
-
-		return exitUsage
-	}
-
-	encoding := sdk.Format(*format)
-	if encoding != sdk.Binary && encoding != sdk.JSON {
-		fmt.Fprintln(stderr, "ratel dump: format must be binpb or json")
-
-		return exitUsage
-	}
-
-	if err := dumpCatalog(*configPath, *name, encoding, stdout, stderr); err != nil {
-		fmt.Fprintln(stderr, "ratel dump:", err)
-
-		return 1
-	}
-
-	return exitOK
+	return command
 }
 
 func dumpCatalog(configPath, name string, format sdk.Format, stdout, stderr io.Writer) error {

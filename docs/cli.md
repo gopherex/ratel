@@ -1,7 +1,11 @@
 # CLI and configuration
 
 One binary, `ratel`, installed with
-`go install github.com/gopherex/ratel/cmd/ratel@latest`.
+`go install github.com/gopherex/ratel/cmd/ratel@latest`. It is built on
+cobra: `ratel --help`, `ratel help <command>` and `<command> --help` describe
+every command and flag, `ratel` alone prints the help, `ratel --version` and
+`ratel version` print the module version, and `ratel completion
+bash|zsh|fish|powershell` writes a shell completion script.
 
 ## Commands
 
@@ -114,7 +118,10 @@ ratel dump --plugin go > request.binpb
 The second command requires the plugin `go` (`builtin: true`) in `ratel.yaml`.
 
 Exit codes: `0` success; `1` diagnostics with severity `ERROR`, a failed
-migration step, a checksum mismatch or detected drift; `2` usage error.
+migration step, a checksum mismatch or detected drift; `2` usage error (an
+unknown command or flag, a wrong number of operands, a missing `--url`). A
+failure prints `ratel <command>: <error>`; a usage error adds `Run 'ratel
+<command> --help' for usage.`
 Diagnostics print as `file:line:column: severity CODE: message`; `--format=json`
 prints them as JSON lines.
 

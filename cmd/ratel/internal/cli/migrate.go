@@ -3,14 +3,13 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
 	tclog "github.com/testcontainers/testcontainers-go/log"
 
 	"github.com/gopherex/ratel/pkg/ir"
@@ -30,17 +29,8 @@ import (
 var (
 	// errFindings is a plan or lint run with findings that fail it.
 	errFindings = errors.New("findings fail the migration")
-	// errUnknownCommand is a subcommand migrateFlags did not accept.
-	errUnknownCommand = errors.New("unknown subcommand")
-)
-
-// Subcommands named more than once: those taking operands, and those using
-// the dev server.
-const (
-	planCommand  = "plan"
-	newCommand   = "new"
-	lintCommand  = "lint"
-	driftCommand = "drift"
+	// errURL is a target command without --url.
+	errURL = errors.New("--url is required")
 )
 
 // workspace is what every migrate command reads: the configuration, the
@@ -57,109 +47,112 @@ type workspace struct {
 	log       *slog.Logger // progress and diagnostics, on stderr
 }
 
-// arguments are a migrate subcommand's flags and operands.
-type arguments struct {
-	command, config, url string
-	level                slog.Level
-	operands             []string
+// migrateFlags are the flags every migrate subcommand shares.
+type migrateFlags struct {
+	config string
+	level  slog.Level
 }
 
-// migrateUsage names the subcommands.
-const migrateUsage = "usage: ratel migrate plan <name> | new <name> | hash | lint [<file>...] | verify | " +
-	"status --url <dsn> | apply --url <dsn> | contract --url <dsn> | drift --url <dsn> " +
-	"[--log-level debug|info|warn|error]"
-
-// migrateCommand runs one migrate subcommand.
-func migrateCommand(args []string, stdout, stderr io.Writer) int {
-	parsed, ok := migrateFlags(args, stderr)
-	if !ok {
-		return exitUsage
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
-	log := newLogger(stderr, parsed.level)
-
-	if parsed.command == planCommand || parsed.command == lintCommand || parsed.command == driftCommand {
-		// testcontainers prints its Docker banner and some container
-		// messages through its process-wide default logger; this process
-		// runs one command, so the command sets it.
-		tclog.SetDefault(devdb.DebugLogger(log))
-	}
-
-	space, err := openWorkspace(parsed.config, stdout, log)
-	if err == nil {
-		err = space.run(ctx, parsed)
-	}
-
-	if err != nil {
-		fmt.Fprintf(stderr, "ratel migrate %s: %v\n", parsed.command, err)
-
-		return exitDiagnostics
-	}
-
-	return exitOK
+// open reads the workspace a subcommand runs on.
+func (f *migrateFlags) open(command *cobra.Command) (*workspace, error) {
+	return openWorkspace(f.config, command.OutOrStdout(), newLogger(command.ErrOrStderr(), f.level))
 }
 
-func migrateFlags(args []string, stderr io.Writer) (arguments, bool) {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, migrateUsage)
-
-		return arguments{}, false
+func migrateCommand() *cobra.Command {
+	flags := &migrateFlags{level: slog.LevelInfo}
+	command := &cobra.Command{
+		Use:   "migrate",
+		Short: "Plan, check and apply migrations",
+		Long: `migrate plans migrations from the schema files, checks them and applies them
+without blocking traffic. Results go to stdout, progress to stderr as slog
+records at --log-level.`,
+		// Without Args and RunE cobra prints help for an unknown subcommand
+		// and succeeds; with them it is a usage error.
+		Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 	}
+	command.PersistentFlags().StringVar(&flags.config, "config", "ratel.yaml", "configuration file")
+	command.PersistentFlags().TextVar(&flags.level, "log-level", slog.LevelInfo, "debug, info, warn or error")
 
-	flags := flag.NewFlagSet("migrate "+args[0], flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	configPath := flags.String("config", "ratel.yaml", "configuration file")
-	url := flags.String("url", "", "target database")
+	command.AddCommand(
+		flags.local("plan <name>", "Diff the schema against the migrations and write the planned steps",
+			cobra.ExactArgs(1), func(ctx context.Context, w *workspace, operands []string) error {
+				w.devServer()
 
-	level := slog.LevelInfo
-	flags.TextVar(&level, "log-level", slog.LevelInfo, "debug, info, warn or error")
+				return w.plan(ctx, operands[0])
+			}),
+		flags.local("new <name>", "Write an empty hand-written migration file", cobra.ExactArgs(1),
+			func(_ context.Context, w *workspace, operands []string) error { return w.create(operands[0]) }),
+		flags.local("hash", "Seal hand-written steps and update ratel.sum", cobra.NoArgs,
+			func(_ context.Context, w *workspace, _ []string) error { return w.hash() }),
+		flags.local("lint [<file>...]", "Run the RTL rules over planned and hand-written migrations",
+			cobra.ArbitraryArgs, func(ctx context.Context, w *workspace, operands []string) error {
+				w.devServer()
 
-	operands, err := parseInterspersed(flags, args[1:])
-	if err != nil {
-		return arguments{}, false
-	}
+				return w.lint(ctx, operands)
+			}),
+		flags.local("verify", "Check ratel.sum and that every step is sealed", cobra.NoArgs,
+			func(_ context.Context, w *workspace, _ []string) error { return w.verify() }),
+		flags.target("status", "Print the journal state of every step",
+			func(ctx context.Context, w *workspace, url string) error { return w.status(ctx, url) }),
+		flags.target("apply", "Run pending expand and backfill steps",
+			func(ctx context.Context, w *workspace, url string) error { return w.apply(ctx, url, migrate.Apply) }),
+		flags.target("contract", "Run pending contract steps",
+			func(ctx context.Context, w *workspace, url string) error { return w.apply(ctx, url, migrate.Contract) }),
+		flags.target("drift", "Diff the target against the state its applied migrations produce",
+			func(ctx context.Context, w *workspace, url string) error {
+				w.devServer()
 
-	parsed := arguments{command: args[0], config: *configPath, url: *url, level: level, operands: operands}
-	needsURL, known := map[string]bool{
-		"status": true, "apply": true, "contract": true, driftCommand: true, planCommand: false, newCommand: false,
-		"hash": false, lintCommand: false, "verify": false,
-	}[parsed.command]
-	named := parsed.command == planCommand || parsed.command == newCommand
+				return w.drift(ctx, url)
+			}),
+	)
 
-	switch {
-	case !known,
-		named && len(parsed.operands) != 1,
-		!named && parsed.command != lintCommand && len(parsed.operands) != 0,
-		needsURL != (parsed.url != ""):
-		fmt.Fprintln(stderr, migrateUsage)
+	return command
+}
 
-		return arguments{}, false
-	default:
-		return parsed, true
+// local is a migrate subcommand that needs no target database.
+func (f *migrateFlags) local(use, short string, args cobra.PositionalArgs,
+	run func(context.Context, *workspace, []string) error,
+) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Args:  args,
+		RunE: func(command *cobra.Command, operands []string) error {
+			space, err := f.open(command)
+			if err == nil {
+				err = run(command.Context(), space, operands)
+			}
+
+			return failure(err)
+		},
 	}
 }
 
-// parseInterspersed parses flags placed before, between or after the
-// operands, as in "plan init --log-level debug"; the flag package stops at
-// the first operand.
-func parseInterspersed(flags *flag.FlagSet, args []string) ([]string, error) {
-	var operands []string
+// target is a migrate subcommand run against the database of --url.
+func (f *migrateFlags) target(use, short string, run func(context.Context, *workspace, string) error) *cobra.Command {
+	var url string
 
-	for {
-		if err := flags.Parse(args); err != nil {
-			return nil, fmt.Errorf("flags: %w", err)
+	command := f.local(use, short, cobra.NoArgs, func(ctx context.Context, w *workspace, _ []string) error {
+		return run(ctx, w, url)
+	})
+	command.Flags().StringVar(&url, "url", "", "target database (required)")
+	command.PreRunE = func(*cobra.Command, []string) error {
+		if url == "" {
+			return errURL
 		}
 
-		if flags.NArg() == 0 {
-			return operands, nil
-		}
-
-		operands = append(operands, flags.Arg(0))
-		args = flags.Args()[1:]
+		return nil
 	}
+
+	return command
+}
+
+// devServer routes testcontainers' messages into the command's log: the
+// library prints its Docker banner and container messages through a
+// process-wide default logger, and this process runs one command.
+func (w *workspace) devServer() {
+	tclog.SetDefault(devdb.DebugLogger(w.log))
 }
 
 // newLogger writes records at level and above to out, one line each,
@@ -226,31 +219,6 @@ func openWorkspace(configPath string, stdout io.Writer, log *slog.Logger) (*work
 		settings: settings, parser: parser, schema: files, catalog: built, directory: directory, sources: sources,
 		quoter: ident.New(parser), stdout: stdout, log: log,
 	}, nil
-}
-
-func (w *workspace) run(ctx context.Context, parsed arguments) error {
-	switch parsed.command {
-	case "verify":
-		return w.verify()
-	case planCommand:
-		return w.plan(ctx, parsed.operands[0])
-	case newCommand:
-		return w.create(parsed.operands[0])
-	case "hash":
-		return w.hash()
-	case lintCommand:
-		return w.lint(ctx, parsed.operands)
-	case "status":
-		return w.status(ctx, parsed.url)
-	case "apply":
-		return w.apply(ctx, parsed.url, migrate.Apply)
-	case "contract":
-		return w.apply(ctx, parsed.url, migrate.Contract)
-	case driftCommand:
-		return w.drift(ctx, parsed.url)
-	default:
-		return fmt.Errorf("%w %q", errUnknownCommand, parsed.command)
-	}
 }
 
 // verify checks what apply checks: the migration files against ratel.sum

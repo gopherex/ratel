@@ -100,7 +100,7 @@ func TestDumpFailures(t *testing.T) {
 		want string
 	}{
 		{"format", []string{"--format", "xml"}, 2, "format"},
-		{"argument", []string{"extra"}, 2, "unexpected"},
+		{"argument", []string{"extra"}, 2, "unknown command"},
 		{"config", []string{"--config", "missing-ratel.yaml"}, 1, "configuration"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
