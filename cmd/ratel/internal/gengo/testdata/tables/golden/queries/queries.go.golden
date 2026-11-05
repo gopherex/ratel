@@ -70,14 +70,14 @@ type userByEmailQuery struct {
 }
 
 // UserByEmail starts the query; each parameter is one step, in order of appearance.
-func UserByEmail() userByEmailEmail {
-	return userByEmailEmail{}
+func UserByEmail() userByEmailSetEmail {
+	return userByEmailSetEmail{}
 }
 
-type userByEmailEmail struct{}
+type userByEmailSetEmail struct{}
 
 // Email sets the parameter email.
-func (s userByEmailEmail) Email(v string) ratel.Query[app.User] {
+func (s userByEmailSetEmail) Email(v string) ratel.Query[app.User] {
 	return ratel.NewQuery([]string{"id", "email", "status", "manager_id", "balance", "tags", "home", "type", "created_at", "profile", "doubled"}, scanUserByEmail, "SELECT * FROM app.users WHERE email = $1", v)
 }
 
@@ -279,44 +279,44 @@ type emailsLikeQuery struct {
 }
 
 // EmailsLike starts the query; each parameter is one step, in order of appearance.
-func EmailsLike() emailsLikePattern {
-	return emailsLikePattern{}
+func EmailsLike() emailsLikeSetPattern {
+	return emailsLikeSetPattern{}
 }
 
-type emailsLikePattern struct{}
+type emailsLikeSetPattern struct{}
 
 // Pattern sets the parameter pattern.
-func (s emailsLikePattern) Pattern(v string) emailsLikeStatus {
-	return emailsLikeStatus{pattern: v}
+func (s emailsLikeSetPattern) Pattern(v string) emailsLikeSetStatus {
+	return emailsLikeSetStatus{pattern: v}
 }
 
-type emailsLikeStatus struct {
+type emailsLikeSetStatus struct {
 	pattern string
 }
 
 // Status sets the parameter status.
-func (s emailsLikeStatus) Status(v app.UserStatus) emailsLikeManager {
-	return emailsLikeManager{pattern: s.pattern, status: v}
+func (s emailsLikeSetStatus) Status(v app.UserStatus) emailsLikeSetManager {
+	return emailsLikeSetManager{pattern: s.pattern, status: v}
 }
 
-type emailsLikeManager struct {
+type emailsLikeSetManager struct {
 	pattern string
 	status  app.UserStatus
 }
 
 // Manager sets the parameter manager.
-func (s emailsLikeManager) Manager(v ratel.Null[int64]) emailsLikeMinimum {
-	return emailsLikeMinimum{pattern: s.pattern, status: s.status, manager: v}
+func (s emailsLikeSetManager) Manager(v ratel.Null[int64]) emailsLikeSetMinimum {
+	return emailsLikeSetMinimum{pattern: s.pattern, status: s.status, manager: v}
 }
 
-type emailsLikeMinimum struct {
+type emailsLikeSetMinimum struct {
 	pattern string
 	status  app.UserStatus
 	manager ratel.Null[int64]
 }
 
 // Minimum sets the parameter minimum.
-func (s emailsLikeMinimum) Minimum(v decimal.Decimal) ratel.Query[EmailsLikeRow] {
+func (s emailsLikeSetMinimum) Minimum(v decimal.Decimal) ratel.Query[EmailsLikeRow] {
 	return ratel.NewQuery([]string{"id", "email"}, scanEmailsLike, "SELECT id, email FROM app.users WHERE email LIKE $1 AND status = $2 AND manager_id = $3 AND balance > $4", s.pattern, s.status, s.manager.Arg(), v)
 }
 
@@ -364,47 +364,47 @@ func scanCreateTag(row pgx.Row) (app.Tag, error) {
 }
 
 // CreateTag starts the query; each parameter is one step, in order of appearance.
-func CreateTag() createTagID {
-	return createTagID{}
+func CreateTag() createTagSetID {
+	return createTagSetID{}
 }
 
-type createTagID struct{}
+type createTagSetID struct{}
 
 // ID sets the parameter id.
-func (s createTagID) ID(v int32) createTagLabel {
-	return createTagLabel{id: v}
+func (s createTagSetID) ID(v int32) createTagSetLabel {
+	return createTagSetLabel{id: v}
 }
 
-type createTagLabel struct {
+type createTagSetLabel struct {
 	id int32
 }
 
 // Label sets the parameter label.
-func (s createTagLabel) Label(v string) ratel.Query[app.Tag] {
+func (s createTagSetLabel) Label(v string) ratel.Query[app.Tag] {
 	return ratel.NewQuery([]string{"id", "label", "kind"}, scanCreateTag, "INSERT INTO app.tags (id, label) VALUES ($1, $2) RETURNING *", s.id, v)
 }
 
 // DeleteTag starts the query; each parameter is one step, in order of appearance.
-func DeleteTag() deleteTagID {
-	return deleteTagID{}
+func DeleteTag() deleteTagSetID {
+	return deleteTagSetID{}
 }
 
-type deleteTagID struct{}
+type deleteTagSetID struct{}
 
 // ID sets the parameter id.
-func (s deleteTagID) ID(v int32) ratel.Command {
+func (s deleteTagSetID) ID(v int32) ratel.Command {
 	return ratel.NewCommand("DELETE FROM app.tags WHERE id = $1", v)
 }
 
 // DeleteOrders starts the query; each parameter is one step, in order of appearance.
-func DeleteOrders() deleteOrdersUserID {
-	return deleteOrdersUserID{}
+func DeleteOrders() deleteOrdersSetUserID {
+	return deleteOrdersSetUserID{}
 }
 
-type deleteOrdersUserID struct{}
+type deleteOrdersSetUserID struct{}
 
 // UserID sets the parameter userID.
-func (s deleteOrdersUserID) UserID(v int64) ratel.Command {
+func (s deleteOrdersSetUserID) UserID(v int64) ratel.Command {
 	return ratel.NewCommand("DELETE FROM app.orders WHERE user_id = $1", v)
 }
 

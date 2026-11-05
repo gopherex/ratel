@@ -38,22 +38,22 @@ type eventsAfterQuery struct {
 }
 
 // EventsAfter starts the query; each parameter is one step, in order of appearance.
-func EventsAfter() eventsAfterArg1 {
-	return eventsAfterArg1{}
+func EventsAfter() eventsAfterSetArg1 {
+	return eventsAfterSetArg1{}
 }
 
-type eventsAfterArg1 struct{}
+type eventsAfterSetArg1 struct{}
 
 // Arg1 sets the parameter arg1.
-func (s eventsAfterArg1) Arg1(v ratel.Null[string]) eventsAfterArg2 {
-	return eventsAfterArg2{arg1: v}
+func (s eventsAfterSetArg1) Arg1(v ratel.Null[string]) eventsAfterSetArg2 {
+	return eventsAfterSetArg2{arg1: v}
 }
 
-type eventsAfterArg2 struct {
+type eventsAfterSetArg2 struct {
 	arg1 ratel.Null[string]
 }
 
 // Arg2 sets the parameter arg2.
-func (s eventsAfterArg2) Arg2(v int64) ratel.Query[EventsAfterRow] {
+func (s eventsAfterSetArg2) Arg2(v int64) ratel.Query[EventsAfterRow] {
 	return ratel.NewQuery([]string{"id"}, scanEventsAfter, "SELECT id FROM app.events WHERE note = $1 AND id > $2", s.arg1.Arg(), v)
 }

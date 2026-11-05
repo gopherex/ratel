@@ -120,6 +120,31 @@ func TestNameCollisions(t *testing.T) {
 	}
 }
 
+// TestParameterNames checks that a parameter named like a generated
+// identifier of its query (@query against the descriptor type <query>Query)
+// generates.
+func TestParameterNames(t *testing.T) {
+	parser := newParser(t)
+
+	t.Parallel()
+
+	dir := t.TempDir()
+	schema := "CREATE SCHEMA app;\nCREATE TABLE app.items (id bigint PRIMARY KEY, name text NOT NULL);\n"
+	queries := "-- name: Search :many\nSELECT id FROM app.items WHERE name LIKE @query;\n"
+
+	if err := os.WriteFile(filepath.Join(dir, "schema.sql"), []byte(schema), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "queries.sql"), []byte(queries), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if response := respond(t, parser, filepath.Join(dir, "schema.sql")); plugin.HasErrors(response) {
+		t.Fatalf("diagnostics = %v", response.GetDiagnostics())
+	}
+}
+
 // TestDiagnosticCodes checks the code of each generation error a schema or
 // query can cause (docs/runtime.md, Diagnostic codes).
 func TestDiagnosticCodes(t *testing.T) {

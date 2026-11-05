@@ -120,13 +120,13 @@ type customerByEmailQuery struct {
 }
 
 // CustomerByEmail starts the query; each parameter is one step, in order of appearance.
-func CustomerByEmail() customerByEmailEmail {
-	return customerByEmailEmail{}
+func CustomerByEmail() customerByEmailSetEmail {
+	return customerByEmailSetEmail{}
 }
 
-type customerByEmailEmail struct{}
+type customerByEmailSetEmail struct{}
 
 // Email sets the parameter email.
-func (s customerByEmailEmail) Email(v string) ratel.Query[CustomerByEmailRow] {
+func (s customerByEmailSetEmail) Email(v string) ratel.Query[CustomerByEmailRow] {
 	return ratel.NewQuery([]string{"id", "tenant_no", "email", "nickname", "status", "created_at", "ttl", "score", "tags", "counters", "home_street", "home_city", "avatar_blob", "big", "meta", "previous", "subtotal", "total", "phone", "fax", "contact_case"}, scanCustomerByEmail, "SELECT * FROM shop.customers WHERE email = $1", v)
 }

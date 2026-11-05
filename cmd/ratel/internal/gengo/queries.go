@@ -130,7 +130,7 @@ func writeParams(file *unit, name string, parameters []parameter) {
 }
 
 // writeSteps writes the builder of a query: a function starting it and one
-// step type per parameter, in order, each with one method naming its
+// step type <query>Set<Parameter> per parameter, in order, each with one method naming its
 // parameter. Only the last step returns the runnable value, built by build
 // from the arguments in parameter order, so a parameter cannot be skipped or
 // swapped. Without parameters the function returns it directly.
@@ -144,7 +144,9 @@ func writeSteps(file *unit, name, result string, parameters []parameter, build f
 	steps := make([]string, len(parameters))
 
 	for index, value := range parameters {
-		steps[index] = camel(name) + value.method
+		// "Set" keeps step types apart from the query's other identifiers,
+		// such as the descriptor type <query>Query of a parameter @query.
+		steps[index] = camel(name) + "Set" + value.method
 		if err := file.declare(steps[index], "query "+name); err != nil {
 			return err
 		}

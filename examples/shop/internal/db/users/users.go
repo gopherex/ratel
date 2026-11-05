@@ -34,14 +34,14 @@ type userByEmailQuery struct {
 }
 
 // UserByEmail starts the query; each parameter is one step, in order of appearance.
-func UserByEmail() userByEmailEmail {
-	return userByEmailEmail{}
+func UserByEmail() userByEmailSetEmail {
+	return userByEmailSetEmail{}
 }
 
-type userByEmailEmail struct{}
+type userByEmailSetEmail struct{}
 
 // Email sets the parameter email.
-func (s userByEmailEmail) Email(v string) ratel.Query[app.User] {
+func (s userByEmailSetEmail) Email(v string) ratel.Query[app.User] {
 	return ratel.NewQuery([]string{"id", "email", "name"}, scanUserByEmail, "SELECT * FROM app.users WHERE email = $1", v)
 }
 
@@ -78,13 +78,13 @@ type topCustomersQuery struct {
 }
 
 // TopCustomers starts the query; each parameter is one step, in order of appearance.
-func TopCustomers() topCustomersLimit {
-	return topCustomersLimit{}
+func TopCustomers() topCustomersSetLimit {
+	return topCustomersSetLimit{}
 }
 
-type topCustomersLimit struct{}
+type topCustomersSetLimit struct{}
 
 // Limit sets the parameter limit.
-func (s topCustomersLimit) Limit(v int64) ratel.Query[TopCustomersRow] {
+func (s topCustomersSetLimit) Limit(v int64) ratel.Query[TopCustomersRow] {
 	return ratel.NewQuery([]string{"email", "spent"}, scanTopCustomers, "SELECT u.email, sum(o.total) AS spent\nFROM app.users u JOIN app.orders o ON o.user_id = u.id\nGROUP BY u.email\nORDER BY spent DESC\nLIMIT $1", v)
 }
