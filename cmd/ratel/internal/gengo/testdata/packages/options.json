@@ -1,0 +1,8 @@
+{
+  "import_path": "example.com/app/db",
+  "packages": [
+    {"tables": ["auth_*"], "package": "auth"},
+    {"tables": ["public.people_*"], "package": "people"},
+    {"tables": ["settings"], "package": "queries"}
+  ]
+}

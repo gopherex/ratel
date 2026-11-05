@@ -83,12 +83,37 @@ db := ratel.New(exec, ratel.WithExecMode(pgx.QueryExecModeCacheDescribe))
 
 Packages follow PostgreSQL schemas: tables, views and types of schema `app`
 go to package `app`, file `<out>/app/app.go`; the queries of a query group go to
-package `<group>`. The plugin options of `ratel.yaml` are:
+package `<group>`. The `packages` option places tables and views elsewhere, so
+one schema can still give a package per area. The plugin options of
+`ratel.yaml` are:
 
 | Option | Meaning |
 |---|---|
 | `import_path` | required: Go import path of the output directory; packages import each other through it |
 | `types` | PostgreSQL type name (`jsonb`, `app.money`) to a Go type (`github.com/acme/doc.Document`), replacing the default mapping |
+| `packages` | rules `{tables: [<glob>...], package: <name>}`: a table or view whose name matches a glob goes to that package; the first matching rule wins, unmatched ones stay in their schema's package |
+
+```yaml
+options:
+  import_path: github.com/acme/app/internal/db
+  packages:
+    - tables: [auth_*]          # unqualified name
+      package: auth
+    - tables: [public.people_*] # schema.name
+      package: people
+```
+
+A glob is a `path.Match` pattern of the table's unqualified name, or of
+`schema.name` when it contains a dot. Enums, domains and composites stay in
+the package of their schema; a table elsewhere imports it. A relation into
+another package exists only on its foreign-key side, as between schemas.
+Packages that would import each other, through foreign keys in both directions
+or a longer loop, are refused with `RTL-G11` naming the loop; place those tables
+in one package. A query group named like a model package shares it, so an
+area's models and queries form one package: its queries use those models
+unqualified, and all their Go identifiers share one namespace, a clash being
+`RTL-G05` (a query `ArchiveKeys` beside the descriptor of table
+`archive_keys`).
 
 `@go.type <import/path.Type>` on a column overrides its Go type; other `go`
 annotations are `@go.row` (below) and `@go.message`, `@go.field` and
@@ -809,12 +834,13 @@ refusal, including serialization failures, cancellation and connection loss.
 | `RTL-G02` | the generated Go does not parse: a generator bug |
 | `RTL-G03` | an invalid `@go.*` annotation, or a proto model missing a field's or its message's annotation |
 | `RTL-G04` | no Go type for a PostgreSQL type: set `options.types` or `@go.type` |
-| `RTL-G05` | two sources map to one Go identifier (columns, relations, generated members) |
+| `RTL-G05` | two sources map to one Go identifier (columns, relations, generated members, queries of a package) |
 | `RTL-G06` | a query without a package |
 | `RTL-G07` | a `:copyfrom` query that is not `INSERT ... VALUES` with one row of parameters |
 | `RTL-G08` | two result columns, or two joined tables, map to one Row field |
 | `RTL-G09` | a shared `@ratel.row` type declared with another shape |
 | `RTL-G10` | warning: two queries return the same row shape; share it with `@ratel.row` |
+| `RTL-G11` | generated packages import each other: tables of two packages reference each other through foreign keys |
 
 ## Schemas and tenants
 

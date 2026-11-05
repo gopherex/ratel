@@ -35,7 +35,7 @@ func (s *state) tableColumns(table *ir.Table) ([]column, error) {
 	columns := make([]column, 0, len(table.GetColumns()))
 
 	for _, value := range table.GetColumns() {
-		mapped, err := s.columnType(table.GetName(), value, schemaOf(table.GetName()))
+		mapped, err := s.columnType(table.GetName(), value, s.relationPackage(table.GetName()))
 		if err != nil {
 			return nil, err
 		}
@@ -86,20 +86,6 @@ func (c column) modelType(file *unit) string {
 	}
 
 	return file.use(c.goType)
-}
-
-func (s *state) tables(file *unit, schema *ir.Schema) error {
-	for _, table := range schema.GetTables() {
-		if table.GetPartitionOf() != nil {
-			continue // partitions are reached through their parent
-		}
-
-		if err := s.writeTable(file, schema.GetName(), table); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // writeTable writes a table's model, scanner, insert type and descriptor; a

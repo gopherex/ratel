@@ -2,6 +2,7 @@ package gengo
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -16,7 +17,7 @@ const codeCollision = "RTL-G05"
 
 // unit accumulates a generated file's body and imports.
 type unit struct {
-	schema   string // PostgreSQL schema of the package
+	pkg      string // Go package name of a model package; empty for a query package
 	body     strings.Builder
 	imports  []string
 	names    map[string]string // generated identifier -> its source, for collisions
@@ -44,38 +45,143 @@ func (u *unit) declare(identifier, source string) error {
 	return nil
 }
 
-// schemaFiles renders a schema's package; an empty schema has none.
-func (s *state) schemaFiles(schema *ir.Schema) ([]*pluginpb.File, error) {
-	if len(schema.GetTables())+len(schema.GetViews())+len(schema.GetMaterializedViews())+
-		len(schema.GetEnums())+len(schema.GetDomains())+len(schema.GetComposites()) == 0 {
-		return nil, nil
-	}
-
-	file := &unit{schema: schema.GetName(), names: make(map[string]string), registry: newRegistry()}
-
-	steps := []func(*unit, *ir.Schema) error{s.enums, s.domains, s.composites, s.tables, s.views}
-	for _, step := range steps {
-		if err := step(file, schema); err != nil {
-			return nil, err
+// relationPackage is the package of a table or view: the first packages rule
+// matching its name, otherwise its schema's.
+func (s *state) relationPackage(name *ir.QualifiedName) string {
+	for _, rule := range s.options.Packages {
+		if rule.matches(schemaOf(name), objectOf(name)) {
+			return rule.Package
 		}
 	}
 
-	if !file.registry.empty() {
-		if err := file.declare("RegisterTypes", "schema "+schema.GetName()); err != nil {
-			return nil, err
-		}
+	return packageName(schemaOf(name))
+}
 
-		writeRegisterTypes(file)
+// units are the generated packages by Go package name; a package with
+// nothing in it has no unit and no file.
+type units map[string]*unit
+
+func (u units) of(pkg string) *unit {
+	if u[pkg] == nil {
+		u[pkg] = &unit{pkg: pkg, names: make(map[string]string), registry: newRegistry()}
 	}
 
-	name := packageName(schema.GetName())
+	return u[pkg]
+}
 
-	contents, err := source(name, file.imports, file.body.String())
-	if err != nil {
+// render writes one file per package, <pkg>/<pkg>.go.
+func (s *state) render(all units) ([]*pluginpb.File, error) {
+	if err := importCycle(s.options.ImportPath, all); err != nil {
 		return nil, err
 	}
 
-	return []*pluginpb.File{{Path: name + "/" + name + ".go", Contents: contents}}, nil
+	files := make([]*pluginpb.File, 0, len(all))
+
+	for _, pkg := range slices.Sorted(mapKeys(all)) {
+		file := all[pkg]
+		if !file.registry.empty() {
+			if err := file.declare("RegisterTypes", "package "+pkg); err != nil {
+				return nil, err
+			}
+
+			writeRegisterTypes(file)
+		}
+
+		contents, err := source(pkg, file.imports, file.body.String())
+		if err != nil {
+			return nil, err
+		}
+
+		files = append(files, &pluginpb.File{Path: pkg + "/" + pkg + ".go", Contents: contents})
+	}
+
+	return files, nil
+}
+
+// schemaModels writes a schema's enums, domains and composites into the
+// package named after it, and each table and view into its relationPackage.
+func (s *state) schemaModels(schema *ir.Schema, all units) error {
+	if len(schema.GetEnums())+len(schema.GetDomains())+len(schema.GetComposites()) > 0 {
+		file := all.of(packageName(schema.GetName()))
+		for _, step := range []func(*unit, *ir.Schema) error{s.enums, s.domains, s.composites} {
+			if err := step(file, schema); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, table := range schema.GetTables() {
+		if table.GetPartitionOf() != nil {
+			continue // partitions are reached through their parent
+		}
+
+		if err := s.writeTable(all.of(s.relationPackage(table.GetName())), schema.GetName(), table); err != nil {
+			return err
+		}
+	}
+
+	for _, view := range schema.GetViews() {
+		if err := s.view(all.of(s.relationPackage(view.GetName())), view.GetName(), view.GetOutput(), "view"); err != nil {
+			return err
+		}
+	}
+
+	for _, view := range schema.GetMaterializedViews() {
+		file := all.of(s.relationPackage(view.GetName()))
+		if err := s.view(file, view.GetName(), view.GetOutput(), "materialized view"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// importCycle refuses model packages that import each other, directly or
+// through others: foreign keys between their tables in both directions.
+func importCycle(importPath string, units map[string]*unit) error {
+	const visiting, done = 1, 2
+
+	state := make(map[string]int, len(units))
+
+	var walk func(pkg string, path []string) []string
+
+	walk = func(pkg string, path []string) []string {
+		switch state[pkg] {
+		case visiting:
+			return append(path[slices.Index(path, pkg):], pkg)
+		case done:
+			return nil
+		}
+
+		state[pkg] = visiting
+
+		path = append(path, pkg)
+
+		for _, imported := range slices.Sorted(slices.Values(units[pkg].imports)) {
+			dependency, local := strings.CutPrefix(imported, importPath+"/")
+			if !local || units[dependency] == nil || dependency == pkg {
+				continue
+			}
+
+			if cycle := walk(dependency, path); cycle != nil {
+				return cycle
+			}
+		}
+
+		state[pkg] = done
+
+		return nil
+	}
+
+	for _, pkg := range slices.Sorted(mapKeys(units)) {
+		if cycle := walk(pkg, nil); cycle != nil {
+			return &plugin.Error{Code: "RTL-G11", Message: "generated packages import each other: " +
+				strings.Join(cycle, " -> ") + "; their tables reference each other through foreign keys, " +
+				"so place them in one package"}
+		}
+	}
+
+	return nil
 }
 
 func (s *state) enums(file *unit, schema *ir.Schema) error {
@@ -134,7 +240,7 @@ func (s *state) domains(file *unit, schema *ir.Schema) error {
 			return err
 		}
 
-		base, err := s.goType(domain.GetBaseType(), schema.GetName())
+		base, err := s.goType(domain.GetBaseType(), file.pkg)
 		if err != nil {
 			return err
 		}
@@ -164,7 +270,7 @@ func (s *state) composites(file *unit, schema *ir.Schema) error {
 		})
 
 		for _, field := range composite.GetFields() {
-			fieldType, err := s.goType(field.GetType(), schema.GetName())
+			fieldType, err := s.goType(field.GetType(), file.pkg)
 			if err != nil {
 				return err
 			}

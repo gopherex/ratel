@@ -96,8 +96,8 @@ func (s *state) load(file *unit, element *ir.TypeRef) {
 	found := s.types[key]
 
 	goName := found.name
-	if found.schema != file.schema {
-		goName = packageName(found.schema) + "." + found.name
+	if owner := packageName(found.schema); owner != file.pkg {
+		goName = owner + "." + found.name
 	}
 
 	array := pgName(&ir.TypeRef{Element: element})

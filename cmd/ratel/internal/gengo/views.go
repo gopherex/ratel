@@ -6,26 +6,10 @@ import (
 	"github.com/gopherex/ratel/pkg/ir"
 )
 
-// views generates a model, scanner and read-only descriptor per view and
+// view generates a model, scanner and read-only descriptor of a view or
 // materialized view, from the columns the host inferred.
-func (s *state) views(file *unit, schema *ir.Schema) error {
-	for _, view := range schema.GetViews() {
-		if err := s.view(file, schema.GetName(), view.GetName(), view.GetOutput(), "view"); err != nil {
-			return err
-		}
-	}
-
-	for _, view := range schema.GetMaterializedViews() {
-		if err := s.view(file, schema.GetName(), view.GetName(), view.GetOutput(), "materialized view"); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (s *state) view(file *unit, schema string, name *ir.QualifiedName, output []*ir.QueryColumn, kind string) error {
-	object := objectOf(name)
+func (s *state) view(file *unit, name *ir.QualifiedName, output []*ir.QueryColumn, kind string) error {
+	schema, object := schemaOf(name), objectOf(name)
 	names := tableNames(object)
 
 	for identifier := range names.all() {
@@ -41,7 +25,7 @@ func (s *state) view(file *unit, schema string, name *ir.QualifiedName, output [
 	columns := make([]column, 0, len(output))
 
 	for _, value := range output {
-		mapped, err := s.goType(value.GetType(), schema)
+		mapped, err := s.goType(value.GetType(), file.pkg)
 		if err != nil {
 			return err
 		}

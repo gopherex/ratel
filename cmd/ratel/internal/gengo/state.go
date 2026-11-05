@@ -138,15 +138,16 @@ func (s *state) annotate(annotation *ir.AnnotationValue) error {
 	}
 }
 
-func (s *state) importPath(schema string) string {
-	return s.options.ImportPath + "/" + packageName(schema)
+// importPath is the import path of a generated package.
+func (s *state) importPath(pkg string) string {
+	return s.options.ImportPath + "/" + pkg
 }
 
-// goType maps a type used from package schema. A user type of another schema
-// is qualified with its package.
-func (s *state) goType(typ *ir.TypeRef, schema string) (goType, error) {
+// goType maps a type used from package pkg (empty for a query package). A
+// user type of another package is qualified with it.
+func (s *state) goType(typ *ir.TypeRef, pkg string) (goType, error) {
 	if typ.GetElement() != nil {
-		element, err := s.goType(typ.GetElement(), schema)
+		element, err := s.goType(typ.GetElement(), pkg)
 		if err != nil {
 			return goType{}, err
 		}
@@ -176,17 +177,17 @@ func (s *state) goType(typ *ir.TypeRef, schema string) (goType, error) {
 			"; set options.types or @go.type"}
 	}
 
-	return s.userGoType(key, schema)
+	return s.userGoType(key, pkg)
 }
 
-func (s *state) userGoType(key, schema string) (goType, error) {
+func (s *state) userGoType(key, pkg string) (goType, error) {
 	found, ok := s.types[key]
 	if !ok {
 		return goType{}, &plugin.Error{Code: "RTL-G04", Message: "undeclared type " + key}
 	}
 
 	if found.kind == ir.TypeKind_TYPE_KIND_RANGE {
-		element, err := s.goType(found.base, schema)
+		element, err := s.goType(found.base, pkg)
 		if err != nil {
 			return goType{}, err
 		}
@@ -194,20 +195,21 @@ func (s *state) userGoType(key, schema string) (goType, error) {
 		return rangeOf(element, false), nil
 	}
 
-	if found.schema == schema {
+	owner := packageName(found.schema)
+	if owner == pkg {
 		return goType{expr: found.name}, nil
 	}
 
-	return goType{expr: packageName(found.schema) + "." + found.name, imports: []string{s.importPath(found.schema)}}, nil
+	return goType{expr: owner + "." + found.name, imports: []string{s.importPath(owner)}}, nil
 }
 
-// columnType is a column's Go type as named from package schema, honoring
+// columnType is a column's Go type as named from package pkg, honoring
 // @go.type.
-func (s *state) columnType(table *ir.QualifiedName, column *ir.Column, schema string) (goType, error) {
+func (s *state) columnType(table *ir.QualifiedName, column *ir.Column, pkg string) (goType, error) {
 	key := strings.Join(append(slices.Clone(table.GetParts()), column.GetName()), ".")
 	if configured, ok := s.columns[key]; ok {
 		return override(configured), nil
 	}
 
-	return s.goType(column.GetType(), schema)
+	return s.goType(column.GetType(), pkg)
 }

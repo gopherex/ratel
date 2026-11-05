@@ -61,6 +61,18 @@ func TestOptions(t *testing.T) {
 		{name: "null options", options: `null`, failure: "import_path is required"},
 		{name: "unknown key", options: `{"import_path": "x.com/db", "package": "db"}`, failure: "invalid options"},
 		{name: "trailing slash", options: `{"import_path": "x.com/db/"}`, failure: "import_path is required"},
+		{
+			name: "package name", options: `{"import_path": "x.com/db", "packages": [{"tables": ["a_*"], "package": "A-b"}]}`,
+			failure: "packages",
+		},
+		{
+			name: "table pattern", options: `{"import_path": "x.com/db", "packages": [{"tables": ["a_["], "package": "a"}]}`,
+			failure: "packages",
+		},
+		{
+			name: "no tables", options: `{"import_path": "x.com/db", "packages": [{"package": "a"}]}`,
+			failure: "packages",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -142,6 +154,35 @@ func TestParameterNames(t *testing.T) {
 
 	if response := respond(t, parser, filepath.Join(dir, "schema.sql")); plugin.HasErrors(response) {
 		t.Fatalf("diagnostics = %v", response.GetDiagnostics())
+	}
+}
+
+// TestPackageCycle checks that foreign keys between two packages in both
+// directions, which Go cannot import, are RTL-G11 naming the packages.
+func TestPackageCycle(t *testing.T) {
+	parser := newParser(t)
+
+	t.Parallel()
+
+	dir := t.TempDir()
+	schema := "CREATE TABLE a_one (id bigint PRIMARY KEY, b_id bigint);\n" +
+		"CREATE TABLE b_one (id bigint PRIMARY KEY, a_id bigint REFERENCES a_one (id));\n" +
+		"ALTER TABLE a_one ADD FOREIGN KEY (b_id) REFERENCES b_one (id);\n"
+	settings := `{"import_path": "x.com/db", "packages": [{"tables": ["a_*"], "package": "a"}, ` +
+		`{"tables": ["b_*"], "package": "b"}]}`
+
+	for name, contents := range map[string]string{"schema.sql": schema, "options.json": settings} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	response := respond(t, parser, filepath.Join(dir, "schema.sql"))
+
+	diagnostics := response.GetDiagnostics()
+	if !plugin.HasErrors(response) || diagnostics[len(diagnostics)-1].GetCode() != "RTL-G11" ||
+		!strings.Contains(diagnostics[len(diagnostics)-1].GetMessage(), "a -> b -> a") {
+		t.Fatalf("diagnostics = %v, want RTL-G11 a -> b -> a", diagnostics)
 	}
 }
 
@@ -236,8 +277,14 @@ func respond(tb testing.TB, parser parse.Parser, schemaPath string) *pluginpb.Pl
 		tb.Fatal(err)
 	}
 
+	// options.json next to schema.sql replaces the default options.
+	settings := []byte(options)
+	if custom, err := os.ReadFile(filepath.Join(filepath.Dir(schemaPath), "options.json")); err == nil {
+		settings = custom
+	}
+
 	request := &pluginpb.GenerateRequest{
-		ProtocolVersion: 1, Catalog: built, Options: []byte(options), Annotations: namespaced(built.ProtoReflect()),
+		ProtocolVersion: 1, Catalog: built, Options: settings, Annotations: namespaced(built.ProtoReflect()),
 	}
 
 	// queries.sql next to schema.sql becomes the query group "queries".
@@ -339,7 +386,11 @@ func newParser(tb testing.TB) parse.Parser {
 func BenchmarkGenerate(b *testing.B) {
 	parser := newParser(b)
 
-	for b.Loop() {
-		generate(b, parser, "testdata/tables/schema.sql")
+	for _, name := range []string{"tables", "packages"} {
+		b.Run(name, func(b *testing.B) {
+			for b.Loop() {
+				generate(b, parser, "testdata/"+name+"/schema.sql")
+			}
+		})
 	}
 }

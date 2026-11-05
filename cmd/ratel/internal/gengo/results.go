@@ -177,9 +177,16 @@ func groupNullable(group tableGroup, value *ir.Query) bool {
 }
 
 func (s *state) modelType(file *unit, table *ir.Table) string {
-	file.imports = append(file.imports, s.importPath(schemaOf(table.GetName())))
+	model := singular(objectOf(table.GetName()))
 
-	return packageName(schemaOf(table.GetName())) + "." + singular(objectOf(table.GetName()))
+	owner := s.relationPackage(table.GetName())
+	if owner == file.pkg {
+		return model
+	}
+
+	file.imports = append(file.imports, s.importPath(owner))
+
+	return owner + "." + model
 }
 
 // modelShape scans every column of one table into its model.
@@ -206,7 +213,7 @@ func (s *state) groupTargets(file *unit, value *ir.Query, group tableGroup, pref
 		declared := group.table.GetColumns()[slices.IndexFunc(group.table.GetColumns(),
 			func(c *ir.Column) bool { return c.GetName() == name })]
 		if declared.GetNullable() {
-			mapped, _ := s.columnType(group.table.GetName(), declared, "")
+			mapped, _ := s.columnType(group.table.GetName(), declared, file.pkg)
 			target.null = s.nullTarget(file, declared.GetType(), mapped)
 		}
 
@@ -219,7 +226,7 @@ func (s *state) groupTargets(file *unit, value *ir.Query, group tableGroup, pref
 func (s *state) column(file *unit, value *ir.Query, index int) (resultColumn, error) {
 	column := value.GetColumns()[index]
 
-	mapped, err := s.goType(column.GetType(), "")
+	mapped, err := s.goType(column.GetType(), file.pkg)
 	if err != nil {
 		return resultColumn{}, err
 	}
@@ -459,7 +466,7 @@ func (s *state) nullableGroup(file *unit, value *ir.Query, group tableGroup, tar
 
 		declared := group.table.GetColumns()[slices.IndexFunc(group.table.GetColumns(),
 			func(c *ir.Column) bool { return c.GetName() == name })]
-		mapped, _ := s.columnType(group.table.GetName(), declared, "")
+		mapped, _ := s.columnType(group.table.GetName(), declared, file.pkg)
 		s.use(file, declared.GetType())
 
 		// Every column of an outer-joined table can be NULL, so each scans

@@ -1,13 +1,11 @@
 package gengo
 
 import (
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/gopherex/ratel/pkg/ir"
 	"github.com/gopherex/ratel/pkg/plugin"
-	"github.com/gopherex/ratel/pkg/plugin/pluginpb"
 )
 
 // parameter is a query parameter as a Go argument.
@@ -29,52 +27,24 @@ func (p parameter) argument(expression string) string {
 	return expression
 }
 
-// queryFiles renders one package per query group.
-func (s *state) queryFiles(queries []*ir.Query) ([]*pluginpb.File, error) {
-	groups := make(map[string][]*ir.Query)
-
+// queryUnits writes each query into the package of its group. A group named
+// like a model package shares it: its queries use the models unqualified.
+func (s *state) queryUnits(queries []*ir.Query, all units) error {
 	for _, value := range queries {
 		group := s.packages[value.GetName()]
 		if group == "" {
-			return nil, &plugin.Error{
+			return &plugin.Error{
 				Code: "RTL-G06", Message: "query " + value.GetName() + " has no package",
 				Source: value.GetMeta().GetSource(),
 			}
 		}
 
-		groups[group] = append(groups[group], value)
+		if err := s.query(all.of(packageName(group)), value); err != nil {
+			return err
+		}
 	}
 
-	files := make([]*pluginpb.File, 0, len(groups))
-
-	for _, group := range slices.Sorted(mapKeys(groups)) {
-		file := &unit{schema: "", names: make(map[string]string), registry: newRegistry()}
-
-		for _, value := range groups[group] {
-			if err := s.query(file, value); err != nil {
-				return nil, err
-			}
-		}
-
-		if !file.registry.empty() {
-			if err := file.declare("RegisterTypes", "query package "+group); err != nil {
-				return nil, err
-			}
-
-			writeRegisterTypes(file)
-		}
-
-		name := packageName(group)
-
-		contents, err := source(name, file.imports, file.body.String())
-		if err != nil {
-			return nil, err
-		}
-
-		files = append(files, &pluginpb.File{Path: name + "/" + name + ".go", Contents: contents})
-	}
-
-	return files, nil
+	return nil
 }
 
 func mapKeys[V any](values map[string]V) func(func(string) bool) {
@@ -91,7 +61,7 @@ func (s *state) parameters(file *unit, value *ir.Query) ([]parameter, error) {
 	out := make([]parameter, 0, len(value.GetParameters()))
 
 	for _, item := range value.GetParameters() {
-		mapped, err := s.goType(item.GetType(), "")
+		mapped, err := s.goType(item.GetType(), file.pkg)
 		if err != nil {
 			return nil, err
 		}

@@ -100,8 +100,8 @@ func (s *state) edges(table *ir.Table) []edge {
 				relation.GetFrom().GetColumns(), relation.GetTo().GetColumns(), through, relation, false)
 		}
 
-		sameSchema := schemaOf(source.GetName()) == schemaOf(table.GetName())
-		if destination == table && relation.GetInverseName() != "" && (through != nil || sameSchema) {
+		samePackage := s.relationPackage(source.GetName()) == s.relationPackage(table.GetName())
+		if destination == table && relation.GetInverseName() != "" && (through != nil || samePackage) {
 			out = s.appendEdge(out, table, source, relation.GetInverseName(), relation.GetInverseKind(),
 				relation.GetTo().GetColumns(), relation.GetFrom().GetColumns(), through, relation, true)
 		}
@@ -122,9 +122,8 @@ func (s *state) appendEdge(out []edge, table, target *ir.Table, name string, kin
 	}
 
 	if through != nil {
-		join := s.table(through.GetName())
-		if join == nil || schemaOf(join.GetName()) != schemaOf(table.GetName()) ||
-			schemaOf(target.GetName()) != schemaOf(table.GetName()) {
+		join, pkg := s.table(through.GetName()), s.relationPackage(table.GetName())
+		if join == nil || s.relationPackage(join.GetName()) != pkg || s.relationPackage(target.GetName()) != pkg {
 			return out
 		}
 
@@ -166,22 +165,22 @@ func relationsType(model string) string { return model + "Relations" }
 
 func countField(edge edge) string { return inflection.Singular(edge.name) + "Count" }
 
-// targetModel is the target's model type as named from the package schema.
+// targetModel is the target's model type as named from the package of file.
 func (s *state) targetModel(file *unit, target *ir.Table) string {
 	model := singular(objectOf(target.GetName()))
 
-	if owner := schemaOf(target.GetName()); owner != file.schema {
+	if owner := s.relationPackage(target.GetName()); owner != file.pkg {
 		file.imports = append(file.imports, s.importPath(owner))
 
-		return packageName(owner) + "." + model
+		return owner + "." + model
 	}
 
 	return model
 }
 
 func (s *state) targetDescriptor(file *unit, target *ir.Table) string {
-	if owner := schemaOf(target.GetName()); owner != file.schema {
-		return packageName(owner) + "." + plural(objectOf(target.GetName()))
+	if owner := s.relationPackage(target.GetName()); owner != file.pkg {
+		return owner + "." + plural(objectOf(target.GetName()))
 	}
 
 	return camel(plural(objectOf(target.GetName()))) + "Base"

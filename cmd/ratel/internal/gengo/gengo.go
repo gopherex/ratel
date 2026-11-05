@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/format"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/gopherex/ratel/pkg/ir"
@@ -34,6 +36,18 @@ type Options struct {
 	// Types maps a PostgreSQL type name ("jsonb", "app.money") to a Go type
 	// ("github.com/acme/doc.Document"), overriding the default mapping.
 	Types map[string]string `json:"types"`
+	// Packages place tables and views in packages other than their schema's;
+	// the first rule with a matching pattern wins. Types stay in the package
+	// of their schema.
+	Packages []PackageRule `json:"packages"`
+}
+
+// PackageRule places the tables and views whose name matches one of Tables
+// in Package. A pattern is a path.Match glob of the unqualified name, or of
+// schema.name when it contains a dot: "auth_*", "public.auth_*".
+type PackageRule struct {
+	Tables  []string `json:"tables"`
+	Package string   `json:"package"`
 }
 
 // Generator is the ratel-gen-go plugin.
@@ -45,11 +59,13 @@ func (Generator) Info(context.Context, *pluginpb.InfoRequest) (*pluginpb.InfoRes
 		Name: Name, Version: version, AnnotationNamespace: Name,
 		MinProtocolVersion: protocolVersion, MaxProtocolVersion: protocolVersion,
 		OptionsDescription: "import_path (required): Go import path of out; " +
-			"types: PostgreSQL type name to Go type (import/path.Type)",
+			"types: PostgreSQL type name to Go type (import/path.Type); " +
+			"packages: [{tables: [glob], package: name}] places tables and views by name",
 	}, nil
 }
 
-// Generate returns one Go file per schema package and query package.
+// Generate returns one Go file per package: models by schema or packages
+// rule, queries by group, a group sharing the package of the same name.
 func (Generator) Generate(ctx context.Context, request *pluginpb.GenerateRequest) (*pluginpb.GenerateResponse, error) {
 	options, err := decodeOptions(request.GetOptions())
 	if err != nil {
@@ -61,28 +77,32 @@ func (Generator) Generate(ctx context.Context, request *pluginpb.GenerateRequest
 		return nil, err
 	}
 
-	var files []*pluginpb.File
+	all := make(units)
 
 	for _, schema := range request.GetCatalog().GetSchemas() {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("ratel-gen-go: %w", err)
 		}
 
-		rendered, err := state.schemaFiles(schema)
-		if err != nil {
+		if err := state.schemaModels(schema, all); err != nil {
 			return nil, err
 		}
-
-		files = append(files, rendered...)
 	}
 
-	queries, err := state.queryFiles(request.GetQueries())
+	if err := state.queryUnits(request.GetQueries(), all); err != nil {
+		return nil, err
+	}
+
+	files, err := state.render(all)
 	if err != nil {
 		return nil, err
 	}
 
-	return &pluginpb.GenerateResponse{Files: append(files, queries...), Diagnostics: state.warnings}, nil
+	return &pluginpb.GenerateResponse{Files: files, Diagnostics: state.warnings}, nil
 }
+
+// codeOptions is the diagnostic code of invalid plugin options.
+const codeOptions = "RTL-G01"
 
 func decodeOptions(data []byte) (Options, error) {
 	var options Options
@@ -92,15 +112,63 @@ func decodeOptions(data []byte) (Options, error) {
 		decoder.DisallowUnknownFields()
 
 		if err := decoder.Decode(&options); err != nil {
-			return Options{}, &plugin.Error{Code: "RTL-G01", Message: "invalid options: " + err.Error()}
+			return Options{}, &plugin.Error{Code: codeOptions, Message: "invalid options: " + err.Error()}
 		}
 	}
 
 	if options.ImportPath == "" || strings.HasSuffix(options.ImportPath, "/") {
-		return Options{}, &plugin.Error{Code: "RTL-G01", Message: "options.import_path is required"}
+		return Options{}, &plugin.Error{Code: codeOptions, Message: "options.import_path is required"}
+	}
+
+	for index, rule := range options.Packages {
+		if err := rule.check(); err != nil {
+			return Options{}, &plugin.Error{
+				Code: codeOptions, Message: "options.packages[" + strconv.Itoa(index) + "]: " + err.Error(),
+			}
+		}
 	}
 
 	return options, nil
+}
+
+// Package rule refusals.
+var (
+	errPackageName = errors.New("package must be a lowercase Go package name")
+	errNoTables    = errors.New("tables must list at least one pattern")
+)
+
+func (r PackageRule) check() error {
+	if r.Package == "" || packageName(r.Package) != r.Package {
+		return fmt.Errorf("%w: %q", errPackageName, r.Package)
+	}
+
+	if len(r.Tables) == 0 {
+		return errNoTables
+	}
+
+	for _, pattern := range r.Tables {
+		if _, err := path.Match(pattern, ""); err != nil {
+			return fmt.Errorf("table pattern %q: %w", pattern, err)
+		}
+	}
+
+	return nil
+}
+
+// matches reports whether the rule places the relation schema.object.
+func (r PackageRule) matches(schema, object string) bool {
+	for _, pattern := range r.Tables {
+		name := object
+		if strings.Contains(pattern, ".") {
+			name = schema + "." + object
+		}
+
+		if matched, _ := path.Match(pattern, name); matched {
+			return true
+		}
+	}
+
+	return false
 }
 
 // source renders a generated file: header, imports and gofmt.
