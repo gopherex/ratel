@@ -213,6 +213,17 @@ func sameTypes(values []*ir.QueryColumn) bool {
 }
 
 func (s *inference) common(values []*ir.QueryColumn) *ir.TypeRef {
+	typ, problem := s.commonType(values)
+	if problem != "" {
+		s.fail(problem)
+	}
+
+	return typ
+}
+
+// commonType resolves the type values unify to, as UNION, CASE and
+// anycompatible arguments do; problem says why they do not.
+func (s *inference) commonType(values []*ir.QueryColumn) (*ir.TypeRef, string) {
 	var result *ir.TypeRef
 
 	preserveDomain := sameTypes(values)
@@ -226,9 +237,7 @@ func (s *inference) common(values []*ir.QueryColumn) *ir.TypeRef {
 		if !preserveDomain {
 			typ = s.signatures.baseType(typ)
 			if typ == nil {
-				s.fail("domain base " + typeKey(value.GetType()))
-
-				continue
+				return scalar("text"), "domain base " + typeKey(value.GetType())
 			}
 		}
 
@@ -249,15 +258,15 @@ func (s *inference) common(values []*ir.QueryColumn) *ir.TypeRef {
 		}
 
 		if !s.signatures.coercible(typ, result) {
-			s.fail("incompatible types " + typeKey(result) + " and " + typeKey(typ))
+			return proto.CloneOf(result), "incompatible types " + typeKey(result) + " and " + typeKey(typ)
 		}
 	}
 
 	if result == nil {
-		return scalar("text")
+		return scalar("text"), ""
 	}
 
-	return proto.CloneOf(result)
+	return proto.CloneOf(result), ""
 }
 
 func functionInputs(function *ir.Function, count int, variadic bool) []*ir.TypeRef {
@@ -287,6 +296,49 @@ func functionInputs(function *ir.Function, count int, variadic bool) []*ir.TypeR
 	}
 
 	return result[:count]
+}
+
+// namedInputs matches a call with named arguments to function as PostgreSQL
+// does: positional arguments first, each named one to the input parameter of
+// that name, every parameter without a default supplied once. Variadic
+// functions take no named arguments here.
+func namedInputs(function *ir.Function, named []string) []*ir.TypeRef {
+	if function.GetVariadicElement() != nil {
+		return nil
+	}
+
+	var params []*ir.Argument
+
+	for _, arg := range function.GetArguments() {
+		if arg.GetMode() != ir.ArgMode_ARG_MODE_OUT {
+			params = append(params, arg)
+		}
+	}
+
+	supplied := make([]bool, len(params))
+	result := make([]*ir.TypeRef, len(named))
+
+	for position, name := range named {
+		index := position
+		if name != "" {
+			index = slices.IndexFunc(params, func(param *ir.Argument) bool { return param.GetName() == name })
+		}
+
+		if index < 0 || index >= len(params) || supplied[index] {
+			return nil
+		}
+
+		supplied[index] = true
+		result[position] = params[index].GetType()
+	}
+
+	for index := range len(params) - int(function.GetDefaultArguments()) {
+		if !supplied[index] {
+			return nil
+		}
+	}
+
+	return result
 }
 
 func arrayParameter(typ *ir.TypeRef) bool {
@@ -334,7 +386,13 @@ func (s *inference) polymorphicElement(input []*ir.TypeRef, args []*ir.QueryColu
 				return nil, false
 			}
 
-			element = s.common([]*ir.QueryColumn{{Type: element}, {Type: actual}})
+			// A candidate whose arguments do not unify is not a match.
+			unified, problem := s.commonType([]*ir.QueryColumn{{Type: element}, {Type: actual}})
+			if problem != "" {
+				return nil, false
+			}
+
+			element = unified
 		} else {
 			element = actual
 		}
@@ -504,13 +562,16 @@ func (s *inference) bestCandidates(items []*candidate, args []*ir.QueryColumn) [
 	return best
 }
 
-func (s *inference) choose(items []*candidate, args []*ir.QueryColumn, name string) *candidate {
+// choose picks the one candidate PostgreSQL would; call names the function
+// or operator with its argument types for the diagnostic.
+func (s *inference) choose(items []*candidate, args []*ir.QueryColumn, call string) *candidate {
 	best := s.bestCandidates(items, args)
 	if len(best) == 1 {
 		return best[0]
 	}
 
-	if len(best) > 1 {
+	ambiguous := len(best) > 1
+	if ambiguous {
 		filtered := s.unknownCandidates(best, args)
 		if len(filtered) == 1 {
 			return filtered[0]
@@ -526,7 +587,11 @@ func (s *inference) choose(items []*candidate, args []*ir.QueryColumn, name stri
 		}
 	}
 
-	s.fail("overload " + name)
+	if ambiguous {
+		s.reject("ambiguous " + call)
+	} else {
+		s.reject("no " + call)
+	}
 
 	return &candidate{}
 }
@@ -639,11 +704,11 @@ func (s *inference) assumedCandidates(items []*candidate, args []*ir.QueryColumn
 	return result
 }
 
-func (s *inference) function(name []string, args []*ir.QueryColumn, variadic bool) *candidate {
+func (s *inference) function(name []string, args []*ir.QueryColumn, named []string, variadic bool) *candidate {
 	keys := []string{nameKey(name)}
 	if len(name) == 1 {
 		keys = make([]string, 0, 1+len(s.catalog.GetSearchPath()))
-		keys = append(keys, nameKey([]string{"pg_catalog", name[0]}))
+		keys = append(keys, nameKey([]string{pgCatalog, name[0]}))
 
 		for _, schema := range s.catalog.GetSearchPath() {
 			keys = append(keys, nameKey([]string{schema, name[0]}))
@@ -657,6 +722,10 @@ func (s *inference) function(name []string, args []*ir.QueryColumn, variadic boo
 	for _, key := range keys {
 		for _, function := range s.signatures.functions[key] {
 			inputs := functionInputs(function, len(args), variadic)
+			if slices.ContainsFunc(named, func(name string) bool { return name != "" }) {
+				inputs = namedInputs(function, named)
+			}
+
 			if inputs == nil && len(args) != 0 {
 				continue
 			}
@@ -688,7 +757,7 @@ func (s *inference) function(name []string, args []*ir.QueryColumn, variadic boo
 		}
 	}
 
-	return s.choose(candidates, args, strings.Join(name, "."))
+	return s.choose(candidates, args, "function "+strings.Join(name, ".")+"("+strings.Join(typeNames(args), ", ")+")")
 }
 
 func functionResult(function *ir.Function) *ir.TypeRef {
@@ -739,5 +808,31 @@ func (s *inference) operator(name string, args []*ir.QueryColumn) *candidate {
 		}
 	}
 
-	return s.choose(candidates, args, name)
+	operands := typeNames(args)
+	if len(operands) == 1 {
+		return s.choose(candidates, args, "operator "+name+" "+operands[0])
+	}
+
+	return s.choose(candidates, args, "operator "+strings.Join(operands, " "+name+" "))
+}
+
+// typeNames spells argument types as PostgreSQL does in its errors.
+func typeNames(args []*ir.QueryColumn) []string {
+	names := make([]string, len(args))
+	for index, arg := range args {
+		names[index] = typeName(arg.GetType())
+	}
+
+	return names
+}
+
+func typeName(typ *ir.TypeRef) string {
+	switch {
+	case unknown(typ):
+		return unknownType
+	case typ.GetKind() == ir.TypeKind_TYPE_KIND_ARRAY:
+		return typeName(typ.GetElement()) + "[]"
+	default:
+		return typ.GetPgName()
+	}
 }

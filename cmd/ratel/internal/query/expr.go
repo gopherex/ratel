@@ -1,6 +1,7 @@
 package query
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -211,8 +212,28 @@ func (s *inference) constrain(nodes []*pg.Node, args []*ir.QueryColumn, types []
 	}
 }
 
+// callArguments returns a call's argument expressions and, aligned with them,
+// the parameter names of named arguments (name => value); positional
+// arguments have an empty name.
+func callArguments(call *pg.FuncCall) ([]*pg.Node, []string) {
+	nodes := slices.Clone(call.GetArgs())
+	named := make([]string, len(nodes))
+
+	for index, node := range nodes {
+		if argument := node.GetNamedArgExpr(); argument != nil {
+			nodes[index] = argument.GetArg()
+			named[index] = argument.GetName()
+		}
+	}
+
+	return nodes, named
+}
+
+// pgCatalog is the schema of the builtin functions, operators and types.
+const pgCatalog = "pg_catalog"
+
 func (s *inference) call(call *pg.FuncCall, env *scope) *ir.QueryColumn {
-	nodes := call.GetArgs()
+	nodes, named := callArguments(call)
 	if call.GetAggWithinGroup() {
 		nodes = slices.Clone(nodes)
 		for _, order := range call.GetAggOrder() {
@@ -222,7 +243,7 @@ func (s *inference) call(call *pg.FuncCall, env *scope) *ir.QueryColumn {
 
 	args := s.expressions(nodes, env, nil)
 	names := stringsOf(call.GetFuncname())
-	chosen := s.function(names, args, call.GetFuncVariadic())
+	chosen := s.function(names, args, named, call.GetFuncVariadic())
 	s.constrain(nodes, nil, chosen.inputs, env)
 	s.expr(call.GetAggFilter(), env, scalar("bool"))
 
@@ -238,7 +259,7 @@ func (s *inference) call(call *pg.FuncCall, env *scope) *ir.QueryColumn {
 	nullable := true
 	parts := chosen.function.GetName().GetParts()
 
-	if len(parts) > 0 && parts[0] == "pg_catalog" {
+	if len(parts) > 0 && parts[0] == pgCatalog {
 		nullable = builtinNullable(name, chosen.function, args)
 	}
 
@@ -373,15 +394,23 @@ func (s *inference) rangeOffset(order, actual *ir.TypeRef) *ir.TypeRef {
 }
 
 func (s *inference) operation(expr *pg.A_Expr, env *scope) *ir.QueryColumn {
-	name := strings.TrimPrefix(strings.Join(stringsOf(expr.GetName()), "."), "pg_catalog.")
-	if expr.GetKind() == pg.A_Expr_Kind_AEXPR_OP_ANY || expr.GetKind() == pg.A_Expr_Kind_AEXPR_OP_ALL {
+	name := strings.TrimPrefix(strings.Join(stringsOf(expr.GetName()), "."), pgCatalog+".")
+
+	switch {
+	case expr.GetKind() == pg.A_Expr_Kind_AEXPR_OP_ANY || expr.GetKind() == pg.A_Expr_Kind_AEXPR_OP_ALL:
 		return s.anyOperation(expr, env, name)
-	}
-
-	if expr.GetRexpr().GetList() != nil {
+	case expr.GetRexpr().GetList() != nil:
 		return s.listOperation(expr, env, name)
+	case expr.GetKind() == pg.A_Expr_Kind_AEXPR_OP && expr.GetLexpr().GetRowExpr() != nil:
+		return s.rowComparison(expr, env, name)
+	default:
+		return s.binaryOperation(expr, env, name)
 	}
+}
 
+// binaryOperation resolves a prefix or binary operator, NULLIF and IS
+// [NOT] DISTINCT FROM over scalar operands.
+func (s *inference) binaryOperation(expr *pg.A_Expr, env *scope, name string) *ir.QueryColumn {
 	nodes := []*pg.Node{expr.GetRexpr()}
 	if expr.GetLexpr() != nil {
 		nodes = []*pg.Node{expr.GetLexpr(), expr.GetRexpr()}
@@ -410,6 +439,53 @@ func (s *inference) operation(expr *pg.A_Expr, env *scope) *ir.QueryColumn {
 	}
 
 	return &ir.QueryColumn{Type: proto.CloneOf(chosen.result), Nullable: nullable}
+}
+
+// rowComparison types (a, b) op (c, d) and (a, b) op (SELECT c, d) member by
+// member, as PostgreSQL rewrites them into a RowCompareExpr.
+func (s *inference) rowComparison(expr *pg.A_Expr, env *scope, name string) *ir.QueryColumn {
+	right := expr.GetRexpr()
+
+	var (
+		nodes  []*pg.Node
+		values []*ir.QueryColumn
+	)
+
+	switch link := right.GetSubLink(); {
+	case right.GetRowExpr() != nil:
+		nodes = right.GetRowExpr().GetArgs()
+		values = s.expressions(nodes, env, nil)
+	case link != nil && link.GetSubLinkType() == pg.SubLinkType_EXPR_SUBLINK:
+		values = s.statement(link.GetSubselect(), newScope(env))
+	default:
+		s.fail("row comparison with " + right.String())
+
+		return &ir.QueryColumn{}
+	}
+
+	s.memberwise(name, expr.GetLexpr().GetRowExpr().GetArgs(), nodes, values, env)
+
+	return &ir.QueryColumn{Type: scalar("bool"), Nullable: true}
+}
+
+// memberwise applies operator name to each pair of row members. The right
+// nodes are nil when the right row is a subquery's result.
+func (s *inference) memberwise(name string, left, right []*pg.Node, values []*ir.QueryColumn, env *scope) {
+	if len(left) != len(values) {
+		s.reject(fmt.Sprintf("row of %d members compared with %d", len(left), len(values)))
+
+		return
+	}
+
+	for index, node := range left {
+		nodes := []*pg.Node{node}
+		if right != nil {
+			nodes = append(nodes, right[index])
+		}
+
+		args := []*ir.QueryColumn{s.expr(node, env, nil), values[index]}
+		s.constrain(nodes, args, s.operator(name, args).inputs, env)
+	}
 }
 
 func (s *inference) anyOperation(expr *pg.A_Expr, env *scope, name string) *ir.QueryColumn {
@@ -507,6 +583,17 @@ func (s *inference) subquery(link *pg.SubLink, env *scope) *ir.QueryColumn {
 
 	if link.GetSubLinkType() == pg.SubLinkType_EXISTS_SUBLINK {
 		return &ir.QueryColumn{Type: scalar("bool")}
+	}
+
+	if row := link.GetTestexpr().GetRowExpr(); row != nil {
+		name := "="
+		if operator := stringsOf(link.GetOperName()); len(operator) > 0 {
+			name = strings.TrimPrefix(strings.Join(operator, "."), pgCatalog+".")
+		}
+
+		s.memberwise(name, row.GetArgs(), nil, columns, env)
+
+		return &ir.QueryColumn{Type: scalar("bool"), Nullable: true}
 	}
 
 	if len(columns) != 1 {

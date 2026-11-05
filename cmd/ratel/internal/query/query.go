@@ -79,10 +79,15 @@ func Infer(
 }
 
 func (s *inference) fail(expression string) {
+	s.reject("cannot infer " + expression)
+}
+
+// reject records the first problem of the query.
+func (s *inference) reject(problem string) {
 	if s.err == nil {
 		s.err = &Error{Diagnostic: &ir.Diagnostic{
 			Severity: ir.DiagnosticSeverity_DIAGNOSTIC_SEVERITY_ERROR, Code: "RTL-Q01",
-			Message: "query " + s.query.GetName() + ": cannot infer " + expression, Source: s.query.GetMeta().GetSource(),
+			Message: "query " + s.query.GetName() + ": " + problem, Source: s.query.GetMeta().GetSource(),
 		}}
 	}
 }
@@ -163,6 +168,14 @@ func (s *inference) finishSignature() {
 		if s.refTypes[ref] == nil {
 			s.fail("parameter $" + strconv.Itoa(int(ref.GetNumber())))
 		}
+	}
+
+	// :exec and :execrows return no rows, so a SELECT list such as
+	// pg_advisory_xact_lock's void result is neither typed nor generated.
+	switch s.query.GetCommand() {
+	case ir.QueryCommand_QUERY_COMMAND_EXEC, ir.QueryCommand_QUERY_COMMAND_EXEC_ROWS:
+		s.query.Columns = nil
+	default:
 	}
 
 	for _, column := range s.query.GetColumns() {

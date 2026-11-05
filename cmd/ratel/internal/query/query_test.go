@@ -155,6 +155,40 @@ func TestInfer(t *testing.T) {
 		},
 		{"nullable annotation", "-- @ratel.nullable id\nSELECT @id::int8 AS result", "int8", "int8", "1"},
 		{"notnull annotation", "-- @ratel.notnull result\nSELECT manager_id AS result FROM public.users", "", "int8", "0"},
+		{"distinct", `SELECT DISTINCT name, manager_id FROM public.users WHERE id > @after`, "int8", "text,int8", "01"},
+		{
+			"row comparison with a subquery",
+			`SELECT id FROM public.users WHERE (score, id) > (SELECT score, id FROM public.users WHERE id = @after)`,
+			"int8", "int8", "0",
+		},
+		{
+			"row comparison with parameters", `SELECT id FROM public.users WHERE (score, id) > (@score, @id)`,
+			"int4,int8", "int8", "0",
+		},
+		{
+			"row membership", "-- name: Test :exec\nDELETE FROM public.users WHERE (id, name) IN " +
+				"(SELECT id, name FROM public.users WHERE score = @score LIMIT @n)",
+			"int4,int8", "", "",
+		},
+		{
+			"partial arbiter", "-- name: Test :execrows\nINSERT INTO public.users(id,name,score) VALUES(@id,'',0) " +
+				"ON CONFLICT (id) WHERE manager_id IS NULL DO NOTHING",
+			"int8", "", "",
+		},
+		{"array append", `SELECT items || id FROM public.arrays`, "", "_int4", "0"},
+		{"array prepend", `SELECT id || items FROM public.arrays`, "", "_int4", "0"},
+		{"array slice", `SELECT items[2:] FROM public.arrays`, "", "_int4", "1"},
+		{"array concat", `SELECT items || items[array_position(items, @id::int4):] FROM public.arrays`, "int4", "_int4", "1"},
+		{
+			"named arguments", `SELECT make_interval(secs => score), make_interval(1, days => @days) FROM public.users`,
+			"int4", "interval,interval", "11",
+		},
+		{
+			"multi-array unnest", `SELECT t.a, t.b FROM unnest(@ids::int8[], @names::text[]) AS t(a, b)`,
+			"_int8,_text", "int8,text", "11",
+		},
+		{"exec drops the result", "-- name: Test :exec\nSELECT pg_advisory_xact_lock(hashtext($1))", "text", "", ""},
+		{"execrows drops the result", "-- name: Test :execrows\nUPDATE public.users SET score=0 RETURNING id", "", "", ""},
 	}
 	for _, tc := range cases {
 		runInference(t, parser, cat, signatures, tc)
@@ -166,6 +200,22 @@ func TestInfer(t *testing.T) {
 	testSignatures(t, parser, cat, signatures)
 	testSpecial(t, parser, cat, signatures)
 	testProvenance(t, parser, cat, signatures)
+	t.Run("overload messages", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range []struct{ sql, want string }{
+			{`SELECT abs($1::uuid)`, "no function abs(uuid)"},
+			{`SELECT id FROM public.users WHERE id = $1::uuid`, "no operator int8 = uuid"},
+			{`SELECT public.choose_kind($1)`, "ambiguous function public.choose_kind(unknown)"},
+			{`SELECT 1 FROM missing`, "no relation missing"},
+			{`SELECT nope FROM public.users`, "no column nope"},
+		} {
+			_, err := query.Infer(parser, cat, signatures, []*annotate.QuerySource{{Name: "Bad", SQL: tc.sql}})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Infer(%s) = %v, want %q", tc.sql, err, tc.want)
+			}
+		}
+	})
 	t.Run("errors", func(t *testing.T) {
 		t.Parallel()
 
@@ -178,6 +228,9 @@ func TestInfer(t *testing.T) {
 			`SELECT @name::text,$1::int4`, `SELECT abs($1::uuid)`, `SELECT $1::nosuchtype`,
 			`SELECT range_agg('[1,2)'::int4range)`, `SELECT public.tricky(1)`,
 			`SELECT public.choose_kind($1)`, `SELECT ARRAY[ROW(1,'x')]`,
+			`SELECT 1 FROM public.users WHERE (id, name) > (SELECT id FROM public.users)`,
+			`SELECT 1 FROM public.users WHERE (id, name) IN (SELECT id FROM public.users)`,
+			`SELECT make_interval(nope => 1)`, `SELECT make_interval(1, years => 2)`,
 		} {
 			t.Run(sql, func(t *testing.T) {
 				t.Parallel()
@@ -269,7 +322,12 @@ func runInference(t *testing.T, parser parse.Parser, cat *ir.Catalog, signatures
 	t.Run(tc.name, func(t *testing.T) {
 		t.Parallel()
 
-		files := []annotate.File{{Name: "query.sql", SQL: "-- name: Test :many\n" + tc.sql}}
+		sql := tc.sql
+		if !strings.HasPrefix(sql, "-- name:") {
+			sql = "-- name: Test :many\n" + sql
+		}
+
+		files := []annotate.File{{Name: "query.sql", SQL: sql}}
 
 		sources, err := annotate.Queries(parser, files, nil)
 		if err != nil {
@@ -334,6 +392,11 @@ func BenchmarkInfer(b *testing.B) {
 		{"query", func(b *testing.B) {
 			b.Helper()
 			benchmarkSQL(b, `SELECT id,name FROM public.users WHERE id=ANY($1) LIMIT $2`)
+		}},
+		{"rows and named arguments", func(b *testing.B) {
+			b.Helper()
+			benchmarkSQL(b, `SELECT t.a, make_interval(secs => t.a) FROM unnest($1::int4[], $2::text[]) AS t(a, b)
+WHERE (t.a, t.b) > (SELECT score, name FROM public.users WHERE id = $3)`)
 		}},
 		{"expressions", benchmarkExpressions},
 		{"scopes", benchmarkScopes},

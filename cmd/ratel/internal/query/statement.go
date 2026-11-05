@@ -181,7 +181,10 @@ func (s *inference) selectClauses(selectStmt *pg.SelectStmt, env *scope) {
 	distinct.columns = targets
 
 	for _, node := range selectStmt.GetDistinctClause() {
-		s.ordering(node, distinct)
+		// A plain DISTINCT is one empty node; DISTINCT ON lists expressions.
+		if node.GetNode() != nil {
+			s.ordering(node, distinct)
+		}
 	}
 
 	env.windows = append(env.windows, group.windows...)
@@ -270,7 +273,8 @@ func (s *inference) insert(insert *pg.InsertStmt, env *scope) []*ir.QueryColumn 
 	conflictScope.columns = append(copyColumns(env.columns), excluded...)
 	s.assignments(conflict.GetTargetList(), columns, conflictScope)
 	s.expr(conflict.GetWhereClause(), conflictScope, scalar("bool"))
-	s.expr(conflict.GetInfer().GetWhereClause(), conflictScope, scalar("bool"))
+	// The arbiter's index predicate sees the target table only, not excluded.
+	s.expr(conflict.GetInfer().GetWhereClause(), env, scalar("bool"))
 
 	return s.returning(insert.GetReturningList(), env)
 }

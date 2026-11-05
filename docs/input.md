@@ -125,10 +125,17 @@ Inference is guaranteed for these constructs, each covered by the test
 corpus: `WITH` including `RECURSIVE` (column types from the non-recursive
 term) and data-modifying CTEs; subqueries in every position; `LATERAL`;
 `UNION`, `INTERSECT`, `EXCEPT`; window functions; `GROUPING SETS`, `ROLLUP`,
-`CUBE`; `VALUES`; `unnest ... WITH ORDINALITY`; JSON functions and operators;
-`INSERT`, `UPDATE`, `DELETE` and `MERGE` with `RETURNING`; `ON CONFLICT`.
-A construct outside this list either infers or fails with a diagnostic; it
-never yields an untyped result.
+`CUBE`; `VALUES`; `unnest ... WITH ORDINALITY` and `unnest(a, b, ...)` over
+several arrays in `FROM`; `DISTINCT` and `DISTINCT ON`; row comparisons
+(`(a, b) > (c, d)`, `(a, b) > (SELECT c, d ...)`, `(a, b) IN (SELECT c, d
+...)`), typed member by member; named arguments (`make_interval(secs =>
+x)`); polymorphic and `anycompatible` functions and operators such as array
+`||`; JSON functions and operators; `INSERT`, `UPDATE`, `DELETE` and `MERGE`
+with `RETURNING`; `ON CONFLICT`, including a partial-index arbiter
+`ON CONFLICT (a) WHERE ...`. A construct outside this list either infers or
+fails with a diagnostic; it never yields an untyped result. `:exec` and
+`:execrows` return no rows, so their result columns are neither typed nor
+generated: `SELECT pg_advisory_xact_lock(...)` is a valid `:exec`.
 
 ## Migrations directory
 

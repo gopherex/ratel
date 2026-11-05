@@ -108,6 +108,8 @@ func checkRejected(t *testing.T, pool *pgxpool.Pool, parser parse.Parser, cat *i
 
 	for _, tc := range []struct{ name, sql, code string }{
 		{"UnknownFunction", `SELECT public.missing(1)`, "42883"},
+		{"NoOperator", `SELECT id FROM public.users WHERE id = $1::uuid`, "42883"},
+		{"RowWidth", `SELECT 1 FROM public.users WHERE (id, name) IN (SELECT id FROM public.users)`, "42601"},
 		{"AmbiguousDefaults", `SELECT public.tricky(1)`, "42725"},
 		{"AmbiguousCategories", `SELECT public.choose_kind($1)`, "42725"},
 		{"UnresolvedOccurrence", `SELECT $1 IS NULL FROM public.users WHERE id=$1`, "42P08"},
@@ -227,7 +229,14 @@ func checkQuery(t *testing.T, pool *pgxpool.Pool, item *ir.Query) {
 		t.Fatal(err)
 	}
 
-	if len(description.ParamOIDs) != len(item.GetParameters()) || len(description.Fields) != len(item.GetColumns()) {
+	// :exec and :execrows drop the statement's result columns.
+	fields := description.Fields
+	if command := item.GetCommand(); command == ir.QueryCommand_QUERY_COMMAND_EXEC ||
+		command == ir.QueryCommand_QUERY_COMMAND_EXEC_ROWS {
+		fields = nil
+	}
+
+	if len(description.ParamOIDs) != len(item.GetParameters()) || len(fields) != len(item.GetColumns()) {
 		t.Fatalf("signature widths: PostgreSQL params=%v columns=%v; inferred %v / %v",
 			description.ParamOIDs, description.Fields, item.GetParameters(), item.GetColumns())
 	}
@@ -236,7 +245,7 @@ func checkQuery(t *testing.T, pool *pgxpool.Pool, item *ir.Query) {
 		checkType(ctx, t, transaction, oid, item.GetParameters()[index].GetType())
 	}
 
-	for index, field := range description.Fields {
+	for index, field := range fields {
 		checkColumnType(ctx, t, transaction, field.DataTypeOID, item.GetColumns()[index].GetType())
 
 		if field.Name != item.GetColumns()[index].GetName() {

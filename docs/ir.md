@@ -411,7 +411,10 @@ the inferred column provenance; inference does not import or inspect Go types.
 
 Incomplete types, ambiguous references, unknown functions/operators and invalid
 parameter numbering return `*query.Error`, with an ERROR `Diagnostic` of code
-`RTL-Q01` naming the query and failed expression. Syntax errors retain the parser's
+`RTL-Q01` naming the query and what failed, with argument types where
+PostgreSQL would name them: `no operator uuid = text`, `ambiguous function
+f(unknown)`, `no relation x`, `no column y`, `cannot infer <expression>`.
+Syntax errors retain the parser's
 error. There is no successful partial signature or fallback `any` type.
 
 Unit tests share one parser per parent test and run inference cases concurrently:

@@ -259,3 +259,30 @@ INSERT INTO public.users(id,name,score) SELECT coalesce($1,1),$2,$3 RETURNING id
 -- name: InsertWhereContext :one
 INSERT INTO public.users(id,name,score)
 SELECT $1::int4,$2,$3 FROM public.users u WHERE u.score=$1 RETURNING id;
+
+-- name: PlainDistinct :many
+SELECT DISTINCT name, manager_id FROM public.users WHERE id > $1;
+
+-- name: RowAfterSubquery :many
+SELECT id FROM public.users WHERE (score, id) > (SELECT score, id FROM public.users WHERE id = $1);
+
+-- name: RowAfterParameters :many
+SELECT id FROM public.users WHERE (score, id) > ($1, $2);
+
+-- name: RowMembership :execrows
+DELETE FROM public.users WHERE (id, name) IN (SELECT id, name FROM public.users WHERE score = $1 LIMIT $2);
+
+-- name: PartialArbiter :execrows
+INSERT INTO public.users(id,name,score) VALUES($1,'',0) ON CONFLICT (id) WHERE manager_id IS NULL DO NOTHING;
+
+-- name: ArrayConcat :many
+SELECT items || items[array_position(items, $1::int4):] FROM public.arrays;
+
+-- name: NamedArguments :many
+SELECT make_interval(secs => score), make_interval(1, days => $1) FROM public.users;
+
+-- name: MultiUnnest :many
+SELECT t.a, t.b FROM unnest($1::int8[], $2::text[]) AS t(a, b);
+
+-- name: AdvisoryLock :exec
+SELECT pg_advisory_xact_lock(hashtext($1));

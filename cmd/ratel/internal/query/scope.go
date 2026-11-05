@@ -1,6 +1,7 @@
 package query
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -90,7 +91,7 @@ func (s *inference) column(parts []string, env *scope) *ir.QueryColumn {
 			}
 
 			if result != nil {
-				s.fail("ambiguous column " + strings.Join(parts, "."))
+				s.reject("ambiguous column " + strings.Join(parts, "."))
 
 				return &ir.QueryColumn{}
 			}
@@ -103,7 +104,7 @@ func (s *inference) column(parts []string, env *scope) *ir.QueryColumn {
 		}
 	}
 
-	s.fail("column " + strings.Join(parts, "."))
+	s.reject("no column " + strings.Join(parts, "."))
 
 	return &ir.QueryColumn{}
 }
@@ -143,7 +144,7 @@ func (s *inference) relation(name *pg.RangeVar, env *scope) []*ir.QueryColumn {
 		}
 	}
 
-	s.fail("relation " + name.GetSchemaname() + "." + name.GetRelname())
+	s.reject("no relation " + strings.TrimPrefix(name.GetSchemaname()+"."+name.GetRelname(), "."))
 
 	return nil
 }
@@ -345,32 +346,36 @@ func (s *inference) rangeFunction(function *pg.RangeFunction, env *scope) []*ir.
 			continue
 		}
 
-		call := items[0].GetFuncCall()
-		args := s.expressions(call.GetArgs(), env, nil)
-		chosen := s.function(stringsOf(call.GetFuncname()), args, call.GetFuncVariadic())
-		s.constrain(call.GetArgs(), nil, chosen.inputs, env)
-		name := stringsOf(call.GetFuncname())
-		last := ""
+		calls := unnestCalls(items[0].GetFuncCall())
+		for _, call := range calls {
+			nodes, named := callArguments(call)
+			args := s.expressions(nodes, env, nil)
+			chosen := s.function(stringsOf(call.GetFuncname()), args, named, call.GetFuncVariadic())
+			s.constrain(nodes, nil, chosen.inputs, env)
 
-		if len(name) > 0 {
-			last = name[len(name)-1]
+			name := stringsOf(call.GetFuncname())
+			last := ""
+
+			if len(name) > 0 {
+				last = name[len(name)-1]
+			}
+
+			defaultName := last
+			if len(function.GetFunctions()) == 1 && len(calls) == 1 && function.GetAlias().GetAliasname() != "" {
+				defaultName = function.GetAlias().GetAliasname()
+			}
+
+			outputs := s.functionColumns(chosen, defaultName)
+			if len(items) > 1 && len(items[1].GetList().GetItems()) > 0 {
+				outputs = s.recordColumns(items[1].GetList().GetItems())
+			}
+
+			for _, column := range outputs {
+				column.TableAlias = last
+			}
+
+			result = append(result, outputs...)
 		}
-
-		defaultName := last
-		if len(function.GetFunctions()) == 1 && function.GetAlias().GetAliasname() != "" {
-			defaultName = function.GetAlias().GetAliasname()
-		}
-
-		outputs := s.functionColumns(chosen, defaultName)
-		if len(items) > 1 && len(items[1].GetList().GetItems()) > 0 {
-			outputs = s.recordColumns(items[1].GetList().GetItems())
-		}
-
-		for _, column := range outputs {
-			column.TableAlias = last
-		}
-
-		result = append(result, outputs...)
 	}
 
 	if function.GetOrdinality() {
@@ -387,6 +392,26 @@ func (s *inference) rangeFunction(function *pg.RangeFunction, env *scope) []*ir.
 	}
 
 	return rename(result, function.GetAlias())
+}
+
+// unnestCalls splits unnest(a, b, ...) in FROM into one unnest per array:
+// PostgreSQL rewrites it to ROWS FROM (unnest(a), unnest(b), ...), a column
+// per array, shorter arrays padded with NULL.
+func unnestCalls(call *pg.FuncCall) []*pg.FuncCall {
+	name := stringsOf(call.GetFuncname())
+	unnest := len(name) == 1 && name[0] == "unnest" || len(name) == 2 && name[0] == pgCatalog && name[1] == "unnest"
+
+	if !unnest || len(call.GetArgs()) < 2 || call.GetFuncVariadic() ||
+		slices.ContainsFunc(call.GetArgs(), func(node *pg.Node) bool { return node.GetNamedArgExpr() != nil }) {
+		return []*pg.FuncCall{call}
+	}
+
+	calls := make([]*pg.FuncCall, len(call.GetArgs()))
+	for index, arg := range call.GetArgs() {
+		calls[index] = &pg.FuncCall{Funcname: call.GetFuncname(), Args: []*pg.Node{arg}, Location: call.GetLocation()}
+	}
+
+	return calls
 }
 
 func (s *inference) recordColumns(nodes []*pg.Node) []*ir.QueryColumn {
