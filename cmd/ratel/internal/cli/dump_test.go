@@ -116,6 +116,26 @@ func TestDumpFailures(t *testing.T) {
 	}
 }
 
+// TestAbsolutePatterns checks that an absolute source pattern is used as is,
+// not joined to the configuration's directory.
+func TestAbsolutePatterns(t *testing.T) {
+	warmParser(t)
+	t.Parallel()
+
+	sources, project := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(sources, "schema.sql"), "CREATE TABLE t(id int8);\n")
+	writeFile(t, filepath.Join(sources, "q.sql"), "-- name: Ids :many\nSELECT id FROM t;\n")
+
+	config := filepath.Join(project, "ratel.yaml")
+	writeFile(t, config, "version: 1\nschema: ["+filepath.Join(sources, "schema*.sql")+"]\n"+
+		"queries: [{files: ["+filepath.Join(sources, "q.sql")+"], package: q}]\n")
+
+	var stderr bytes.Buffer
+	if code := cli.Main([]string{"ratel", "check", "--config", config}, &bytes.Buffer{}, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, &stderr)
+	}
+}
+
 func TestDumpConfiguration(t *testing.T) {
 	warmParser(t)
 	t.Parallel()

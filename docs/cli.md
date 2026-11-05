@@ -91,7 +91,7 @@ its credentials); testcontainers' own messages are logged at `debug`.
 Every command of the table is implemented. `dump` reads `ratel.yaml` from the
 working directory, or the file selected by `--config <path>`. Source patterns
 and plugin paths are relative to that configuration file, not the working
-directory. Schema patterns support `**`, expand in sorted order and deduplicate
+directory; an absolute one is used as is. Schema patterns support `**`, expand in sorted order and deduplicate
 files; a pattern matching no files is an error. An explicit `schema: []` builds
 an empty catalog.
 

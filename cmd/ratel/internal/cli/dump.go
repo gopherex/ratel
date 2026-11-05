@@ -92,7 +92,11 @@ func schemaFiles(root string, patterns []string) ([]catalog.File, error) {
 	names := make(map[string]bool)
 
 	for _, pattern := range patterns {
-		matches, err := doublestar.FilepathGlob(filepath.Join(root, pattern), doublestar.WithFailOnIOErrors())
+		if !filepath.IsAbs(pattern) {
+			pattern = filepath.Join(root, pattern)
+		}
+
+		matches, err := doublestar.FilepathGlob(pattern, doublestar.WithFailOnIOErrors())
 		if err != nil {
 			return nil, fmt.Errorf("schema glob %q: %w", pattern, err)
 		}
