@@ -56,6 +56,58 @@ func TestFor(t *testing.T) {
 	}
 }
 
+func TestExtensions(t *testing.T) {
+	t.Parallel()
+
+	for _, major := range []int{16, 17, 18} {
+		t.Run(strconv.Itoa(major), func(t *testing.T) {
+			t.Parallel()
+
+			schemas, err := builtins.Extensions(major, []*ir.Extension{
+				{Name: "pg_trgm", Schema: "search"}, {Name: "postgis", Schema: "public"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(schemas) != 1 || schemas[0].GetName() != "search" {
+				t.Fatalf("schemas = %v, want pg_trgm alone in search", len(schemas))
+			}
+
+			found := false
+
+			for _, function := range schemas[0].GetFunctions() {
+				parts := function.GetName().GetParts()
+				if parts[0] != "search" {
+					t.Fatalf("function %v not relocated", parts)
+				}
+
+				found = found || parts[1] == "word_similarity"
+			}
+
+			operator := slices.ContainsFunc(schemas[0].GetBuiltinOperators(), func(operator *ir.BuiltinOperator) bool {
+				return operator.GetName() == "<%" && operator.GetFunction().GetParts()[0] == "search"
+			})
+			if !found || !operator {
+				t.Fatalf("word_similarity=%v <%%=%v", found, operator)
+			}
+
+			if none, err := builtins.Extensions(major, nil); err != nil || none != nil {
+				t.Fatalf("no extensions = %v, %v", none, err)
+			}
+		})
+	}
+}
+
+func BenchmarkExtensions(b *testing.B) {
+	extensions := []*ir.Extension{{Name: "pg_trgm", Schema: "public"}}
+	for b.Loop() {
+		if _, err := builtins.Extensions(18, extensions); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func checkFunctions(t *testing.T, schema *ir.Schema, major int) {
 	t.Helper()
 

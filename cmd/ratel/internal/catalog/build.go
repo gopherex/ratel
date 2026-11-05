@@ -71,6 +71,7 @@ type (
 		attachments []attachment
 		comments    []comment
 		builtins    []*ir.Schema
+		major       int
 		types       *pgtype.Map
 		snapshot    map[string]bool // pg_name of every builtin type of the target major
 		casts       map[string]bool // "source:target" of every implicit builtin cast
@@ -147,28 +148,35 @@ func newBuilder(parser parse.Parser, major int, builtins []*ir.Schema) *builder 
 		reference: reference, message: public, meta: public.GetMeta(), scope: defaultSchema,
 	}}
 
-	snapshot, casts := make(map[string]bool), make(map[string]bool)
-
-	for _, schema := range builtins {
-		for _, builtin := range schema.GetBuiltinTypes() {
-			snapshot[builtin.GetType().GetPgName()] = true
-		}
-
-		for _, cast := range schema.GetBuiltinCasts() {
-			if cast.GetContext() == "i" {
-				casts[cast.GetSource().GetPgName()+":"+cast.GetTarget().GetPgName()] = true
-			}
-		}
-	}
-
-	return &builder{
+	result := &builder{
 		parser: parser,
 		catalog: &ir.Catalog{
 			DefaultSchema: defaultSchema, SearchPath: []string{defaultSchema}, DatabaseVersion: strconv.Itoa(major),
 		},
 		schemas: map[string]*ir.Schema{defaultSchema: public}, objects: objects,
-		namespaces: make(map[string]declaration), builtins: builtins,
-		types: pgtype.NewMap(), snapshot: snapshot, casts: casts,
+		namespaces: make(map[string]declaration), major: major,
+		types: pgtype.NewMap(), snapshot: make(map[string]bool), casts: make(map[string]bool),
+	}
+	result.addBuiltins(builtins)
+
+	return result
+}
+
+// addBuiltins makes signatures known to resolution: the pg_catalog snapshot,
+// and those of each extension the schema creates.
+func (b *builder) addBuiltins(schemas []*ir.Schema) {
+	b.builtins = append(b.builtins, schemas...)
+
+	for _, schema := range schemas {
+		for _, builtin := range schema.GetBuiltinTypes() {
+			b.snapshot[builtin.GetType().GetPgName()] = true
+		}
+
+		for _, cast := range schema.GetBuiltinCasts() {
+			if cast.GetContext() == "i" {
+				b.casts[cast.GetSource().GetPgName()+":"+cast.GetTarget().GetPgName()] = true
+			}
+		}
 	}
 }
 

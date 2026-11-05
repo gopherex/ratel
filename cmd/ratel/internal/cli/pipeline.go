@@ -71,6 +71,14 @@ func loadProject(configPath string) (project, error) {
 		return project{}, err
 	}
 
+	// Queries and views may call what the schema's CREATE EXTENSION brings.
+	extensions, err := builtins.Extensions(settings.Postgres.Version, result.GetExtensions())
+	if err != nil {
+		return project{}, err
+	}
+
+	snapshot = append(snapshot, extensions...)
+
 	if err := query.Views(parser, result, snapshot); err != nil {
 		return project{}, err
 	}

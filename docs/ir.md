@@ -162,7 +162,12 @@ copied into the desired catalog. A type name is built in when the snapshot's
 pgx lacks resolve to `pg_catalog`, as PostgreSQL's implicit search path does.
 With an empty signature input, calls to ordinary built-in functions are
 unresolved; sequence calls (`nextval`, `currval`, `setval`) resolve their
-constant sequence names directly.
+constant sequence names directly. `CREATE EXTENSION x [SCHEMA s]` adds the
+signatures of `x` from the extension snapshot (below) in schema `s`: a call
+resolves to them qualified, or unqualified when `s` is on the search path. An
+extension the snapshot does not know adds none, and calls to its functions stay
+unresolved. Query and view inference take the same signatures:
+`builtins.Extensions(major, catalog.GetExtensions())` appended to `For(major)`.
 
 ### Generated builtins
 
@@ -180,9 +185,18 @@ and removes its containers and connections. Image digests in
 `-timeout` flag sets its total deadline and cleanup timeout (default 10 minutes).
 To intentionally update server images, update those digests and regenerate.
 
-Only `pg_catalog` objects are included; procedures and other namespaces are
-excluded. No extra extensions are installed beyond the image's default plpgsql. Database-local OIDs, owners and source metadata are
-not serialized. The extraction retains:
+`{16,17,18}.binpb` holds `pg_catalog` objects only; procedures are excluded.
+`{16,17,18}-extensions.binpb` holds the contrib extensions of the same image,
+as the schemas of a `Catalog`, one per extension and named after it: the
+generator installs each available extension alone into schema `ratel_ext`
+(its requirements into `ratel_deps`, so their objects stay out), reads that
+schema the same way, and rolls the installation back. An extension that cannot
+be installed so (procedural languages fixed to `pg_catalog`, transforms whose
+language library the image lacks) is skipped and logged.
+`builtins.Extensions(major, extensions)` renames `ratel_ext` in function
+identities to the schema each extension is created in; an extension's types
+and operators are looked up by name, as built-in ones are. Database-local
+OIDs, owners and source metadata are not serialized. The extraction retains:
 
 - `Schema.builtin_types`: canonical `TypeRef` names and kinds, array elements,
   `pg_type` category/preferred flags, domain bases and range/multirange subtypes.

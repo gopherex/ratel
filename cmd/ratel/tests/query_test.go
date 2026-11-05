@@ -66,6 +66,13 @@ func TestQuerySignatures(t *testing.T) {
 				t.Fatal(buildErr)
 			}
 
+			extensions, extensionErr := builtins.Extensions(major, cat.GetExtensions())
+			if extensionErr != nil {
+				t.Fatal(extensionErr)
+			}
+
+			signatures = append(signatures, extensions...)
+
 			inputs := versionQueries(t, parser, major, sources.Queries)
 
 			inferred, inferErr := query.Infer(parser, cat, signatures, inputs)

@@ -133,7 +133,11 @@ x)`); polymorphic and `anycompatible` functions and operators such as array
 `||`; JSON functions and operators; `INSERT`, `UPDATE`, `DELETE` and `MERGE`
 with `RETURNING`; `ON CONFLICT`, including a partial-index arbiter
 `ON CONFLICT (a) WHERE ...`. A construct outside this list either infers or
-fails with a diagnostic; it never yields an untyped result. `:exec` and
+fails with a diagnostic; it never yields an untyped result. Functions,
+operators and types of a contrib extension the schema creates (`CREATE
+EXTENSION pg_trgm`: `<%`, `word_similarity`) infer like built-in ones; `citext`
+maps to `string`; another type an extension defines, such as `hstore`, needs
+a Go type in the generator's `types` option. `:exec` and
 `:execrows` return no rows, so their result columns are neither typed nor
 generated: `SELECT pg_advisory_xact_lock(...)` is a valid `:exec`.
 

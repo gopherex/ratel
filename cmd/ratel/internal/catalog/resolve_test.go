@@ -177,6 +177,40 @@ func containsTarget(result *ir.Catalog, target string) bool {
 	return found
 }
 
+// TestExtensionFunctions checks that CREATE EXTENSION brings the extension's
+// functions into resolution, in its schema.
+func TestExtensionFunctions(t *testing.T) {
+	parser := newParser(t)
+
+	t.Parallel()
+
+	signatures, err := builtins.For(18)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ name, sql, failure string }{
+		{"default", `CREATE EXTENSION "uuid-ossp";
+CREATE TABLE t(id uuid DEFAULT uuid_generate_v4() PRIMARY KEY);`, ""},
+		{"check", `CREATE EXTENSION pg_trgm;
+CREATE TABLE t(name text CHECK (similarity(name, 'x') >= 0));`, ""},
+		{"qualified outside the search path", `CREATE SCHEMA ext; CREATE EXTENSION pg_trgm SCHEMA ext;
+CREATE TABLE t(name text CHECK (ext.similarity(name, 'x') >= 0));`, ""},
+		{"unqualified outside the search path", `CREATE SCHEMA ext; CREATE EXTENSION pg_trgm SCHEMA ext;
+CREATE TABLE t(name text CHECK (similarity(name, 'x') >= 0));`, "similarity"},
+		{"without the extension", `CREATE TABLE t(id uuid DEFAULT uuid_generate_v4() PRIMARY KEY);`, "uuid_generate_v4"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := catalog.Build(parser, []catalog.File{{Name: "schema.sql", SQL: tc.sql}}, 18, signatures)
+			if (tc.failure == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.failure)) {
+				t.Fatalf("Build() error = %v, want failure %q", err, tc.failure)
+			}
+		})
+	}
+}
+
 func BenchmarkOverloads(b *testing.B) {
 	parser := newParser(b)
 

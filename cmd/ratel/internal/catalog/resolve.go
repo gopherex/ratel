@@ -688,7 +688,14 @@ func (b *builder) bestCandidates(call *ir.FunctionCall, scope string) []*ir.Func
 
 	for _, schema := range b.builtins {
 		for _, function := range schema.GetFunctions() {
-			consider(function, pgCatalog)
+			// An extension's function answers an unqualified call only when its
+			// schema is on the search path, as in PostgreSQL.
+			schema := function.GetName().GetParts()[0]
+			if schema != pgCatalog && !slices.Contains(b.catalog.GetSearchPath(), schema) {
+				schema = ""
+			}
+
+			consider(function, schema)
 		}
 	}
 

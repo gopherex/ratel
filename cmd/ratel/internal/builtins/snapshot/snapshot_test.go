@@ -54,6 +54,35 @@ func TestEncode(t *testing.T) {
 	}
 }
 
+func TestEncodeExtensions(t *testing.T) {
+	t.Parallel()
+
+	first, second := fixture(), fixture()
+	first.Name, second.Name = "citext", "pg_trgm"
+
+	expected, err := snapshot.EncodeExtensions([]*ir.Schema{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	slices.Reverse(second.GetFunctions())
+
+	actual, err := snapshot.EncodeExtensions([]*ir.Schema{second, first})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(expected, actual) {
+		t.Fatal("extension or row order changed snapshot bytes")
+	}
+
+	decoded := &ir.Catalog{}
+	if err := proto.Unmarshal(actual, decoded); err != nil || len(decoded.GetSchemas()) != 2 ||
+		decoded.GetSchemas()[0].GetName() != "citext" {
+		t.Fatalf("decoded=%v err=%v", decoded, err)
+	}
+}
+
 func fixture() *ir.Schema {
 	integer := &ir.TypeRef{PgName: "int4"}
 	text := &ir.TypeRef{PgName: "text"}

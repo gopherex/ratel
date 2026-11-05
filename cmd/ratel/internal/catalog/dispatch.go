@@ -7,6 +7,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/gopherex/ratel/pkg/ir"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 )
 
 func (b *builder) dispatch(stmt statement) error {
@@ -68,6 +70,13 @@ func (b *builder) addExtension(extension *ir.Extension) error {
 	}
 
 	b.catalog.Extensions = append(b.catalog.Extensions, extension)
+
+	signatures, err := builtins.Extensions(b.major, []*ir.Extension{extension})
+	if err != nil {
+		return err
+	}
+
+	b.addBuiltins(signatures)
 
 	return nil
 }

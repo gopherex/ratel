@@ -25,3 +25,6 @@ CREATE TABLE public.money(value public.amount NOT NULL);
 CREATE FUNCTION public.choose_kind(value bool) RETURNS bool LANGUAGE sql AS 'SELECT value';
 CREATE FUNCTION public.choose_kind(value int4) RETURNS int4 LANGUAGE sql AS 'SELECT value';
 CREATE FUNCTION public.user_rows() RETURNS SETOF public.users LANGUAGE sql AS 'SELECT * FROM public.users';
+CREATE EXTENSION pg_trgm;
+CREATE EXTENSION "uuid-ossp";
+CREATE TABLE public.tokens(id uuid DEFAULT uuid_generate_v4() PRIMARY KEY);

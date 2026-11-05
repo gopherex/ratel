@@ -1,5 +1,7 @@
+-- $1 is the schema whose objects are extracted; $2 the schemas whose types
+-- they may reference (pg_catalog, and for an extension its dependencies).
 WITH type_refs AS (
- SELECT t.oid, t.typname, t.typcategory, t.typispreferred, t.typbasetype,
+ SELECT t.oid, n.nspname, t.typname, t.typcategory, t.typispreferred, t.typbasetype,
    CASE WHEN e.typarray = t.oid
         THEN e.typname || '[]' ELSE t.typname END AS signature,
    jsonb_strip_nulls(jsonb_build_object(
@@ -16,24 +18,25 @@ WITH type_refs AS (
  FROM pg_catalog.pg_type t
  JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
  LEFT JOIN pg_catalog.pg_type e ON e.oid = t.typelem
- WHERE n.nspname = 'pg_catalog'
+ WHERE n.nspname = ANY($2::text[])
 ), routines AS (
- SELECT p.*, jsonb_build_object('parts', jsonb_build_array('pg_catalog', p.proname,
+ SELECT p.*, jsonb_build_object('parts', jsonb_build_array(n.nspname, p.proname,
    COALESCE((SELECT string_agg(t.signature, ',' ORDER BY a.ordinality)
       FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY a(oid, ordinality)
       JOIN type_refs t ON t.oid = a.oid), ''))) AS identity
  FROM pg_catalog.pg_proc p
  JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
- WHERE n.nspname = 'pg_catalog' AND p.prokind <> 'p'
+ WHERE n.nspname = $1 AND p.prokind <> 'p'
 )
 SELECT jsonb_build_object(
- 'name', 'pg_catalog',
+ 'name', $1::text,
  'builtin_types', (SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
    'type', t.ref, 'category', t.typcategory, 'preferred', t.typispreferred,
    'base', b.ref, 'range_subtype', s.ref)))
    FROM type_refs t LEFT JOIN type_refs b ON b.oid = t.typbasetype
    LEFT JOIN pg_catalog.pg_range r ON r.rngtypid = t.oid OR r.rngmultitypid = t.oid
-   LEFT JOIN type_refs s ON s.oid = r.rngsubtype),
+   LEFT JOIN type_refs s ON s.oid = r.rngsubtype
+   WHERE t.nspname = $1),
  'functions', (SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
    'name', p.identity,
    'arguments', (SELECT jsonb_agg(jsonb_build_object(
@@ -58,7 +61,7 @@ SELECT jsonb_build_object(
  'builtin_operators', (SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
    'name', o.oprname, 'left', l.ref, 'right', r.ref, 'result', ret.ref, 'function', p.identity)))
    FROM pg_catalog.pg_operator o
-   JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace AND n.nspname = 'pg_catalog'
+   JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace AND n.nspname = $1
    LEFT JOIN type_refs l ON l.oid = o.oprleft
    LEFT JOIN type_refs r ON r.oid = o.oprright
    JOIN type_refs ret ON ret.oid = o.oprresult JOIN routines p ON p.oid = o.oprcode),
@@ -67,5 +70,5 @@ SELECT jsonb_build_object(
    'method', c.castmethod, 'function', p.identity)))
    FROM pg_catalog.pg_cast c JOIN type_refs s ON s.oid = c.castsource
    JOIN type_refs t ON t.oid = c.casttarget LEFT JOIN routines p ON p.oid = c.castfunc
-   WHERE c.castcontext IN ('i', 'a'))
+   WHERE c.castcontext IN ('i', 'a') AND (s.nspname = $1 OR t.nspname = $1))
 )

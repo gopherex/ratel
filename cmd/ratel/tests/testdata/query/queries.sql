@@ -286,3 +286,12 @@ SELECT t.a, t.b FROM unnest($1::int8[], $2::text[]) AS t(a, b);
 
 -- name: AdvisoryLock :exec
 SELECT pg_advisory_xact_lock(hashtext($1));
+
+-- name: TrigramWords :many
+SELECT name, word_similarity($1, name) AS score FROM public.users WHERE $1 <% name;
+
+-- name: TrigramFuzzy :many
+SELECT id FROM public.users WHERE name % $1 ORDER BY similarity(name, $1) DESC;
+
+-- name: ExtensionDefault :one
+INSERT INTO public.tokens DEFAULT VALUES RETURNING id;
