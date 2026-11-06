@@ -200,6 +200,7 @@ func TestInfer(t *testing.T) {
 	testSignatures(t, parser, cat, signatures)
 	testSpecial(t, parser, cat, signatures)
 	testProvenance(t, parser, cat, signatures)
+	testNullTested(t, parser, cat, signatures)
 	t.Run("overload messages", func(t *testing.T) {
 		t.Parallel()
 
@@ -249,6 +250,41 @@ func TestInfer(t *testing.T) {
 					t.Fatalf("expected RTL-Q01 diagnostic, got %v", err)
 				}
 			})
+		}
+	})
+}
+
+// testNullTested checks that a parameter IS [NOT] NULL tests is nullable,
+// unless @ratel.notnull says otherwise.
+func testNullTested(t *testing.T, parser parse.Parser, cat *ir.Catalog, signatures []*ir.Schema) {
+	t.Helper()
+	t.Run("null-tested parameters", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range []struct {
+			sql      string
+			nullable bool
+		}{
+			{`SELECT id FROM public.users WHERE (@m::int8 IS NULL OR id = @m)`, true},
+			{`SELECT id FROM public.users WHERE @m::int8 IS NOT NULL AND id = @m`, true},
+			{`SELECT id FROM public.users WHERE id = @m`, false},
+			{"-- @ratel.notnull m\nSELECT id FROM public.users WHERE (@m::int8 IS NULL OR id = @m)", false},
+		} {
+			files := []annotate.File{{Name: "query.sql", SQL: "-- name: Test :many\n" + tc.sql}}
+
+			sources, err := annotate.Queries(parser, files, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := query.Infer(parser, cat, signatures, sources.Queries)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if nullable := got[0].GetParameters()[0].GetNullable(); nullable != tc.nullable {
+				t.Errorf("Infer(%s) parameter nullable = %v, want %v", tc.sql, nullable, tc.nullable)
+			}
 		}
 	})
 }

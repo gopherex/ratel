@@ -13,9 +13,7 @@ func (s *inference) special(node *pg.Node, env *scope, expected *ir.TypeRef) *ir
 	case node.GetBoolExpr() != nil:
 		return s.boolean(node.GetBoolExpr(), env)
 	case node.GetNullTest() != nil:
-		s.expr(node.GetNullTest().GetArg(), env, nil)
-
-		return &ir.QueryColumn{Type: scalar("bool")}
+		return s.nullTest(node.GetNullTest(), env)
 	case node.GetBooleanTest() != nil:
 		s.expr(node.GetBooleanTest().GetArg(), env, scalar("bool"))
 
@@ -56,6 +54,23 @@ func (s *inference) special(node *pg.Node, env *scope, expected *ir.TypeRef) *ir
 
 		return &ir.QueryColumn{}
 	}
+}
+
+// nullTest types IS [NOT] NULL; a parameter it tests, cast or not, is
+// nullable (finishSignature).
+func (s *inference) nullTest(test *pg.NullTest, env *scope) *ir.QueryColumn {
+	arg := test.GetArg()
+	for arg.GetTypeCast() != nil {
+		arg = arg.GetTypeCast().GetArg()
+	}
+
+	if ref := arg.GetParamRef(); ref != nil {
+		s.nullTested[ref.GetNumber()] = true
+	}
+
+	s.expr(test.GetArg(), env, nil)
+
+	return &ir.QueryColumn{Type: scalar("bool")}
 }
 
 func (s *inference) minmax(expr *pg.MinMaxExpr, env *scope) *ir.QueryColumn {

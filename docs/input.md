@@ -115,6 +115,12 @@ aggregates other than `count` can produce NULL. `STRICT` alone does not prove a
 function's result non-null for non-null arguments. A caller can state that
 stronger contract with `@ratel.notnull`.
 
+A parameter takes the nullability of the column it is compared with, assigned
+to or inserted into. A parameter that `IS NULL` or `IS NOT NULL` tests is
+nullable whatever else it meets, since testing it only makes sense when NULL
+can be passed: `(@verified::boolean IS NULL OR c.verified = @verified)` takes
+`ratel.Null[bool]`, an optional filter. `@ratel.notnull verified` overrides it.
+
 There is no dynamic-query syntax. Optional filters, dynamic ordering and
 pagination are added at runtime by using a `SELECT` query as a builder source
 ([runtime.md](runtime.md#queries-as-builder-sources)). Parameter and column

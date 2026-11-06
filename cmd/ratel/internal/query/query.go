@@ -41,6 +41,7 @@ type inference struct {
 	query      *ir.Query
 	params     map[int32]*ir.QueryParameter
 	contextual map[int32]bool
+	nullTested map[int32]bool // parameters an IS [NOT] NULL tests: the caller may pass NULL
 	refTypes   map[*pg.ParamRef]*ir.TypeRef
 	refs       []*pg.ParamRef
 	names      map[int32]string
@@ -60,7 +61,7 @@ func Infer(
 	for _, source := range sources {
 		state := inference{
 			parser: parser, catalog: cat, signatures: signatures,
-			params: make(map[int32]*ir.QueryParameter), contextual: make(map[int32]bool),
+			params: make(map[int32]*ir.QueryParameter), contextual: make(map[int32]bool), nullTested: make(map[int32]bool),
 			refTypes: make(map[*pg.ParamRef]*ir.TypeRef),
 		}
 
@@ -161,6 +162,12 @@ func (s *inference) finishSignature() {
 		}
 
 		param.Name = s.names[int32(number)]
+		// Testing a parameter for NULL only makes sense when NULL can be
+		// passed; @ratel.notnull, applied later, overrides this.
+		if s.nullTested[int32(number)] {
+			param.Nullable = true
+		}
+
 		s.query.Parameters = append(s.query.GetParameters(), param)
 	}
 
