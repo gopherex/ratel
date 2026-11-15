@@ -189,6 +189,23 @@ func TestInfer(t *testing.T) {
 		},
 		{"exec drops the result", "-- name: Test :exec\nSELECT pg_advisory_xact_lock(hashtext($1))", "text", "", ""},
 		{"execrows drops the result", "-- name: Test :execrows\nUPDATE public.users SET score=0 RETURNING id", "", "", ""},
+		{"lock", "-- name: Test :exec\nLOCK TABLE public.users IN SHARE MODE", "", "", ""},
+		{"lock several, search path", "-- name: Test :exec\nLOCK users, public.money", "", "", ""},
+		{
+			"system columns of a table", `SELECT u.ctid, tableoid, xmin, cmin, xmax, cmax FROM public.users u`,
+			"", "tid,oid,xid,cid,xid,cid", "000000",
+		},
+		{
+			"xmax tells an insert from an upsert",
+			`INSERT INTO public.users(id,name,score) VALUES (@id,@name,@score)
+			 ON CONFLICT (id) DO UPDATE SET score=excluded.score RETURNING id, xmax`,
+			"int8,text,int4", "int8,xid", "00",
+		},
+		{
+			"system column of an outer-joined table", `SELECT m.xmax FROM public.users u
+			 LEFT JOIN public.users m ON m.id=u.manager_id`, "", "xid", "1",
+		},
+		{"system column in update returning", `UPDATE public.users SET score=0 RETURNING xmin`, "", "xid", "0"},
 	}
 	for _, tc := range cases {
 		runInference(t, parser, cat, signatures, tc)
@@ -210,8 +227,12 @@ func TestInfer(t *testing.T) {
 			{`SELECT public.choose_kind($1)`, "ambiguous function public.choose_kind(unknown)"},
 			{`SELECT 1 FROM missing`, "no relation missing"},
 			{`SELECT nope FROM public.users`, "no column nope"},
+			{`LOCK TABLE missing`, "no relation missing"},
+			{`LOCK TABLE public.people, missing`, "no relation missing"},
 		} {
-			_, err := query.Infer(parser, cat, signatures, []*annotate.QuerySource{{Name: "Bad", SQL: tc.sql}})
+			_, err := query.Infer(parser, cat, signatures, []*annotate.QuerySource{{
+				Name: "Bad", SQL: tc.sql, Command: ir.QueryCommand_QUERY_COMMAND_EXEC,
+			}})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("Infer(%s) = %v, want %q", tc.sql, err, tc.want)
 			}
@@ -232,6 +253,13 @@ func TestInfer(t *testing.T) {
 			`SELECT 1 FROM public.users WHERE (id, name) > (SELECT id FROM public.users)`,
 			`SELECT 1 FROM public.users WHERE (id, name) IN (SELECT id FROM public.users)`,
 			`SELECT make_interval(nope => 1)`, `SELECT make_interval(1, years => 2)`,
+			// A view, a subquery and a CTE have no system columns; two tables make one ambiguous.
+			`SELECT xmax FROM public.people`, `SELECT s.xmax FROM (SELECT id FROM public.users) s`,
+			`WITH c AS (SELECT id FROM public.users) SELECT xmax FROM c`,
+			`SELECT xmax FROM public.users, public.money`,
+			`SELECT j.xmax FROM (public.users u JOIN public.money m ON true) j`,
+			// LOCK returns neither rows nor a row count.
+			`LOCK TABLE public.users`,
 		} {
 			t.Run(sql, func(t *testing.T) {
 				t.Parallel()

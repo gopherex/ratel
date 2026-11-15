@@ -1,6 +1,8 @@
 package query
 
 import (
+	"slices"
+
 	pg "github.com/pganalyze/pg_query_go/v6"
 	"google.golang.org/protobuf/proto"
 
@@ -23,6 +25,10 @@ func (s *inference) statement(node *pg.Node, env *scope) []*ir.QueryColumn {
 		return s.deleteStmt(node.GetDeleteStmt(), env)
 	case node.GetMergeStmt() != nil:
 		return s.merge(node.GetMergeStmt(), env)
+	case node.GetLockStmt() != nil:
+		s.lock(node.GetLockStmt(), env)
+
+		return nil
 	default:
 		s.fail("statement " + node.String())
 
@@ -260,6 +266,7 @@ func (s *inference) insert(insert *pg.InsertStmt, env *scope) []*ir.QueryColumn 
 	table := insert.GetRelation()
 	columns := s.relation(table, env)
 	env.columns = rename(columns, table.GetAlias())
+	env.system = s.systemColumns(table)
 	expected := s.writeColumns(columns, insert.GetCols(), env)
 	source := insert.GetSelectStmt().GetSelectStmt()
 
@@ -415,6 +422,7 @@ func (s *inference) update(update *pg.UpdateStmt, env *scope) []*ir.QueryColumn 
 	s.with(update.GetWithClause(), env)
 	columns := s.relation(update.GetRelation(), env)
 	env.columns = rename(columns, update.GetRelation().GetAlias())
+	env.system = s.systemColumns(update.GetRelation())
 
 	for _, from := range update.GetFromClause() {
 		env.columns = append(env.columns, s.from(from, env)...)
@@ -430,6 +438,8 @@ func (s *inference) deleteStmt(statement *pg.DeleteStmt, env *scope) []*ir.Query
 	s.with(statement.GetWithClause(), env)
 
 	env.columns = rename(s.relation(statement.GetRelation(), env), statement.GetRelation().GetAlias())
+	env.system = s.systemColumns(statement.GetRelation())
+
 	for _, from := range statement.GetUsingClause() {
 		env.columns = append(env.columns, s.from(from, env)...)
 	}
@@ -443,6 +453,8 @@ func (s *inference) merge(merge *pg.MergeStmt, env *scope) []*ir.QueryColumn {
 	s.with(merge.GetWithClause(), env)
 	columns := s.relation(merge.GetRelation(), env)
 	env.columns = rename(columns, merge.GetRelation().GetAlias())
+	env.system = s.systemColumns(merge.GetRelation())
+	targetSystem := len(env.system)
 	env.columns = append(env.columns, s.from(merge.GetSourceRelation(), env)...)
 	s.expr(merge.GetJoinCondition(), env, scalar("bool"))
 
@@ -463,10 +475,25 @@ func (s *inference) merge(merge *pg.MergeStmt, env *scope) []*ir.QueryColumn {
 	}
 
 	if sourceNullable {
-		for _, col := range append(env.columns[len(columns):], env.qualified...) {
+		for _, col := range slices.Concat(env.columns[len(columns):], env.qualified, env.system[targetSystem:]) {
 			col.Nullable = true
 		}
 	}
 
 	return s.returning(merge.GetReturningList(), env)
+}
+
+// lock checks a LOCK statement: a write barrier with neither rows nor a row
+// count, so only :exec, over relations the schema has (qualified like any
+// other reference).
+func (s *inference) lock(statement *pg.LockStmt, env *scope) {
+	if s.query.GetCommand() != ir.QueryCommand_QUERY_COMMAND_EXEC {
+		s.reject("LOCK returns no rows and no row count: declare it :exec")
+
+		return
+	}
+
+	for _, relation := range statement.GetRelations() {
+		s.relation(relation.GetRangeVar(), env)
+	}
 }

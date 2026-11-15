@@ -263,6 +263,22 @@ func checkQuery(t *testing.T, pool *pgxpool.Pool, item *ir.Query) {
 	if len(item.GetParameters()) == 0 && len(item.GetColumns()) > 0 {
 		checkNullRows(ctx, t, transaction, item)
 	}
+
+	checkExec(ctx, t, transaction, item)
+}
+
+// checkExec runs a parameterless :exec as generated: a utility statement such
+// as LOCK resolves its relations only when executed. The caller rolls back.
+func checkExec(ctx context.Context, t *testing.T, transaction pgx.Tx, item *ir.Query) {
+	t.Helper()
+
+	if len(item.GetParameters()) > 0 || item.GetCommand() != ir.QueryCommand_QUERY_COMMAND_EXEC {
+		return
+	}
+
+	if _, err := transaction.Exec(ctx, item.GetSql()); err != nil {
+		t.Fatalf("execute %s: %v", item.GetSql(), err)
+	}
 }
 
 func checkDomain(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {

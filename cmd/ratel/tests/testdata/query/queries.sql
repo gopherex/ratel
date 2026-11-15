@@ -295,3 +295,16 @@ SELECT id FROM public.users WHERE name % $1 ORDER BY similarity(name, $1) DESC;
 
 -- name: ExtensionDefault :one
 INSERT INTO public.tokens DEFAULT VALUES RETURNING id;
+
+-- name: LockUsers :exec
+LOCK TABLE users, public.money IN SHARE MODE;
+
+-- name: SystemColumns :many
+SELECT u.ctid, tableoid, xmin, cmin, xmax, cmax FROM public.users u;
+
+-- name: OuterSystemColumn :many
+SELECT m.xmax FROM public.users u LEFT JOIN public.users m ON m.id = u.manager_id;
+
+-- name: UpsertMarker :one
+INSERT INTO public.users(id, name, score) VALUES ($1, $2, $3)
+ON CONFLICT (id) DO UPDATE SET score = excluded.score RETURNING id, xmax;

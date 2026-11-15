@@ -147,6 +147,16 @@ a Go type in the generator's `types` option. `:exec` and
 `:execrows` return no rows, so their result columns are neither typed nor
 generated: `SELECT pg_advisory_xact_lock(...)` is a valid `:exec`.
 
+A table's system columns (`tableoid` oid, `xmin` and `xmax` xid, `cmin` and
+`cmax` cid, `ctid` tid) resolve by name, qualified or not, in `SELECT` and in
+`RETURNING` of `INSERT`, `UPDATE`, `DELETE` and `MERGE`; they are never part of
+`*`. A view, a subquery, a CTE or a join alias has none, and two tables in range
+make an unqualified name ambiguous. `RETURNING xmax` tells a row an
+`ON CONFLICT DO UPDATE` updated (non-zero) from one it inserted (zero).
+`LOCK [TABLE] ... [IN ... MODE]` is a valid `:exec` and only that: it returns
+neither rows nor a row count. Every relation it names must exist in the schema,
+and the generated SQL qualifies each one.
+
 ## Migrations directory
 
 Holds the steps planned by `ratel migrate plan` and the integrity file

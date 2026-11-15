@@ -14,9 +14,12 @@ import (
 )
 
 type scope struct {
-	parent      *scope
-	columns     []*ir.QueryColumn
-	qualified   []*ir.QueryColumn
+	parent    *scope
+	columns   []*ir.QueryColumn
+	qualified []*ir.QueryColumn
+	// system are the hidden columns of the base tables in range: addressable
+	// by name like PostgreSQL's system columns, never part of * or a result.
+	system      []*ir.QueryColumn
 	keepUnknown bool
 	windows     []*pg.WindowDef
 	windowDefs  map[string]*pg.WindowDef
@@ -102,6 +105,10 @@ func (s *inference) column(parts []string, env *scope) *ir.QueryColumn {
 		if result != nil {
 			return proto.CloneOf(result)
 		}
+
+		if system := s.systemColumn(current, name, qualifier, parts); system != nil {
+			return system
+		}
 	}
 
 	s.reject("no column " + strings.Join(parts, "."))
@@ -147,6 +154,78 @@ func (s *inference) relation(name *pg.RangeVar, env *scope) []*ir.QueryColumn {
 	s.reject("no relation " + strings.TrimPrefix(name.GetSchemaname()+"."+name.GetRelname(), "."))
 
 	return nil
+}
+
+// systemColumns are the hidden columns of name when it resolved to a table
+// (PostgreSQL "System Columns"); a view, a CTE or a function has none.
+// relation qualifies every catalog relation it finds, so an unqualified name
+// here is a CTE.
+func (s *inference) systemColumns(name *pg.RangeVar) []*ir.QueryColumn {
+	if name.GetSchemaname() == "" || !s.isTable(name.GetSchemaname(), name.GetRelname()) {
+		return nil
+	}
+
+	alias := name.GetRelname()
+	if name.GetAlias().GetAliasname() != "" {
+		alias = name.GetAlias().GetAliasname()
+	}
+
+	result := make([]*ir.QueryColumn, 0, len(systemColumnTypes()))
+	for _, column := range systemColumnTypes() {
+		result = append(result, &ir.QueryColumn{Name: column[0], Type: scalar(column[1]), TableAlias: alias})
+	}
+
+	return result
+}
+
+// systemColumnTypes lists PostgreSQL's system columns with their types.
+func systemColumnTypes() [][2]string {
+	return [][2]string{
+		{"tableoid", "oid"}, {"xmin", "xid"}, {"cmin", "cid"}, {"xmax", "xid"}, {"cmax", "cid"}, {"ctid", "tid"},
+	}
+}
+
+func (s *inference) isTable(namespace, name string) bool {
+	for _, schema := range s.catalog.GetSchemas() {
+		if schema.GetName() != namespace {
+			continue
+		}
+
+		for _, table := range schema.GetTables() {
+			parts := table.GetName().GetParts()
+			if parts[len(parts)-1] == name {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// systemColumn resolves name among the system columns of one scope level,
+// after its ordinary columns: no user column can take a system column's name.
+func (s *inference) systemColumn(env *scope, name, qualifier string, parts []string) *ir.QueryColumn {
+	var result *ir.QueryColumn
+
+	for _, col := range env.system {
+		if col.GetName() != name || (qualifier != "" && qualifier != col.GetTableAlias()) {
+			continue
+		}
+
+		if result != nil {
+			s.reject("ambiguous column " + strings.Join(parts, "."))
+
+			return &ir.QueryColumn{}
+		}
+
+		result = col
+	}
+
+	if result == nil {
+		return nil
+	}
+
+	return proto.CloneOf(result)
 }
 
 func (s *inference) schemaRelation(schema *ir.Schema, name string) []*ir.QueryColumn {
@@ -217,6 +296,7 @@ func (s *inference) from(node *pg.Node, env *scope) []*ir.QueryColumn {
 	case node.GetRangeVar() != nil:
 		table := node.GetRangeVar()
 		result = rename(s.relation(table, env), table.GetAlias())
+		env.system = append(env.system, s.systemColumns(table)...)
 	case node.GetRangeSubselect() != nil:
 		subquery := node.GetRangeSubselect()
 		parent := namespaceScope(env)
@@ -240,7 +320,7 @@ func (s *inference) from(node *pg.Node, env *scope) []*ir.QueryColumn {
 }
 
 func (s *inference) join(join *pg.JoinExpr, env *scope) []*ir.QueryColumn {
-	start := len(env.qualified)
+	start, systemStart := len(env.qualified), len(env.system)
 	left := s.from(join.GetLarg(), env)
 	rightScope := newScope(env)
 	rightScope.columns = left
@@ -249,6 +329,7 @@ func (s *inference) join(join *pg.JoinExpr, env *scope) []*ir.QueryColumn {
 
 	on.columns = append(copyColumns(left), right...)
 	on.qualified = append(copyColumns(env.qualified[start:]), rightScope.qualified...)
+	on.system = append(copyColumns(env.system[systemStart:]), rightScope.system...)
 	s.expr(join.GetQuals(), on, scalar("bool"))
 	using := stringsOf(join.GetUsingClause())
 
@@ -265,22 +346,25 @@ func (s *inference) join(join *pg.JoinExpr, env *scope) []*ir.QueryColumn {
 	result := s.joinColumns(left, right, using, join.GetJointype())
 
 	if join.GetJointype() == pg.JoinType_JOIN_LEFT || join.GetJointype() == pg.JoinType_JOIN_FULL {
-		for _, col := range append(right, rightScope.qualified...) {
+		for _, col := range slices.Concat(right, rightScope.qualified, rightScope.system) {
 			col.Nullable = true
 		}
 	}
 
 	if join.GetJointype() == pg.JoinType_JOIN_RIGHT || join.GetJointype() == pg.JoinType_JOIN_FULL {
-		for _, col := range append(left, env.qualified[start:]...) {
+		for _, col := range slices.Concat(left, env.qualified[start:], env.system[systemStart:]) {
 			col.Nullable = true
 		}
 	}
 
 	env.qualified = append(env.qualified, rightScope.qualified...)
+	env.system = append(env.system, rightScope.system...)
 	result = rename(result, join.GetAlias())
 
 	if join.GetAlias().GetAliasname() != "" {
 		env.qualified = append(env.qualified[:start], copyColumns(result)...)
+		// A join alias hides the tables inside it, and a join has no system columns.
+		env.system = env.system[:systemStart]
 	}
 
 	return result

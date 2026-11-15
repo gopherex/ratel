@@ -6,6 +6,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/gopherex/ratel/pkg/ir"
+
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
@@ -44,6 +46,35 @@ func testStatementProvenance(t *testing.T, parser parse.Parser) {
 				}
 
 				inspectIDs(t, first.ProtoReflect(), seen)
+			}
+		})
+	}
+}
+
+func testRawStatementKind(t *testing.T, parser parse.Parser) {
+	t.Helper()
+
+	for _, tc := range []struct {
+		sql  string
+		want ir.StatementKind
+	}{
+		{"VACUUM app.t", ir.StatementKind_STATEMENT_KIND_UTILITY},
+		{"LOCK TABLE app.t IN SHARE MODE", ir.StatementKind_STATEMENT_KIND_UTILITY},
+		{"TRUNCATE app.t", ir.StatementKind_STATEMENT_KIND_TRUNCATE},
+	} {
+		t.Run(tc.sql, func(t *testing.T) {
+			t.Parallel()
+
+			tree, err := parser.Parse(tc.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			raw := tree.GetStmts()[0]
+
+			mapped := mapper.New(parser, "query.sql", tc.sql, raw, 0).MapStatement(raw.GetStmt())
+			if got := mapped.GetRaw().GetKind(); got != tc.want {
+				t.Fatalf("kind = %v, want %v", got, tc.want)
 			}
 		})
 	}

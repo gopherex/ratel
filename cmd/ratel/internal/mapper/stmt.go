@@ -497,7 +497,7 @@ func classify(node *pg.Node) ir.StatementKind {
 	case node.GetTransactionStmt() != nil:
 		return ir.StatementKind_STATEMENT_KIND_TCL
 	case node.GetVacuumStmt() != nil, node.GetVariableSetStmt() != nil, node.GetExplainStmt() != nil,
-		node.GetClusterStmt() != nil, node.GetReindexStmt() != nil:
+		node.GetClusterStmt() != nil, node.GetReindexStmt() != nil, node.GetLockStmt() != nil:
 		return ir.StatementKind_STATEMENT_KIND_UTILITY
 	default:
 		if node == nil || node.GetNode() == nil {

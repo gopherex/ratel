@@ -19,6 +19,7 @@ func TestMapper(t *testing.T) {
 		{"ColumnConstraints", testColumnConstraints},
 		{"MapExpr", testMapExpr},
 		{"StatementProvenance", testStatementProvenance},
+		{"RawStatementKind", testRawStatementKind},
 		{"SourceCoordinates", testSourceCoordinates},
 		{"NilDeclarations", testNilDeclarations},
 		{"MapRoutine", testMapRoutine},
