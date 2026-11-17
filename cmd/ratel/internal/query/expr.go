@@ -12,6 +12,7 @@ import (
 	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
+	"github.com/gopherex/ratel/cmd/ratel/internal/overload"
 )
 
 func (s *inference) expr(node *pg.Node, env *scope, expected *ir.TypeRef) *ir.QueryColumn {
@@ -65,18 +66,18 @@ func (s *inference) cast(cast *pg.TypeCast, env *scope) *ir.QueryColumn {
 }
 
 func constant(value *pg.A_Const) *ir.QueryColumn {
-	result := &ir.QueryColumn{Nullable: value.GetIsnull(), Type: scalar(unknownType)}
+	result := &ir.QueryColumn{Nullable: value.GetIsnull(), Type: overload.Scalar(overload.Unknown)}
 
 	switch {
 	case value.GetIval() != nil:
-		result.Type = scalar("int4")
+		result.Type = overload.Scalar("int4")
 	case value.GetFval() != nil:
-		result.Type = scalar("numeric")
+		result.Type = overload.Scalar("numeric")
 		if _, err := strconv.ParseInt(value.GetFval().GetFval(), 10, 64); err == nil {
-			result.Type = scalar("int8")
+			result.Type = overload.Scalar("int8")
 		}
 	case value.GetBoolval() != nil:
-		result.Type = scalar("bool")
+		result.Type = overload.Scalar("bool")
 	default:
 	}
 
@@ -108,9 +109,10 @@ func (s *inference) parameter(ref *pg.ParamRef, expected *ir.TypeRef) *ir.QueryC
 		s.refs = append(s.refs, ref)
 	}
 
-	if !unknown(expected) {
-		inconsistent := typ == nil && value.GetType() != nil && typeKey(value.GetType()) != typeKey(expected)
-		if inconsistent || (typ != nil && !s.signatures.coercible(typ, expected)) {
+	if !overload.IsUnknown(expected) {
+		inconsistent := typ == nil && value.GetType() != nil &&
+			overload.TypeKey(value.GetType()) != overload.TypeKey(expected)
+		if inconsistent || (typ != nil && !s.resolver.Coercible(typ, expected)) {
 			s.fail("conflicting parameter $" + strconv.Itoa(int(ref.GetNumber())))
 		}
 
@@ -230,7 +232,10 @@ func callArguments(call *pg.FuncCall) ([]*pg.Node, []string) {
 }
 
 // pgCatalog is the schema of the builtin functions, operators and types.
-const pgCatalog = "pg_catalog"
+const (
+	pgCatalog   = "pg_catalog"
+	binaryArity = 2
+)
 
 func (s *inference) call(call *pg.FuncCall, env *scope) *ir.QueryColumn {
 	nodes, named := callArguments(call)
@@ -244,8 +249,8 @@ func (s *inference) call(call *pg.FuncCall, env *scope) *ir.QueryColumn {
 	args := s.expressions(nodes, env, nil)
 	names := stringsOf(call.GetFuncname())
 	chosen := s.function(names, args, named, call.GetFuncVariadic())
-	s.constrain(nodes, nil, chosen.inputs, env)
-	s.expr(call.GetAggFilter(), env, scalar("bool"))
+	s.constrain(nodes, nil, chosen.Inputs, env)
+	s.expr(call.GetAggFilter(), env, overload.Scalar("bool"))
 
 	for _, node := range call.GetAggOrder() {
 		s.ordering(node.GetSortBy().GetNode(), env)
@@ -257,13 +262,13 @@ func (s *inference) call(call *pg.FuncCall, env *scope) *ir.QueryColumn {
 
 	name := names[len(names)-1]
 	nullable := true
-	parts := chosen.function.GetName().GetParts()
+	parts := chosen.Function.GetName().GetParts()
 
 	if len(parts) > 0 && parts[0] == pgCatalog {
-		nullable = builtinNullable(name, chosen.function, args)
+		nullable = builtinNullable(name, chosen.Function, args)
 	}
 
-	return &ir.QueryColumn{Name: name, Type: proto.CloneOf(chosen.result), Nullable: nullable}
+	return &ir.QueryColumn{Name: name, Type: proto.CloneOf(chosen.Result), Nullable: nullable}
 }
 
 func builtinNullable(name string, function *ir.Function, args []*ir.QueryColumn) bool {
@@ -330,7 +335,7 @@ func (s *inference) frameOffset(node *pg.Node, window *pg.WindowDef, orders []*p
 		return
 	}
 
-	typ := scalar("int8")
+	typ := overload.Scalar("int8")
 	// PostgreSQL parsenodes.h: FRAMEOPTION_RANGE is a syntax bit, not a tuning value.
 	const frameRange = 0x00002
 	if window.GetFrameOptions()&frameRange != 0 {
@@ -342,7 +347,7 @@ func (s *inference) frameOffset(node *pg.Node, window *pg.WindowDef, orders []*p
 
 		actual := s.expr(node, env, nil)
 		order := s.expr(orders[0].GetSortBy().GetNode(), env, nil)
-		typ = s.rangeOffset(s.signatures.baseType(order.GetType()), actual.GetType())
+		typ = s.rangeOffset(s.resolver.BaseType(order.GetType()), actual.GetType())
 	}
 
 	s.expr(node, env, typ)
@@ -352,32 +357,32 @@ func (s *inference) rangeOffset(order, actual *ir.TypeRef) *ir.TypeRef {
 	var result *ir.TypeRef
 
 	preferred := actual
-	if unknown(preferred) {
+	if overload.IsUnknown(preferred) {
 		preferred = order
 	} else {
-		preferred = s.signatures.baseType(preferred)
+		preferred = s.resolver.BaseType(preferred)
 	}
 
 	ambiguous := false
 
 	const rangeArguments = 5
 
-	for _, function := range s.signatures.functions["pg_catalog.in_range"] {
+	for _, function := range s.resolver.Functions([]string{pgCatalog, "in_range"}) {
 		args := function.GetArguments()
-		if len(args) != rangeArguments || typeKey(args[0].GetType()) != typeKey(order) {
+		if len(args) != rangeArguments || overload.TypeKey(args[0].GetType()) != overload.TypeKey(order) {
 			continue
 		}
 
 		typ := args[2].GetType()
-		if !s.signatures.coercible(actual, typ) {
+		if !s.resolver.Coercible(actual, typ) {
 			continue
 		}
 
-		if typeKey(typ) == typeKey(preferred) {
+		if overload.TypeKey(typ) == overload.TypeKey(preferred) {
 			return typ
 		}
 
-		if result != nil && typeKey(result) != typeKey(typ) {
+		if result != nil && overload.TypeKey(result) != overload.TypeKey(typ) {
 			ambiguous = true
 		}
 
@@ -385,7 +390,7 @@ func (s *inference) rangeOffset(order, actual *ir.TypeRef) *ir.TypeRef {
 	}
 
 	if result == nil || ambiguous {
-		s.fail("RANGE frame offset for " + typeKey(order))
+		s.fail("RANGE frame offset for " + overload.TypeKey(order))
 
 		return nil
 	}
@@ -418,7 +423,7 @@ func (s *inference) binaryOperation(expr *pg.A_Expr, env *scope, name string) *i
 
 	args := s.expressions(nodes, env, nil)
 	chosen := s.operator(name, args)
-	s.constrain(nodes, args, chosen.inputs, env)
+	s.constrain(nodes, args, chosen.Inputs, env)
 
 	nullable := false
 	for _, arg := range args {
@@ -438,7 +443,7 @@ func (s *inference) binaryOperation(expr *pg.A_Expr, env *scope, name string) *i
 		nullable = true
 	}
 
-	return &ir.QueryColumn{Type: proto.CloneOf(chosen.result), Nullable: nullable}
+	return &ir.QueryColumn{Type: proto.CloneOf(chosen.Result), Nullable: nullable}
 }
 
 // rowComparison types (a, b) op (c, d) and (a, b) op (SELECT c, d) member by
@@ -465,7 +470,7 @@ func (s *inference) rowComparison(expr *pg.A_Expr, env *scope, name string) *ir.
 
 	s.memberwise(name, expr.GetLexpr().GetRowExpr().GetArgs(), nodes, values, env)
 
-	return &ir.QueryColumn{Type: scalar("bool"), Nullable: true}
+	return &ir.QueryColumn{Type: overload.Scalar("bool"), Nullable: true}
 }
 
 // memberwise applies operator name to each pair of row members. The right
@@ -484,7 +489,7 @@ func (s *inference) memberwise(name string, left, right []*pg.Node, values []*ir
 		}
 
 		args := []*ir.QueryColumn{s.expr(node, env, nil), values[index]}
-		s.constrain(nodes, args, s.operator(name, args).inputs, env)
+		s.constrain(nodes, args, s.operator(name, args).Inputs, env)
 	}
 }
 
@@ -493,20 +498,20 @@ func (s *inference) anyOperation(expr *pg.A_Expr, env *scope, name string) *ir.Q
 
 	var expected *ir.TypeRef
 
-	if !unknown(left.GetType()) {
-		expected = array(left.GetType())
+	if !overload.IsUnknown(left.GetType()) {
+		expected = overload.Array(left.GetType())
 	}
 
 	right := s.expr(expr.GetRexpr(), env, expected)
 	element := &ir.QueryColumn{Type: right.GetType().GetElement(), Nullable: true}
 
 	chosen := s.operator(name, []*ir.QueryColumn{left, element})
-	if len(chosen.inputs) == binaryArity {
-		s.expr(expr.GetLexpr(), env, chosen.inputs[0])
-		s.expr(expr.GetRexpr(), env, array(chosen.inputs[1]))
+	if len(chosen.Inputs) == binaryArity {
+		s.expr(expr.GetLexpr(), env, chosen.Inputs[0])
+		s.expr(expr.GetRexpr(), env, overload.Array(chosen.Inputs[1]))
 	}
 
-	return &ir.QueryColumn{Type: scalar("bool"), Nullable: true}
+	return &ir.QueryColumn{Type: overload.Scalar("bool"), Nullable: true}
 }
 
 func (s *inference) listOperation(expr *pg.A_Expr, env *scope, name string) *ir.QueryColumn {
@@ -522,10 +527,10 @@ func (s *inference) listOperation(expr *pg.A_Expr, env *scope, name string) *ir.
 		}
 
 		chosen := s.operator(operator, []*ir.QueryColumn{left, right})
-		s.constrain([]*pg.Node{expr.GetLexpr(), value}, []*ir.QueryColumn{left, right}, chosen.inputs, env)
+		s.constrain([]*pg.Node{expr.GetLexpr(), value}, []*ir.QueryColumn{left, right}, chosen.Inputs, env)
 	}
 
-	return &ir.QueryColumn{Type: scalar("bool"), Nullable: true}
+	return &ir.QueryColumn{Type: overload.Scalar("bool"), Nullable: true}
 }
 
 func (s *inference) coalesce(nodes []*pg.Node, env *scope) *ir.QueryColumn {
@@ -543,9 +548,9 @@ func (s *inference) coalesce(nodes []*pg.Node, env *scope) *ir.QueryColumn {
 
 func (s *inference) caseExpr(expr *pg.CaseExpr, env *scope) *ir.QueryColumn {
 	operand := s.expr(expr.GetArg(), env, nil)
-	if expr.GetArg() != nil && unknown(operand.GetType()) {
-		s.expr(expr.GetArg(), env, scalar("text"))
-		operand.Type = scalar("text")
+	if expr.GetArg() != nil && overload.IsUnknown(operand.GetType()) {
+		s.expr(expr.GetArg(), env, overload.Scalar("text"))
+		operand.Type = overload.Scalar("text")
 	}
 
 	nodes := make([]*pg.Node, 1, 1+len(expr.GetArgs()))
@@ -557,9 +562,9 @@ func (s *inference) caseExpr(expr *pg.CaseExpr, env *scope) *ir.QueryColumn {
 		if expr.GetArg() != nil {
 			right := s.expr(when.GetExpr(), env, nil)
 			chosen := s.operator("=", []*ir.QueryColumn{operand, right})
-			s.constrain([]*pg.Node{expr.GetArg(), when.GetExpr()}, []*ir.QueryColumn{operand, right}, chosen.inputs, env)
+			s.constrain([]*pg.Node{expr.GetArg(), when.GetExpr()}, []*ir.QueryColumn{operand, right}, chosen.Inputs, env)
 		} else {
-			s.expr(when.GetExpr(), env, scalar("bool"))
+			s.expr(when.GetExpr(), env, overload.Scalar("bool"))
 		}
 
 		nodes = append(nodes, when.GetResult())
@@ -582,7 +587,7 @@ func (s *inference) subquery(link *pg.SubLink, env *scope) *ir.QueryColumn {
 	columns := s.statement(link.GetSubselect(), newScope(env))
 
 	if link.GetSubLinkType() == pg.SubLinkType_EXISTS_SUBLINK {
-		return &ir.QueryColumn{Type: scalar("bool")}
+		return &ir.QueryColumn{Type: overload.Scalar("bool")}
 	}
 
 	if row := link.GetTestexpr().GetRowExpr(); row != nil {
@@ -593,7 +598,7 @@ func (s *inference) subquery(link *pg.SubLink, env *scope) *ir.QueryColumn {
 
 		s.memberwise(name, row.GetArgs(), nil, columns, env)
 
-		return &ir.QueryColumn{Type: scalar("bool"), Nullable: true}
+		return &ir.QueryColumn{Type: overload.Scalar("bool"), Nullable: true}
 	}
 
 	if len(columns) != 1 {
@@ -611,11 +616,11 @@ func (s *inference) subquery(link *pg.SubLink, env *scope) *ir.QueryColumn {
 
 		return col
 	case pg.SubLinkType_ARRAY_SUBLINK:
-		return &ir.QueryColumn{Name: "array", Type: array(col.GetType())}
+		return &ir.QueryColumn{Name: "array", Type: overload.Array(col.GetType())}
 	case pg.SubLinkType_ANY_SUBLINK, pg.SubLinkType_ALL_SUBLINK:
 		s.expr(link.GetTestexpr(), env, col.GetType())
 
-		return &ir.QueryColumn{Type: scalar("bool"), Nullable: true}
+		return &ir.QueryColumn{Type: overload.Scalar("bool"), Nullable: true}
 	default:
 		s.fail("subquery expression " + link.String())
 

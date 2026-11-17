@@ -16,6 +16,8 @@ import (
 	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
+	"github.com/gopherex/ratel/cmd/ratel/internal/overload"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
@@ -74,7 +76,7 @@ type (
 		major       int
 		types       *pgtype.Map
 		snapshot    map[string]bool // pg_name of every builtin type of the target major
-		casts       map[string]bool // "source:target" of every implicit builtin cast
+		resolver    *overload.Resolver
 	}
 )
 
@@ -155,7 +157,7 @@ func newBuilder(parser parse.Parser, major int, builtins []*ir.Schema) *builder 
 		},
 		schemas: map[string]*ir.Schema{defaultSchema: public}, objects: objects,
 		namespaces: make(map[string]declaration), major: major,
-		types: pgtype.NewMap(), snapshot: make(map[string]bool), casts: make(map[string]bool),
+		types: pgtype.NewMap(), snapshot: make(map[string]bool),
 	}
 	result.addBuiltins(builtins)
 
@@ -170,12 +172,6 @@ func (b *builder) addBuiltins(schemas []*ir.Schema) {
 	for _, schema := range schemas {
 		for _, builtin := range schema.GetBuiltinTypes() {
 			b.snapshot[builtin.GetType().GetPgName()] = true
-		}
-
-		for _, cast := range schema.GetBuiltinCasts() {
-			if cast.GetContext() == "i" {
-				b.casts[cast.GetSource().GetPgName()+":"+cast.GetTarget().GetPgName()] = true
-			}
 		}
 	}
 }
@@ -276,9 +272,10 @@ func schemaStatementStart(tokens []*pg.ScanToken, index int) bool {
 }
 
 func (b *builder) register(ref *ir.ObjectRef, message proto.Message, meta *ir.Metadata, namespace string) error {
-	key := namespace + "/" + ObjectID(ref)
+	key := namespace + "/" + objectid.ID(ref)
 	if previous, exists := b.namespaces[key]; exists {
-		return refusal("RTL-C02", meta, "duplicate "+ObjectID(ref)+"; first declared at "+position(previous.meta.GetSource()))
+		return refusal("RTL-C02", meta,
+			"duplicate "+objectid.ID(ref)+"; first declared at "+position(previous.meta.GetSource()))
 	}
 
 	entry := declaration{reference: ref, message: message, meta: meta, scope: defaultSchema}
@@ -321,11 +318,11 @@ func (b *builder) add(message proto.Message, collection, scope string) error {
 
 	if kind == ir.ObjectKind_OBJECT_KIND_TABLE || kind == ir.ObjectKind_OBJECT_KIND_VIEW ||
 		kind == ir.ObjectKind_OBJECT_KIND_MATERIALIZED_VIEW {
-		if previous, exists := b.namespaces["type/"+ObjectID(ref)]; exists {
+		if previous, exists := b.namespaces["type/"+objectid.ID(ref)]; exists {
 			return refusal("RTL-C02", entry.meta, "duplicate row type; first declared at "+position(previous.meta.GetSource()))
 		}
 
-		b.namespaces["type/"+ObjectID(ref)] = entry
+		b.namespaces["type/"+objectid.ID(ref)] = entry
 	}
 
 	field := schema.ProtoReflect().Descriptor().Fields().ByName(protoreflect.Name(collection))
@@ -357,4 +354,4 @@ func refusal(code string, meta *ir.Metadata, message string) error {
 func position(span *ir.SourceSpan) string {
 	return fmt.Sprintf("%s:%d:%d", span.GetFile(), span.GetStartLine(), span.GetStartColumn())
 }
-func objectKey(ref *ir.ObjectRef) string { return ref.GetKind().String() + "/" + ObjectID(ref) }
+func objectKey(ref *ir.ObjectRef) string { return ref.GetKind().String() + "/" + objectid.ID(ref) }

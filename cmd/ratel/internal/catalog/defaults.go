@@ -8,6 +8,7 @@ import (
 
 	"github.com/gopherex/ratel/pkg/ir"
 
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
 	"github.com/gopherex/ratel/cmd/ratel/internal/pgname"
 )
 
@@ -141,7 +142,7 @@ func (b *builder) expandColumns(table *ir.Table) error {
 			column.DefaultExpr = &ir.Expr{Node: &ir.Expr_FunctionCall{FunctionCall: &ir.FunctionCall{
 				Name: &ir.QualifiedName{Parts: []string{"nextval"}},
 				Arguments: []*ir.Expr{{Node: &ir.Expr_Literal{Literal: &ir.Literal{
-					Value: &ir.Literal_StringValue{StringValue: ObjectID(reference)},
+					Value: &ir.Literal_StringValue{StringValue: objectid.ID(reference)},
 				}}}},
 			}}}
 		}
@@ -211,7 +212,7 @@ func serialType(name string) string {
 func (b *builder) uniqueRelationName(schema, name1, name2, label string) string {
 	return pgname.Choose(name1, name2, label, func(name string) bool {
 		reference := &ir.ObjectRef{Name: &ir.QualifiedName{Parts: []string{schema, name}}}
-		_, exists := b.namespaces["relation/"+ObjectID(reference)]
+		_, exists := b.namespaces["relation/"+objectid.ID(reference)]
 
 		return exists
 	})

@@ -7,6 +7,7 @@ import (
 	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
@@ -155,7 +156,7 @@ func testAnnotationTargets(t *testing.T, parser parse.Parser) {
 				t.Fatalf("annotations = %v", annotations)
 			}
 
-			if actual := catalog.ObjectID(annotations[0].GetObject()); actual != tc.object {
+			if actual := objectid.ID(annotations[0].GetObject()); actual != tc.object {
 				t.Fatalf("target = %s, want %s", actual, tc.object)
 			}
 

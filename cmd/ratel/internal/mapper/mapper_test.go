@@ -80,6 +80,27 @@ func testRawStatementKind(t *testing.T, parser parse.Parser) {
 	}
 }
 
+// A statement's span starts at its first token: PostgreSQL places a later
+// statement right after the previous semicolon, so whitespace and comments
+// between them would otherwise point diagnostics at the line before.
+func testStatementStart(t *testing.T, parser parse.Parser) {
+	t.Helper()
+
+	const sql = "CREATE TABLE a(id int);\n\n  -- the index\n  CREATE INDEX ON a (id);"
+
+	tree, err := parser.Parse(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw := tree.GetStmts()[1]
+	source := mapper.New(parser, "schema.sql", sql, raw, 1).MapStatement(raw.GetStmt()).GetMeta().GetSource()
+
+	if source.GetStartLine() != 4 || source.GetStartColumn() != 3 {
+		t.Fatalf("statement starts at %d:%d, want 4:3", source.GetStartLine(), source.GetStartColumn())
+	}
+}
+
 func inspectIDs(t *testing.T, message protoreflect.Message, seen map[string]bool) {
 	t.Helper()
 

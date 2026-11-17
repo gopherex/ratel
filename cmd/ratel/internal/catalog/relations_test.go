@@ -9,6 +9,7 @@ import (
 	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
 )
 
 const usersTable = "CREATE TABLE users(id int PRIMARY KEY); "
@@ -166,10 +167,10 @@ func relationSummary(c *ir.Catalog) []string {
 	for _, relation := range c.GetRelations() {
 		line := fmt.Sprintf("%s/%s %s/%s %s>%s", relation.GetName(), relation.GetInverseName(),
 			kindName(relation.GetKind()), kindName(relation.GetInverseKind()),
-			catalog.ObjectID(relation.GetFrom().GetTable()), catalog.ObjectID(relation.GetTo().GetTable()))
+			objectid.ID(relation.GetFrom().GetTable()), objectid.ID(relation.GetTo().GetTable()))
 
 		if relation.GetThrough() != nil {
-			line += " via " + catalog.ObjectID(relation.GetThrough())
+			line += " via " + objectid.ID(relation.GetThrough())
 		}
 
 		result = append(result, line)

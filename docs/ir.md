@@ -55,7 +55,9 @@ a lower-case simple identifier). Functions append the argument type list.
    integration suite applies each fixture to real PostgreSQL 16, 17 and 18 and
    compares.
 3. **Positions.** Every object built from source carries a `SourceSpan`;
-   introspected objects carry none.
+   introspected objects carry none. A statement's span starts at its first
+   token, not at the whitespace and comments after the previous semicolon,
+   so a diagnostic names the statement's own line.
 4. **Complete inference or an error.** A query whose parameter or column type
    cannot be inferred fails with a diagnostic naming the expression, unless an
    annotation states the type or nullability. Unknown functions and operators
@@ -223,16 +225,26 @@ PostgreSQL signatures, version-specific functions and independent loader state.
 Run `cd cmd/ratel && go test -race ./internal/builtins/...`; benchmarks use
 `go test -run '^$' -bench . -benchmem ./internal/builtins/...` in that module.
 The catalog resolver chooses an overload for calls in schema expressions
-(defaults, checks, generated columns, index expressions, policies) after
-PostgreSQL's `func_select_candidate`. Arity counts trailing defaults and expands
-a variadic element. Each argument is typed from its column (the column type,
-domains unwrapped to their base), a cast target, or a literal (`int4` or `int8`
-by range, `numeric`, `bool`); string literals and NULL are unknown and match any
-parameter. An exact type scores above a domain over it, which scores above an
-implicit cast from `builtin_casts`; polymorphic parameters accept their type
-family. The single best candidate wins; a tie is `RTL-C03`. Inside view and
-routine query bodies, column types belong to the query's own scope, so a tie
-there leaves the call without a target and query inference types it.
+(defaults, checks, generated columns, index expressions, policies) with the
+same resolver query inference uses (`internal/overload`), after PostgreSQL's
+`func_select_candidate` and `oper_select_candidate`: exact matches first, then
+implicit casts from `builtin_casts` scored by exact and preferred types, then
+unknown arguments resolved by type category (the string category first, then
+its preferred type), then unknown arguments assumed to be the known one. Arity
+counts trailing defaults and expands a variadic element; polymorphic parameters
+instantiate from their arguments. An argument is typed from its column (a
+domain counts as its base), a cast target, a literal (`int4` or `int8` by
+range, `numeric`, `bool`, `bytea`), an operator expression (the chosen
+operator's result: `title || ' ' || slug` is `text`, so `lower` is
+`lower(text)`), a nested call (the chosen function's result), or a boolean
+construct (`AND`, `IS NULL`, `LIKE`, `IN`, ...); string literals and NULL are
+unknown, as in PostgreSQL (`length(NULL)` is `length(text)`). An unqualified
+name looks in `pg_catalog`, the object's schema, then the search path. A call
+no signature takes is `RTL-C03` "undeclared function f(int4)", one several
+take equally well `RTL-C03` "ambiguous function f(int4)". Inside view and
+routine query bodies, column types belong to the query's own scope, so a call
+with an argument typed only there, or one left ambiguous, keeps no target and
+query inference types it.
 
 The builder uses `public` as the default schema and search path. It collects
 schema declarations, visits embedded `CREATE SCHEMA` elements with that schema

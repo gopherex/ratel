@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"cmp"
+	"errors"
 	"maps"
 	"math"
 	"slices"
@@ -14,6 +15,8 @@ import (
 	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
+	"github.com/gopherex/ratel/cmd/ratel/internal/overload"
 	"github.com/gopherex/ratel/cmd/ratel/internal/pgname"
 )
 
@@ -31,7 +34,9 @@ func (b *builder) finish() error {
 	for _, name := range slices.Sorted(maps.Keys(b.schemas)) {
 		schema := b.schemas[name]
 		slices.SortFunc(schema.GetTables(), func(left, right *ir.Table) int {
-			return cmp.Compare(ObjectID(&ir.ObjectRef{Name: left.GetName()}), ObjectID(&ir.ObjectRef{Name: right.GetName()}))
+			return cmp.Compare(
+				objectid.ID(&ir.ObjectRef{Name: left.GetName()}), objectid.ID(&ir.ObjectRef{Name: right.GetName()}),
+			)
 		})
 
 		for _, table := range schema.GetTables() {
@@ -105,7 +110,7 @@ func (b *builder) attach(pending attachment) error {
 		return b.attachViewIndex(materialized, pending)
 	}
 
-	return refusal("RTL-C03", metadata(pending.message), "undeclared table "+ObjectID(reference))
+	return refusal("RTL-C03", metadata(pending.message), "undeclared table "+objectid.ID(reference))
 }
 
 func (b *builder) attachTable(pending attachment) error {
@@ -113,7 +118,7 @@ func (b *builder) attachTable(pending attachment) error {
 
 	entry, exists := b.objects[objectKey(reference)]
 	if !exists {
-		return refusal("RTL-C03", metadata(pending.message), "undeclared table "+ObjectID(reference))
+		return refusal("RTL-C03", metadata(pending.message), "undeclared table "+objectid.ID(reference))
 	}
 
 	var table *ir.Table
@@ -407,7 +412,7 @@ func (b *builder) columnExists(table *ir.Table, name string, meta *ir.Metadata) 
 		}
 	}
 
-	return refusal("RTL-C03", meta, "undeclared column "+ObjectID(&ir.ObjectRef{Name: table.GetName()})+"."+name)
+	return refusal("RTL-C03", meta, "undeclared column "+objectid.ID(&ir.ObjectRef{Name: table.GetName()})+"."+name)
 }
 
 func (b *builder) resolveReference(reference *ir.ObjectRef, scope string, meta *ir.Metadata) error {
@@ -429,7 +434,7 @@ func (b *builder) resolveReference(reference *ir.ObjectRef, scope string, meta *
 	}
 
 	if reference.GetKind() == ir.ObjectKind_OBJECT_KIND_UNSPECIFIED {
-		if entry, exists := b.namespaces["type/"+ObjectID(reference)]; exists {
+		if entry, exists := b.namespaces["type/"+objectid.ID(reference)]; exists {
 			reference.Kind = entry.reference.GetKind()
 
 			return nil
@@ -451,7 +456,7 @@ func (b *builder) resolveReference(reference *ir.ObjectRef, scope string, meta *
 		return nil
 	}
 
-	return refusal("RTL-C03", meta, "undeclared reference "+ObjectID(reference))
+	return refusal("RTL-C03", meta, "undeclared reference "+objectid.ID(reference))
 }
 
 func (b *builder) resolveRoutineReference(reference *ir.ObjectRef, scope string, meta *ir.Metadata) error {
@@ -561,11 +566,11 @@ func (b *builder) resolveType(value *ir.TypeRef, scope string, meta *ir.Metadata
 
 	name := value.GetUdt().GetName()
 	qualify(name, scope, ir.ObjectKind_OBJECT_KIND_ENUM_TYPE)
-	key := "type/" + ObjectID(&ir.ObjectRef{Name: name})
+	key := "type/" + objectid.ID(&ir.ObjectRef{Name: name})
 
 	entry, exists := b.namespaces[key]
 	if !exists {
-		return refusal("RTL-C03", meta, "undeclared type "+ObjectID(&ir.ObjectRef{Name: name}))
+		return refusal("RTL-C03", meta, "undeclared type "+objectid.ID(&ir.ObjectRef{Name: name}))
 	}
 
 	value.Kind = resolvedTypeKind(entry.reference.GetKind())
@@ -629,9 +634,11 @@ func (b *builder) resolveForeignKey(value *ir.ForeignKey, scope string, meta *ir
 	return nil
 }
 
-// resolveCall binds a call to one routine. Inside a query body, column types
-// come from the query's own scope, which query inference resolves; there an
-// overload left ambiguous by untyped arguments keeps no target.
+// resolveCall binds a call to one routine, choosing among overloads as
+// PostgreSQL does (the overload package query inference shares). Inside a
+// query body, column types come from the query's own scope, which query
+// inference resolves: a call with an argument typed only there keeps no
+// target, and so does one left ambiguous.
 func (b *builder) resolveCall(call *ir.FunctionCall, scope string, meta *ir.Metadata, query bool) error {
 	parts := call.GetName().GetParts()
 	if len(parts) == 0 {
@@ -644,222 +651,203 @@ func (b *builder) resolveCall(call *ir.FunctionCall, scope string, meta *ir.Meta
 		return b.sequenceCall(call, scope, meta)
 	}
 
-	candidates := b.bestCandidates(call, scope)
-	if query && len(candidates) > 1 {
+	args, typed := b.argumentTypes(call.GetArguments(), scope)
+	if !typed && query {
 		return nil
 	}
 
-	if len(candidates) != 1 {
-		return refusal("RTL-C03", meta, "undeclared or ambiguous function "+strings.Join(parts, "."))
+	chosen, err := b.overloads().Function(parts, b.routinePath(scope), args, nil, call.GetVariadic())
+	if err != nil {
+		if query {
+			return nil
+		}
+
+		return refusal("RTL-C03", meta, callProblem(err))
 	}
 
 	call.Target = &ir.ObjectRef{
 		Kind: ir.ObjectKind_OBJECT_KIND_FUNCTION,
-		Name: &ir.QualifiedName{Parts: slices.Clone(candidates[0].GetName().GetParts())},
+		Name: &ir.QualifiedName{Parts: slices.Clone(chosen.Function.GetName().GetParts())},
 	}
 
 	return nil
 }
 
-// bestCandidates returns the routines that take the call with the highest
-// match score.
-func (b *builder) bestCandidates(call *ir.FunctionCall, scope string) []*ir.Function {
-	candidates, best := make([]*ir.Function, 0, 1), 0
-
-	consider := func(function *ir.Function, scope string) {
-		score, ok := b.matchCall(function, call, scope)
-
-		switch {
-		case !ok || score < best:
-		case score > best || len(candidates) == 0:
-			candidates, best = append(candidates[:0], function), score
-		default:
-			candidates = append(candidates, function)
-		}
+// callProblem words a refused call: an undeclared one, or one several
+// overloads take equally well, with its argument types.
+func callProblem(err error) string {
+	var refused *overload.Error
+	if errors.As(err, &refused) && !refused.Ambiguous {
+		return "undeclared " + refused.Call
 	}
 
-	for _, entry := range b.objects {
-		switch function := entry.message.(type) {
-		case *ir.Function:
-			consider(function, scope)
-		default:
-		}
-	}
-
-	for _, schema := range b.builtins {
-		for _, function := range schema.GetFunctions() {
-			// An extension's function answers an unqualified call only when its
-			// schema is on the search path, as in PostgreSQL.
-			schema := function.GetName().GetParts()[0]
-			if schema != pgCatalog && !slices.Contains(b.catalog.GetSearchPath(), schema) {
-				schema = ""
-			}
-
-			consider(function, schema)
-		}
-	}
-
-	return candidates
+	return err.Error()
 }
 
-// Argument match scores, after PostgreSQL's func_select_candidate: an exact
-// type beats a domain over it, which beats an implicit cast.
-const (
-	coercedArgument = iota
-	domainArgument
-	exactArgument
-)
-
-// matchCall scores a candidate for the call; ok is false when its arity or an
-// argument type rules it out.
-func (b *builder) matchCall(function *ir.Function, call *ir.FunctionCall, scope string) (int, bool) {
-	parts := call.GetName().GetParts()
-
-	prefix := slices.Clone(parts)
-	if len(prefix) == 1 {
-		prefix = append([]string{scope}, prefix...)
-	}
-
-	candidate := function.GetName().GetParts()
-	if len(candidate) == 0 || !slices.Equal(candidate[:len(candidate)-1], prefix) {
-		return 0, false
-	}
-
-	inputs, fits := callInputs(function, len(call.GetArguments()))
-	if !fits {
-		return 0, false
-	}
-
-	score := 0
-
-	for index, expected := range inputs {
-		points, ok := b.matchArgument(expected, call.GetArguments()[index])
-		if !ok {
-			return 0, false
+// routinePath is the schemas an unqualified routine name looks in after
+// pg_catalog: the object's own schema, then the search path.
+func (b *builder) routinePath(scope string) []string {
+	result := []string{scope}
+	for _, schema := range b.catalog.GetSearchPath() {
+		if !slices.Contains(result, schema) {
+			result = append(result, schema)
 		}
-
-		score += points
 	}
 
-	return score, true
+	return result
 }
 
-// callInputs lists the input types a call with count arguments binds to,
-// filling trailing defaults and expanding a variadic element; fits is false
-// when the arity does not fit.
-func callInputs(function *ir.Function, count int) ([]*ir.TypeRef, bool) {
-	var inputs []*ir.TypeRef
-
-	for _, argument := range function.GetArguments() {
-		if argument.GetMode() != ir.ArgMode_ARG_MODE_OUT {
-			inputs = append(inputs, argument.GetType())
-		}
+// overloads is the resolver over the builtins and the desired catalog,
+// built once the catalog's schemas are assembled.
+func (b *builder) overloads() *overload.Resolver {
+	if b.resolver == nil {
+		b.resolver = overload.New(b.catalog, b.builtins)
 	}
 
-	minimum := len(inputs) - int(function.GetDefaultArguments())
+	return b.resolver
+}
 
-	if element := function.GetVariadicElement(); element != nil {
-		inputs = inputs[:len(inputs)-1]
-		minimum = min(minimum, len(inputs))
+// booleanSymbol reports the constructs that yield bool whatever their
+// operands.
+func booleanSymbol(symbol string) bool {
+	switch symbol {
+	case "AND", "OR", "NOT", "IS NULL", "IS NOT NULL", "IS TRUE", "IS NOT TRUE", "IS FALSE",
+		"IS NOT FALSE", "IS UNKNOWN", "IS NOT UNKNOWN", "IN", "NOT IN", "LIKE", "NOT LIKE",
+		"ILIKE", "NOT ILIKE", "SIMILAR TO", "NOT SIMILAR TO", "IS DISTINCT FROM",
+		"IS NOT DISTINCT FROM", "BETWEEN", "NOT BETWEEN", "BETWEEN SYMMETRIC", "NOT BETWEEN SYMMETRIC":
+		return true
+	default:
+		return strings.HasSuffix(symbol, " ANY") || strings.HasSuffix(symbol, " ALL")
+	}
+}
 
-		for len(inputs) < count {
-			inputs = append(inputs, element)
-		}
+// argumentTypes types each expression; typed is false when one of them
+// cannot be typed here (see exprType).
+func (b *builder) argumentTypes(exprs []*ir.Expr, scope string) ([]*ir.TypeRef, bool) {
+	result := make([]*ir.TypeRef, len(exprs))
+	all := true
+
+	for index, expr := range exprs {
+		typ, typed := b.exprType(expr, scope)
+		result[index] = typ
+		all = all && typed
 	}
 
-	if count < minimum || count > len(inputs) {
+	return result, all
+}
+
+// exprType is the type of an expression before coercion. typed is false
+// when this resolver cannot type it (a column of a query's own scope, a
+// subquery); a typed nil is an unknown: an untyped string literal or NULL,
+// which PostgreSQL resolves from its context.
+func (b *builder) exprType(actual *ir.Expr, scope string) (*ir.TypeRef, bool) {
+	switch value := actual.GetNode().(type) {
+	case *ir.Expr_Cast:
+		typ := b.resolvedType(value.Cast.GetTargetType(), defaultSchema)
+
+		return typ, typ != nil
+	case *ir.Expr_ColumnRef:
+		return b.columnType(value.ColumnRef)
+	case *ir.Expr_Literal:
+		return literalType(value.Literal)
+	case *ir.Expr_Operator:
+		return b.operatorType(value.Operator, scope)
+	case *ir.Expr_FunctionCall:
+		return b.callType(value.FunctionCall, scope)
+	default:
+		return nil, false
+	}
+}
+
+func (b *builder) columnType(ref *ir.ColumnRef) (*ir.TypeRef, bool) {
+	target := ref.GetTarget()
+	if target == nil {
 		return nil, false
 	}
 
-	return inputs[:count], true
-}
+	entry := b.objects[objectKey(target)]
+	switch column := entry.message.(type) {
+	case *ir.Column:
+		typ := b.resolvedType(column.GetType(), entry.scope)
 
-func (b *builder) matchArgument(expected *ir.TypeRef, actual *ir.Expr) (int, bool) {
-	given := b.argumentType(actual)
-
-	switch {
-	case given == nil:
-		return coercedArgument, true
-	case strings.HasPrefix(expected.GetPgName(), "any"):
-		return coercedArgument, acceptsPolymorphic(expected.GetPgName(), b.baseType(given))
-	case sameType(given, expected):
-		return exactArgument, true
+		return typ, typ != nil
 	default:
-	}
-
-	base := b.baseType(given)
-
-	switch {
-	case base == nil:
-		return 0, false
-	case sameType(base, expected):
-		return domainArgument, true
-	case base.GetUdt() == nil && expected.GetUdt() == nil && b.casts[base.GetPgName()+":"+expected.GetPgName()]:
-		return coercedArgument, true
-	default:
-		return 0, false
+		return nil, false
 	}
 }
 
-// acceptsPolymorphic reports whether a polymorphic parameter takes the type,
-// by the family the pseudo-type names.
-func acceptsPolymorphic(parameter string, given *ir.TypeRef) bool {
-	switch parameter {
-	case "anyarray", "anycompatiblearray":
-		return given.GetElement() != nil
-	case "anynonarray", "anycompatiblenonarray":
-		return given.GetElement() == nil
-	case "anyenum":
-		return given.GetKind() == ir.TypeKind_TYPE_KIND_ENUM
-	case "anyrange", "anycompatiblerange":
-		return given.GetKind() == ir.TypeKind_TYPE_KIND_RANGE || strings.HasSuffix(given.GetPgName(), "range")
-	case "anymultirange", "anycompatiblemultirange":
-		return strings.HasSuffix(given.GetPgName(), "multirange")
-	default:
-		return given != nil
-	}
-}
-
-func sameType(left, right *ir.TypeRef) bool {
-	if left.GetUdt() != nil || right.GetUdt() != nil {
-		return left.GetUdt() != nil && right.GetUdt() != nil && objectKey(left.GetUdt()) == objectKey(right.GetUdt())
-	}
-
-	return left.GetPgName() == right.GetPgName()
-}
-
-// argumentType is the type of an argument before coercion; nil is unknown:
-// an untyped string literal, NULL, or an expression this resolver does not
-// type, which PostgreSQL also coerces to the candidate.
-func (b *builder) argumentType(actual *ir.Expr) *ir.TypeRef {
-	if cast := actual.GetCast(); cast != nil {
-		return b.resolvedType(cast.GetTargetType(), defaultSchema)
-	}
-
-	if target := actual.GetColumnRef().GetTarget(); target != nil {
-		entry := b.objects[objectKey(target)]
-		switch column := entry.message.(type) {
-		case *ir.Column:
-			return b.resolvedType(column.GetType(), entry.scope)
-		default:
-			return nil
-		}
-	}
-
-	switch value := actual.GetLiteral().GetValue().(type) {
+func literalType(literal *ir.Literal) (*ir.TypeRef, bool) {
+	switch value := literal.GetValue().(type) {
 	case *ir.Literal_IntValue:
 		if value.IntValue >= math.MinInt32 && value.IntValue <= math.MaxInt32 {
-			return &ir.TypeRef{Kind: ir.TypeKind_TYPE_KIND_SCALAR, PgName: integer}
+			return overload.Scalar(integer), true
 		}
 
-		return &ir.TypeRef{Kind: ir.TypeKind_TYPE_KIND_SCALAR, PgName: bigInteger}
+		return overload.Scalar(bigInteger), true
 	case *ir.Literal_FloatValue, *ir.Literal_NumericValue:
-		return &ir.TypeRef{Kind: ir.TypeKind_TYPE_KIND_SCALAR, PgName: "numeric"}
+		return overload.Scalar("numeric"), true
 	case *ir.Literal_BoolValue:
-		return &ir.TypeRef{Kind: ir.TypeKind_TYPE_KIND_SCALAR, PgName: "bool"}
+		return overload.Scalar("bool"), true
+	case *ir.Literal_ByteaValue:
+		return overload.Scalar("bytea"), true
 	default:
-		return nil
+		// A string literal and NULL are unknown until their context types them.
+		return nil, true
 	}
+}
+
+// operatorType resolves an operator expression as PostgreSQL does and
+// yields its result type.
+func (b *builder) operatorType(operator *ir.OperatorExpr, scope string) (*ir.TypeRef, bool) {
+	symbol := operator.GetSymbol()
+	if booleanSymbol(symbol) {
+		return overload.Scalar("bool"), true
+	}
+
+	operands, typed := b.argumentTypes(operator.GetOperands(), scope)
+	if !typed {
+		return nil, false
+	}
+
+	if symbol == "NULLIF" {
+		if len(operands) == 0 {
+			return nil, false
+		}
+
+		return operands[0], true
+	}
+
+	// OPERATOR(pg_catalog.||) names the operator with its schema.
+	if dot := strings.LastIndex(symbol, "."); dot >= 0 {
+		symbol = symbol[dot+1:]
+	}
+
+	chosen, err := b.overloads().Operator(symbol, operands)
+	if err != nil {
+		return nil, false
+	}
+
+	return chosen.Result, true
+}
+
+// callType resolves a nested call and yields the type it returns.
+func (b *builder) callType(call *ir.FunctionCall, scope string) (*ir.TypeRef, bool) {
+	parts := call.GetName().GetParts()
+	if len(parts) == 0 {
+		return nil, false
+	}
+
+	args, typed := b.argumentTypes(call.GetArguments(), scope)
+	if !typed {
+		return nil, false
+	}
+
+	chosen, err := b.overloads().Function(parts, b.routinePath(scope), args, nil, call.GetVariadic())
+	if err != nil {
+		return nil, false
+	}
+
+	return chosen.Result, true
 }
 
 // resolvedType resolves a copy, so typing an argument never depends on
@@ -871,25 +859,6 @@ func (b *builder) resolvedType(typ *ir.TypeRef, scope string) *ir.TypeRef {
 	}
 
 	return clone
-}
-
-// baseType unwraps domains to their base type; nil when one is undeclared.
-func (b *builder) baseType(typ *ir.TypeRef) *ir.TypeRef {
-	for range len(b.objects) + 1 {
-		if typ.GetKind() != ir.TypeKind_TYPE_KIND_DOMAIN {
-			return typ
-		}
-
-		entry := b.objects[objectKey(typ.GetUdt())]
-		switch domain := entry.message.(type) {
-		case *ir.DomainType:
-			typ = b.resolvedType(domain.GetBaseType(), entry.scope)
-		default:
-			return nil
-		}
-	}
-
-	return nil
 }
 
 func (b *builder) sequenceCall(call *ir.FunctionCall, scope string, meta *ir.Metadata) error {

@@ -6,6 +6,8 @@ import (
 	pg "github.com/pganalyze/pg_query_go/v6"
 
 	"github.com/gopherex/ratel/pkg/ir"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/overload"
 )
 
 func (s *inference) special(node *pg.Node, env *scope, expected *ir.TypeRef) *ir.QueryColumn {
@@ -15,15 +17,15 @@ func (s *inference) special(node *pg.Node, env *scope, expected *ir.TypeRef) *ir
 	case node.GetNullTest() != nil:
 		return s.nullTest(node.GetNullTest(), env)
 	case node.GetBooleanTest() != nil:
-		s.expr(node.GetBooleanTest().GetArg(), env, scalar("bool"))
+		s.expr(node.GetBooleanTest().GetArg(), env, overload.Scalar("bool"))
 
-		return &ir.QueryColumn{Type: scalar("bool")}
+		return &ir.QueryColumn{Type: overload.Scalar("bool")}
 	case node.GetAArrayExpr() != nil:
 		values := s.expressions(node.GetAArrayExpr().GetElements(), env, expected.GetElement())
 		typ := s.common(values)
 		s.expressions(node.GetAArrayExpr().GetElements(), env, typ)
 
-		return &ir.QueryColumn{Name: "array", Type: array(typ)}
+		return &ir.QueryColumn{Name: "array", Type: overload.Array(typ)}
 	case node.GetMinMaxExpr() != nil:
 		return s.minmax(node.GetMinMaxExpr(), env)
 	case node.GetRowExpr() != nil:
@@ -33,11 +35,11 @@ func (s *inference) special(node *pg.Node, env *scope, expected *ir.TypeRef) *ir
 	case node.GetGroupingSet() != nil:
 		s.expressions(node.GetGroupingSet().GetContent(), env, nil)
 
-		return &ir.QueryColumn{Type: scalar("int4")}
+		return &ir.QueryColumn{Type: overload.Scalar("int4")}
 	case node.GetGroupingFunc() != nil:
 		s.expressions(node.GetGroupingFunc().GetArgs(), env, nil)
 
-		return &ir.QueryColumn{Name: "grouping", Type: scalar("int4")}
+		return &ir.QueryColumn{Name: "grouping", Type: overload.Scalar("int4")}
 	case node.GetCollateClause() != nil:
 		value := s.expr(node.GetCollateClause().GetArg(), env, expected)
 		value.SourceColumn = nil
@@ -70,7 +72,7 @@ func (s *inference) nullTest(test *pg.NullTest, env *scope) *ir.QueryColumn {
 
 	s.expr(test.GetArg(), env, nil)
 
-	return &ir.QueryColumn{Type: scalar("bool")}
+	return &ir.QueryColumn{Type: overload.Scalar("bool")}
 }
 
 func (s *inference) minmax(expr *pg.MinMaxExpr, env *scope) *ir.QueryColumn {
@@ -85,20 +87,20 @@ func (s *inference) minmax(expr *pg.MinMaxExpr, env *scope) *ir.QueryColumn {
 }
 
 func (s *inference) boolean(expr *pg.BoolExpr, env *scope) *ir.QueryColumn {
-	args := s.expressions(expr.GetArgs(), env, scalar("bool"))
+	args := s.expressions(expr.GetArgs(), env, overload.Scalar("bool"))
 	nullable := false
 
 	for _, arg := range args {
 		nullable = nullable || arg.GetNullable()
 	}
 
-	return &ir.QueryColumn{Type: scalar("bool"), Nullable: nullable}
+	return &ir.QueryColumn{Type: overload.Scalar("bool"), Nullable: nullable}
 }
 
 func (s *inference) ordering(node *pg.Node, env *scope) {
 	value := s.expr(node, env, nil)
-	if unknown(value.GetType()) && node.GetParamRef() != nil {
-		s.parameter(node.GetParamRef(), scalar("text"))
+	if overload.IsUnknown(value.GetType()) && node.GetParamRef() != nil {
+		s.parameter(node.GetParamRef(), overload.Scalar("text"))
 	}
 }
 
@@ -136,7 +138,7 @@ func sqlValue(value *pg.SQLValueFunction) *ir.QueryColumn {
 
 	name := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(value.GetOp().String(), "SVFOP_"), "_N"))
 
-	return &ir.QueryColumn{Name: name, Type: scalar(typ)}
+	return &ir.QueryColumn{Name: name, Type: overload.Scalar(typ)}
 }
 
 func markGroupingNullable(nodes []*pg.Node, env *scope) {
@@ -162,8 +164,8 @@ func (s *inference) indirection(value *pg.A_Indirection, env *scope) *ir.QueryCo
 			continue
 		}
 
-		s.expr(index.GetLidx(), env, scalar("int4"))
-		s.expr(index.GetUidx(), env, scalar("int4"))
+		s.expr(index.GetLidx(), env, overload.Scalar("int4"))
+		s.expr(index.GetUidx(), env, overload.Scalar("int4"))
 
 		if !index.GetIsSlice() {
 			result.Type = result.GetType().GetElement()

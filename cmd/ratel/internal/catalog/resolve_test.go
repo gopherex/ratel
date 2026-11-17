@@ -11,6 +11,7 @@ import (
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
@@ -110,9 +111,22 @@ func testOverloads(t *testing.T, parser parse.Parser) {
 		},
 		{name: "builtin type outside pgx", sql: `CREATE SEQUENCE s;
  CREATE TABLE a(id bigint DEFAULT nextval('s'::regclass));`},
+		// Unknown arguments take the string category first, as in PostgreSQL:
+		// length(NULL) is length(text).
 		{
-			name: "untyped arguments stay ambiguous", sql: `CREATE TABLE a(id int CHECK (length(NULL) > 0));`,
-			failure: "ambiguous function length",
+			name: "unknown argument prefers text", sql: `CREATE TABLE a(id int CHECK (length(NULL) > 0));`,
+			target: "pg_catalog.length(text)",
+		},
+		{
+			name: "ambiguity is refused", sql: `CREATE FUNCTION f(a int8) RETURNS int LANGUAGE sql AS 'SELECT 1';
+ CREATE FUNCTION f(a numeric) RETURNS int LANGUAGE sql AS 'SELECT 2';
+ CREATE TABLE a(id int DEFAULT f(1));`,
+			failure: "ambiguous function f(int4)",
+		},
+		{
+			name: "no implicit cast is undeclared", sql: `CREATE FUNCTION f(a int4) RETURNS int LANGUAGE sql AS 'SELECT 1';
+ CREATE TABLE a(id int DEFAULT f(1.5));`,
+			failure: "undeclared function f(numeric)",
 		},
 		{name: "query body defers to inference", sql: `CREATE TABLE a(v numeric);
  CREATE VIEW s AS SELECT sum(v) AS total FROM a;`},
@@ -120,6 +134,31 @@ func testOverloads(t *testing.T, parser parse.Parser) {
  CREATE TABLE a(id int DEFAULT f(1));`, target: "public.f(int4,int4)"},
 		{name: "variadic", sql: `CREATE FUNCTION f(VARIADIC v int[]) RETURNS int LANGUAGE sql AS 'SELECT 1';
  CREATE TABLE a(id int DEFAULT f(1, 2, 3));`, target: "public.f(int4[])"},
+		// An operator argument takes its operator's result type, as in
+		// PostgreSQL: text || unknown resolves text || text, so lower(text)
+		// wins over the range and multirange overloads.
+		{
+			name: "concatenation argument", sql: `CREATE EXTENSION pg_trgm;
+ CREATE TABLE packs(title text, slug text, deleted_at timestamptz);
+ CREATE INDEX packs_search ON packs USING gin (lower(title || ' ' || slug) gin_trgm_ops) WHERE deleted_at IS NULL;`,
+			target: "pg_catalog.lower(text)",
+		},
+		{
+			name: "nested call result", sql: `CREATE TABLE a(note varchar(10)); CREATE INDEX ON a (lower(btrim(note)));`,
+			target: "pg_catalog.lower(text)",
+		},
+		{
+			name: "arithmetic result", sql: `CREATE TABLE a(n int4, m int8 CHECK (abs(n + m) > 0));`,
+			target: "pg_catalog.abs(int8)",
+		},
+		{
+			name: "unary operator", sql: `CREATE TABLE a(n numeric CHECK (abs(-n) >= 0));`,
+			target: "pg_catalog.abs(numeric)",
+		},
+		{
+			name: "literal operands concatenate as text", sql: `CREATE TABLE a(id int CHECK (length('a' || 'b') > 0));`,
+			target: "pg_catalog.length(text)",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -153,7 +192,7 @@ func containsTarget(result *ir.Catalog, target string) bool {
 	walk = func(message protoreflect.Message) {
 		switch call := message.Interface().(type) {
 		case *ir.FunctionCall:
-			found = found || (call.GetTarget() != nil && catalog.ObjectID(call.GetTarget()) == target)
+			found = found || (call.GetTarget() != nil && objectid.ID(call.GetTarget()) == target)
 		default:
 		}
 

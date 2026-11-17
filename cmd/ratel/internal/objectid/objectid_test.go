@@ -1,14 +1,14 @@
-package catalog_test
+package objectid_test
 
 import (
 	"testing"
 
 	"github.com/gopherex/ratel/pkg/ir"
 
-	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
 )
 
-func TestObjectID(t *testing.T) {
+func TestID(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
@@ -25,7 +25,7 @@ func TestObjectID(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := catalog.ObjectID(&ir.ObjectRef{Kind: tc.kind, Name: &ir.QualifiedName{Parts: tc.parts}})
+			got := objectid.ID(&ir.ObjectRef{Kind: tc.kind, Name: &ir.QualifiedName{Parts: tc.parts}})
 			if got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
@@ -33,11 +33,11 @@ func TestObjectID(t *testing.T) {
 	}
 }
 
-func BenchmarkObjectID(b *testing.B) {
+func BenchmarkID(b *testing.B) {
 	reference := &ir.ObjectRef{
 		Kind: ir.ObjectKind_OBJECT_KIND_FUNCTION, Name: &ir.QualifiedName{Parts: []string{"app", "f", "int4,text"}},
 	}
 	for b.Loop() {
-		_ = catalog.ObjectID(reference)
+		_ = objectid.ID(reference)
 	}
 }

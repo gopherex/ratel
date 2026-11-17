@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/gopherex/ratel/pkg/ir"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
 )
 
 // Diagnostic codes of the relation graph (docs/ir.md, Relations).
@@ -115,13 +117,13 @@ func (r *relator) foreignKey(table *ir.Table, constraint *ir.Constraint) (edge, 
 
 	foreignKey := constraint.GetForeignKey()
 	referenced := foreignKey.GetReferencedTable().GetName()
-	pair := []string{ObjectID(tableRef(table.GetName())), ObjectID(tableRef(referenced))}
+	pair := []string{objectid.ID(tableRef(table.GetName())), objectid.ID(tableRef(referenced))}
 	slices.Sort(pair)
 
 	result := edge{
 		table:      table,
 		constraint: constraint,
-		key:        ObjectID(constraintRef(table.GetName(), constraint.GetName())),
+		key:        objectid.ID(constraintRef(table.GetName(), constraint.GetName())),
 		pair:       strings.Join(pair, "\x00"),
 		columns:    foreignKey.GetColumns(),
 		referenced: referenced,
@@ -223,7 +225,7 @@ func (r *relator) relations(edges []edge) []related {
 			result = append(result, r.foreignKeyRelation(item))
 		}
 
-		id := ObjectID(tableRef(item.table.GetName()))
+		id := objectid.ID(tableRef(item.table.GetName()))
 		byTable[id] = append(byTable[id], item)
 	}
 
@@ -236,8 +238,8 @@ func (r *relator) relations(edges []edge) []related {
 
 	slices.SortFunc(result, func(left, right related) int {
 		return cmp.Or(
-			cmp.Compare(ObjectID(left.relation.GetFk()), ObjectID(right.relation.GetFk())),
-			cmp.Compare(ObjectID(left.relation.GetThrough()), ObjectID(right.relation.GetThrough())),
+			cmp.Compare(objectid.ID(left.relation.GetFk()), objectid.ID(right.relation.GetFk())),
+			cmp.Compare(objectid.ID(left.relation.GetThrough()), objectid.ID(right.relation.GetThrough())),
 		)
 	})
 
@@ -364,25 +366,25 @@ func (r *relator) collisions(c *ir.Catalog, relations []related) {
 	for _, schema := range c.GetSchemas() {
 		for _, table := range schema.GetTables() {
 			for _, column := range table.GetColumns() {
-				taken[ObjectID(tableRef(table.GetName()))+"\x00"+exportedName(column.GetName())] =
+				taken[objectid.ID(tableRef(table.GetName()))+"\x00"+exportedName(column.GetName())] =
 					"column " + column.GetName()
 			}
 		}
 	}
 
 	for _, item := range relations {
-		origin := "relation " + ObjectID(item.relation.GetFk())
+		origin := "relation " + objectid.ID(item.relation.GetFk())
 		r.claim(taken, item, item.relation.GetFrom().GetTable(), item.relation.GetName(), origin)
 		r.claim(taken, item, item.relation.GetTo().GetTable(), item.relation.GetInverseName(), origin)
 	}
 }
 
 func (r *relator) claim(taken map[string]string, item related, table *ir.ObjectRef, name, origin string) {
-	key := ObjectID(table) + "\x00" + name
+	key := objectid.ID(table) + "\x00" + name
 
 	if previous, exists := taken[key]; exists {
 		r.fail(relationCollision, item.span, fmt.Sprintf(
-			"relation name %s on %s collides with %s", name, ObjectID(table), previous,
+			"relation name %s on %s collides with %s", name, objectid.ID(table), previous,
 		))
 
 		return

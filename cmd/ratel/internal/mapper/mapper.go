@@ -36,10 +36,31 @@ func New(parser parse.Parser, file, sql string, raw *pg.RawStmt, ordinal int) Ma
 		end = min(start+int(raw.GetStmtLen()), end)
 	}
 
+	start += leadingTrivia(parser, sql[start:end])
+
 	return Mapper{
 		parser: parser, file: file, sql: sql, start: start, end: end,
 		path: strconv.Quote(file) + "/statement/" + strconv.Itoa(ordinal),
 	}
+}
+
+// leadingTrivia is the length of the whitespace and comments before a
+// statement's first token: PostgreSQL places a later statement right after
+// the previous semicolon, so without it a statement would start on the
+// line before its own.
+func leadingTrivia(parser parse.Parser, text string) int {
+	scan, err := parser.Scan(text)
+	if err != nil {
+		return 0
+	}
+
+	for _, token := range scan.GetTokens() {
+		if token.GetToken() != pg.Token_SQL_COMMENT && token.GetToken() != pg.Token_C_COMMENT {
+			return int(token.GetStart())
+		}
+	}
+
+	return 0
 }
 
 // SourceSQL returns the original statement slice, excluding its terminating semicolon.

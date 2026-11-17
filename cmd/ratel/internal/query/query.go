@@ -16,6 +16,7 @@ import (
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/annotate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
+	"github.com/gopherex/ratel/cmd/ratel/internal/overload"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 )
 
@@ -37,7 +38,7 @@ func (e *Error) Error() string {
 type inference struct {
 	parser     parse.Parser
 	catalog    *ir.Catalog
-	signatures signatures
+	resolver   *overload.Resolver
 	query      *ir.Query
 	params     map[int32]*ir.QueryParameter
 	contextual map[int32]bool
@@ -54,13 +55,13 @@ type inference struct {
 func Infer(
 	parser parse.Parser, cat *ir.Catalog, builtins []*ir.Schema, sources []*annotate.QuerySource,
 ) ([]*ir.Query, error) {
-	signatures := newSignatures(cat, builtins)
+	resolver := overload.New(cat, builtins)
 	result := make([]*ir.Query, 0, len(sources))
 	ordinals := make(map[string]int)
 
 	for _, source := range sources {
 		state := inference{
-			parser: parser, catalog: cat, signatures: signatures,
+			parser: parser, catalog: cat, resolver: resolver,
 			params: make(map[int32]*ir.QueryParameter), contextual: make(map[int32]bool), nullTested: make(map[int32]bool),
 			refTypes: make(map[*pg.ParamRef]*ir.TypeRef),
 		}
@@ -96,7 +97,7 @@ func (s *inference) reject(problem string) {
 func (s *inference) infer(source *annotate.QuerySource, ordinal int) (*ir.Query, error) {
 	s.query = &ir.Query{Name: source.Name, Command: source.Command, Meta: proto.CloneOf(source.Meta)}
 
-	rewritten, err := rewrite(s.parser, source.SQL, s.signatures.operators)
+	rewritten, err := rewrite(s.parser, source.SQL, s.resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +248,7 @@ type rewrittenSQL struct {
 	mixed bool
 }
 
-func rewrite(parser parse.Parser, sql string, operators map[string][]*ir.BuiltinOperator) (rewrittenSQL, error) {
+func rewrite(parser parse.Parser, sql string, operators *overload.Resolver) (rewrittenSQL, error) {
 	scan, err := parser.Scan(sql)
 	if err != nil {
 		return rewrittenSQL{}, err
@@ -271,7 +272,7 @@ func rewrite(parser parse.Parser, sql string, operators map[string][]*ir.Builtin
 		}
 
 		text := sql[start:end]
-		if !strings.HasSuffix(text, "@") || (text != "@" && len(operators[text]) > 0) || index+1 == len(tokens) {
+		if !strings.HasSuffix(text, "@") || (text != "@" && operators.IsOperator(text)) || index+1 == len(tokens) {
 			continue
 		}
 

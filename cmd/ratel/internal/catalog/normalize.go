@@ -11,6 +11,7 @@ import (
 
 	"github.com/gopherex/ratel/pkg/ir"
 
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
 	"github.com/gopherex/ratel/cmd/ratel/internal/pgname"
 )
 
@@ -67,7 +68,7 @@ func attachmentKey(value attachment) string {
 	default:
 	}
 
-	return priority + ObjectID(&ir.ObjectRef{Name: value.table}) + semanticKey(value.message)
+	return priority + objectid.ID(&ir.ObjectRef{Name: value.table}) + semanticKey(value.message)
 }
 
 // indexColumns is the column addition PostgreSQL names an unnamed index from.
@@ -149,7 +150,7 @@ func clearSource(message protoreflect.Message) {
 func sortKey(message protoreflect.Message) string {
 	switch value := message.Interface().(type) {
 	case *ir.ObjectRef:
-		return ObjectID(value)
+		return objectid.ID(value)
 	case *ir.Grant:
 		roles, privileges := slices.Clone(value.GetRoles()), slices.Clone(value.GetPrivileges())
 		slices.Sort(roles)
@@ -183,7 +184,7 @@ func sortKey(message protoreflect.Message) string {
 		default:
 		}
 
-		return ObjectID(&ir.ObjectRef{Kind: kind, Name: name})
+		return objectid.ID(&ir.ObjectRef{Kind: kind, Name: name})
 	default:
 		return ""
 	}

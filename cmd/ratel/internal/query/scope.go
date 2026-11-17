@@ -11,6 +11,7 @@ import (
 	"github.com/gopherex/ratel/pkg/ir"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
+	"github.com/gopherex/ratel/cmd/ratel/internal/overload"
 )
 
 type scope struct {
@@ -172,7 +173,7 @@ func (s *inference) systemColumns(name *pg.RangeVar) []*ir.QueryColumn {
 
 	result := make([]*ir.QueryColumn, 0, len(systemColumnTypes()))
 	for _, column := range systemColumnTypes() {
-		result = append(result, &ir.QueryColumn{Name: column[0], Type: scalar(column[1]), TableAlias: alias})
+		result = append(result, &ir.QueryColumn{Name: column[0], Type: overload.Scalar(column[1]), TableAlias: alias})
 	}
 
 	return result
@@ -330,7 +331,7 @@ func (s *inference) join(join *pg.JoinExpr, env *scope) []*ir.QueryColumn {
 	on.columns = append(copyColumns(left), right...)
 	on.qualified = append(copyColumns(env.qualified[start:]), rightScope.qualified...)
 	on.system = append(copyColumns(env.system[systemStart:]), rightScope.system...)
-	s.expr(join.GetQuals(), on, scalar("bool"))
+	s.expr(join.GetQuals(), on, overload.Scalar("bool"))
 	using := stringsOf(join.GetUsingClause())
 
 	if join.GetIsNatural() {
@@ -435,7 +436,7 @@ func (s *inference) rangeFunction(function *pg.RangeFunction, env *scope) []*ir.
 			nodes, named := callArguments(call)
 			args := s.expressions(nodes, env, nil)
 			chosen := s.function(stringsOf(call.GetFuncname()), args, named, call.GetFuncVariadic())
-			s.constrain(nodes, nil, chosen.inputs, env)
+			s.constrain(nodes, nil, chosen.Inputs, env)
 
 			name := stringsOf(call.GetFuncname())
 			last := ""
@@ -468,7 +469,7 @@ func (s *inference) rangeFunction(function *pg.RangeFunction, env *scope) []*ir.
 			alias = result[0].GetTableAlias()
 		}
 
-		result = append(result, &ir.QueryColumn{Name: "ordinality", Type: scalar("int8"), TableAlias: alias})
+		result = append(result, &ir.QueryColumn{Name: "ordinality", Type: overload.Scalar("int8"), TableAlias: alias})
 	}
 
 	if len(function.GetColdeflist()) > 0 {
@@ -511,19 +512,19 @@ func (s *inference) recordColumns(nodes []*pg.Node) []*ir.QueryColumn {
 	return result
 }
 
-func (s *inference) functionColumns(chosen *candidate, name string) []*ir.QueryColumn {
-	if columns := functionOutputs(chosen.function); len(columns) > 0 {
+func (s *inference) functionColumns(chosen *overload.Candidate, name string) []*ir.QueryColumn {
+	if columns := functionOutputs(chosen.Function); len(columns) > 0 {
 		return columns
 	}
 
-	typ := s.signatures.baseType(chosen.result)
+	typ := s.resolver.BaseType(chosen.Result)
 	if typ.GetKind() != ir.TypeKind_TYPE_KIND_COMPOSITE {
-		return []*ir.QueryColumn{{Name: name, Type: chosen.result, Nullable: true}}
+		return []*ir.QueryColumn{{Name: name, Type: chosen.Result, Nullable: true}}
 	}
 
 	columns := s.compositeColumns(typ)
 	if len(columns) == 0 {
-		s.fail("composite table function result " + typeKey(typ))
+		s.fail("composite table function result " + overload.TypeKey(typ))
 	}
 
 	for _, column := range columns {
@@ -535,17 +536,17 @@ func (s *inference) functionColumns(chosen *candidate, name string) []*ir.QueryC
 }
 
 func (s *inference) compositeColumns(typ *ir.TypeRef) []*ir.QueryColumn {
-	key := typeKey(typ)
+	key := overload.TypeKey(typ)
 
 	for _, schema := range s.catalog.GetSchemas() {
 		for _, table := range schema.GetTables() {
-			if nameKey(table.GetName().GetParts()) == key {
+			if overload.NameKey(table.GetName().GetParts()) == key {
 				return tableColumns(table, "")
 			}
 		}
 
 		for _, composite := range schema.GetComposites() {
-			if nameKey(composite.GetName().GetParts()) != key {
+			if overload.NameKey(composite.GetName().GetParts()) != key {
 				continue
 			}
 
@@ -558,13 +559,13 @@ func (s *inference) compositeColumns(typ *ir.TypeRef) []*ir.QueryColumn {
 		}
 
 		for _, view := range schema.GetViews() {
-			if nameKey(view.GetName().GetParts()) == key {
+			if overload.NameKey(view.GetName().GetParts()) == key {
 				return s.view(view.GetQuery(), view.GetColumns(), "")
 			}
 		}
 
 		for _, view := range schema.GetMaterializedViews() {
-			if nameKey(view.GetName().GetParts()) == key {
+			if overload.NameKey(view.GetName().GetParts()) == key {
 				return s.view(view.GetQuery(), view.GetColumns(), "")
 			}
 		}
@@ -673,8 +674,8 @@ func (s *inference) values(rows []*pg.Node, env *scope, expected []*ir.QueryColu
 	}
 
 	for _, column := range result {
-		if unknown(column.GetType()) {
-			column.Type = scalar("text")
+		if overload.IsUnknown(column.GetType()) {
+			column.Type = overload.Scalar("text")
 		}
 	}
 

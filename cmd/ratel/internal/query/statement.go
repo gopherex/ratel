@@ -7,6 +7,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/gopherex/ratel/pkg/ir"
+
+	"github.com/gopherex/ratel/cmd/ratel/internal/overload"
 )
 
 func (s *inference) statement(node *pg.Node, env *scope) []*ir.QueryColumn {
@@ -69,7 +71,7 @@ func (s *inference) recursive(cte *pg.CommonTableExpr, env *scope) []*ir.QueryCo
 		changed := false
 
 		for index, col := range next {
-			if typeKey(col.GetType()) != typeKey(anchor[index].GetType()) {
+			if overload.TypeKey(col.GetType()) != overload.TypeKey(anchor[index].GetType()) {
 				s.fail("recursive CTE column " + col.GetName())
 
 				return nil
@@ -107,8 +109,8 @@ func (s *inference) selectStmt(stmt *pg.SelectStmt, env *scope, expected []*ir.Q
 	result = s.selectTail(stmt, env, result, expected)
 	if !env.keepUnknown {
 		for _, column := range result {
-			if column.GetType().GetPgName() == unknownType {
-				column.Type = scalar("text")
+			if column.GetType().GetPgName() == overload.Unknown {
+				column.Type = overload.Scalar("text")
 			}
 		}
 	}
@@ -129,8 +131,8 @@ func (s *inference) simpleSelect(stmt *pg.SelectStmt, env *scope) []*ir.QueryCol
 	}
 	// PostgreSQL resolves target expressions before WHERE; overloads can bind a parameter's type here.
 	s.targets(stmt.GetTargetList(), env)
-	s.expr(stmt.GetWhereClause(), env, scalar("bool"))
-	s.expr(stmt.GetHavingClause(), env, scalar("bool"))
+	s.expr(stmt.GetWhereClause(), env, overload.Scalar("bool"))
+	s.expr(stmt.GetHavingClause(), env, overload.Scalar("bool"))
 
 	return s.targets(stmt.GetTargetList(), env)
 }
@@ -151,8 +153,8 @@ func (s *inference) selectTail(
 		markGroupingNullable(stmt.GetGroupClause(), env)
 	}
 
-	s.expr(stmt.GetLimitCount(), env, scalar("int8"))
-	s.expr(stmt.GetLimitOffset(), env, scalar("int8"))
+	s.expr(stmt.GetLimitCount(), env, overload.Scalar("int8"))
+	s.expr(stmt.GetLimitOffset(), env, overload.Scalar("int8"))
 
 	for _, node := range stmt.GetWindowClause() {
 		s.window(node.GetWindowDef(), env)
@@ -216,7 +218,7 @@ func (s *inference) targetContext(targets []*pg.Node, env *scope, expected []*ir
 		if index < len(expected) {
 			s.context(value, env, expected[index])
 		} else if value.GetParamRef() != nil && s.refTypes[value.GetParamRef()] == nil {
-			s.parameter(value.GetParamRef(), scalar("text"))
+			s.parameter(value.GetParamRef(), overload.Scalar("text"))
 		}
 
 		index++
@@ -279,9 +281,9 @@ func (s *inference) insert(insert *pg.InsertStmt, env *scope) []*ir.QueryColumn 
 	conflictScope := newScope(env)
 	conflictScope.columns = append(copyColumns(env.columns), excluded...)
 	s.assignments(conflict.GetTargetList(), columns, conflictScope)
-	s.expr(conflict.GetWhereClause(), conflictScope, scalar("bool"))
+	s.expr(conflict.GetWhereClause(), conflictScope, overload.Scalar("bool"))
 	// The arbiter's index predicate sees the target table only, not excluded.
-	s.expr(conflict.GetInfer().GetWhereClause(), env, scalar("bool"))
+	s.expr(conflict.GetInfer().GetWhereClause(), env, overload.Scalar("bool"))
 
 	return s.returning(insert.GetReturningList(), env)
 }
@@ -321,7 +323,7 @@ func (s *inference) writeTarget(column *ir.QueryColumn, target *pg.ResTarget, en
 
 	result := proto.CloneOf(column)
 	slice := false
-	indexType := &ir.QueryColumn{Type: scalar("int4")}
+	indexType := &ir.QueryColumn{Type: overload.Scalar("int4")}
 
 	for _, node := range target.GetIndirection() {
 		index := node.GetAIndices()
@@ -429,7 +431,7 @@ func (s *inference) update(update *pg.UpdateStmt, env *scope) []*ir.QueryColumn 
 	}
 
 	s.assignments(update.GetTargetList(), columns, env)
-	s.expr(update.GetWhereClause(), env, scalar("bool"))
+	s.expr(update.GetWhereClause(), env, overload.Scalar("bool"))
 
 	return s.returning(update.GetReturningList(), env)
 }
@@ -444,7 +446,7 @@ func (s *inference) deleteStmt(statement *pg.DeleteStmt, env *scope) []*ir.Query
 		env.columns = append(env.columns, s.from(from, env)...)
 	}
 
-	s.expr(statement.GetWhereClause(), env, scalar("bool"))
+	s.expr(statement.GetWhereClause(), env, overload.Scalar("bool"))
 
 	return s.returning(statement.GetReturningList(), env)
 }
@@ -456,14 +458,14 @@ func (s *inference) merge(merge *pg.MergeStmt, env *scope) []*ir.QueryColumn {
 	env.system = s.systemColumns(merge.GetRelation())
 	targetSystem := len(env.system)
 	env.columns = append(env.columns, s.from(merge.GetSourceRelation(), env)...)
-	s.expr(merge.GetJoinCondition(), env, scalar("bool"))
+	s.expr(merge.GetJoinCondition(), env, overload.Scalar("bool"))
 
 	sourceNullable := false
 
 	for _, node := range merge.GetMergeWhenClauses() {
 		clause := node.GetMergeWhenClause()
 		sourceNullable = sourceNullable || clause.GetMatchKind() == pg.MergeMatchKind_MERGE_WHEN_NOT_MATCHED_BY_SOURCE
-		s.expr(clause.GetCondition(), env, scalar("bool"))
+		s.expr(clause.GetCondition(), env, overload.Scalar("bool"))
 		s.assignments(clause.GetTargetList(), columns, env)
 
 		expected := s.writeColumns(columns, clause.GetTargetList(), env)

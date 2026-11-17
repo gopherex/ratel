@@ -23,6 +23,7 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/annotate"
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
+	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 	"github.com/gopherex/ratel/cmd/ratel/internal/query"
 )
@@ -312,7 +313,7 @@ func checkColumnType(ctx context.Context, t *testing.T, transaction pgx.Tx, oid 
  ) SELECT oid FROM chain WHERE typbasetype=0`
 
 	var base uint32
-	if err := transaction.QueryRow(ctx, sql, catalog.ObjectID(inferred.GetUdt())).Scan(&base); err != nil {
+	if err := transaction.QueryRow(ctx, sql, objectid.ID(inferred.GetUdt())).Scan(&base); err != nil {
 		t.Fatal(err)
 	}
 
