@@ -277,13 +277,15 @@ view, static query or SELECT to a DB write method fails to compile.
 PostgreSQL output names in scanner order. The generated
 `ratel.Scanner[M]` has signature `func(pgx.Row) (M, error)` and calls `Scan`
 with explicit model-field addresses. `ratel.NewCol[M, V](name)` and
-`ratel.NewNullCol[M, V](name)` construct its typed column fields. Columns
+`ratel.NewNullCol[M, V](name)` construct its typed column fields,
+`ratel.NewReadCol` and `ratel.NewNullReadCol` its computed ones. Columns
 refer to the current source's output names; the renderer binds and quotes its
 alias independently from the descriptor's physical schema.
 
 A column whose Go type is not its PostgreSQL value, such as a proto enum
 stored as its name, is built with `ratel.NewCodecCol[M](name, codec)` or
-`ratel.NewCodecNullCol`. `ratel.Codec[V]` has `Encode func(V) any`, applied to
+`ratel.NewCodecNullCol` (`ratel.NewCodecReadCol` and
+`ratel.NewCodecNullReadCol` for a computed one). `ratel.Codec[V]` has `Encode func(V) any`, applied to
 every argument the column binds (comparisons, `In`, `Between`, `To`), and
 `Scan func(pgx.Rows) (Null[V], error)`, which `Pluck` and `PluckNull` use; a
 NULL in `Pluck` returns `ratel.ErrUnexpectedNull`. Package
@@ -501,6 +503,11 @@ sub := ratel.From(app.Users.Select().Where(...)).OrderBy(...)       // SELECT ov
   argument is bound, since its own markers start at `$1`.
 - `Col[M, V]` has comparison, `In`, range and pattern operators typed by `V`;
   `NullCol[M, V]` adds `IsNull` and `IsNotNull`.
+- A column PostgreSQL computes, a generated column or an identity
+  `GENERATED ALWAYS`, is `ReadCol[M, V]` (`NullReadCol[M, V]` when nullable):
+  it filters, orders, joins and names a conflict target like any column, but
+  it has no `To` and is not an upsert `Update` column, so a write PostgreSQL
+  would refuse does not compile. Insert types and `Save` leave it out.
 - `app.Users.Select()` starts a SELECT over a descriptor, `query.Select()`
   over a static query, and `ratel.From(source)` over any `ratel.Source[M]`,
   including another SELECT.
@@ -565,7 +572,9 @@ n, err = db.Run(app.Users.Save(user)).Exec(ctx)
   table's generated insert type. Every constructor flag is checked before
   any SQL is sent, including rows in later chunks; an empty input also returns
   `ErrInvalidInsert`. Unset optional columns are omitted, never bound as NULL.
-- `OnConflict(cols...).Update(cols...)` assigns `EXCLUDED` values;
+- `OnConflict(cols...).Update(cols...)` assigns `EXCLUDED` values; the
+  target takes any column, computed ones included (a unique index may cover a
+  generated column), the update only writable ones;
   `OnConflict(cols...).DoNothing()` skips conflicts. Target and action are
   mandatory for upsert; duplicate or unknown columns return `ErrInvalidQuery`.
   Calling a conflict method on `Insert` also enables upsert; partial conflict

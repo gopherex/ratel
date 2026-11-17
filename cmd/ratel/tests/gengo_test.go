@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/cli"
@@ -28,8 +29,8 @@ plugins:
 
 // TestGeneratedCode runs ratel generate on a fixture, builds the generated
 // packages in their own module and runs a program using them against real
-// PostgreSQL: registration, inserts, reads, relations, static queries, COPY
-// and constraint sentinels.
+// PostgreSQL 16, 17 and 18: registration, inserts, reads, relations, static
+// queries, COPY, constraint sentinels and computed columns.
 func TestGeneratedCode(t *testing.T) {
 	t.Parallel()
 
@@ -61,21 +62,29 @@ func TestGeneratedCode(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "go.work")
 	write(t, workspace, "go 1.27.3\n\nuse (\n\t"+module+"\n\t"+root+"\n)\n")
 
-	pool := postgresPool(t, 18)
-
-	ctx, cancel := context.WithTimeout(t.Context(), startupTimeout)
-	defer cancel()
-
-	if _, err := pool.Exec(ctx, files["schema/app.sql"]); err != nil {
-		t.Fatal(err)
-	}
-
-	environment := append(os.Environ(), "GOWORK="+workspace, "RATEL_E2E_DSN="+pool.Config().ConnString())
+	environment := append(os.Environ(), "GOWORK="+workspace)
 
 	goCommand(t, module, append(environment, "GOFLAGS=-mod=mod"), "get", "github.com/jackc/pgx/v5@v5.11.0",
 		"github.com/shopspring/decimal", "github.com/jackc/pgx-shopspring-decimal")
 	goCommand(t, module, environment, "vet", "./...")
-	goCommand(t, module, environment, "test", "-count=1", "./...")
+
+	for _, major := range []int{16, 17, 18} {
+		t.Run(strconv.Itoa(major), func(t *testing.T) {
+			t.Parallel()
+
+			pool := postgresPool(t, major)
+
+			ctx, cancel := context.WithTimeout(t.Context(), startupTimeout)
+			defer cancel()
+
+			if _, err := pool.Exec(ctx, files["schema/app.sql"]); err != nil {
+				t.Fatal(err)
+			}
+
+			goCommand(t, module, append(environment, "RATEL_E2E_DSN="+pool.Config().ConnString()),
+				"test", "-count=1", "./...")
+		})
+	}
 }
 
 func goCommand(t *testing.T, directory string, environment []string, args ...string) {

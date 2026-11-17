@@ -90,14 +90,21 @@ func (s *state) writeDescriptor(file *unit, schema, table string, names identifi
 		"\treturn &copied\n}\n\n", names.descriptorType, names.descriptorType, embedded, embedded)
 }
 
-// columnKind is the constructor of a descriptor column ("NewCol" or
-// "NewNullCol"); without its "New" prefix it is the column type.
+// columnKind is the constructor of a descriptor column ("NewCol",
+// "NewNullCol", or for a column PostgreSQL computes "NewReadCol",
+// "NewNullReadCol"); without its "New" prefix it is the column type. A
+// computed column has no assignment, so writing it does not compile.
 func columnKind(value column) string {
-	if value.nullable {
+	switch {
+	case value.insert == insertOmitted && value.nullable:
+		return "NewNullReadCol"
+	case value.insert == insertOmitted:
+		return "NewReadCol"
+	case value.nullable:
 		return "NewNullCol"
+	default:
+		return "NewCol"
 	}
-
-	return "NewCol"
 }
 
 func tableOptions(names identifiers, columns []column, table *ir.Table) string {

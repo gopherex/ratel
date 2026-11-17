@@ -945,7 +945,7 @@ var Users = &usersTable{
 	Type:       ratel.NewNullCol[User, string]("type"),
 	CreatedAt:  ratel.NewCol[User, time.Time]("created_at"),
 	Profile:    ratel.NewNullCol[User, doc.Profile]("profile"),
-	Doubled:    ratel.NewNullCol[User, int64]("doubled"),
+	Doubled:    ratel.NewNullReadCol[User, int64]("doubled"),
 	Orders: ratel.NewRel[User, Order](ordersBase, ratel.RelMany,
 		[]ratel.RelKey[User]{{
 			Column: "user_id", Parent: "id", Type: pgx.Identifier{"pg_catalog", "int8"},
@@ -1012,7 +1012,7 @@ type usersTable struct {
 	Type      ratel.NullCol[User, string]
 	CreatedAt ratel.Col[User, time.Time]
 	Profile   ratel.NullCol[User, doc.Profile]
-	Doubled   ratel.NullCol[User, int64]
+	Doubled   ratel.NullReadCol[User, int64]
 	Orders    ratel.Rel[User, Order]
 	Manager   ratel.Rel[User, User]
 	Users     ratel.Rel[User, User]

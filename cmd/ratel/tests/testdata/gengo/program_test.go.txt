@@ -183,3 +183,38 @@ func TestGenerated(t *testing.T) {
 		t.Fatalf("second DeleteRow error = %v", err)
 	}
 }
+
+// Computed columns: PostgreSQL fills id (identity ALWAYS) and name_lower
+// (generated); inserts and Save leave them out, reads and conflict targets
+// use them.
+func TestComputedColumns(t *testing.T) {
+	ctx := t.Context()
+	db := ratel.New(pool(t))
+
+	node, err := db.Run(app.Nodes.Insert(app.Nodes.Row().Name("Report.PDF")).Returning()).One(ctx)
+	if err != nil || node.NameLower != "report.pdf" || node.ID == 0 {
+		t.Fatalf("insert = %+v, %v", node, err)
+	}
+
+	node.Name = "Notes.TXT"
+	if _, err := db.Run(app.Nodes.Save(node)).Exec(ctx); err != nil {
+		t.Fatalf("Save = %v", err)
+	}
+
+	saved, err := db.Run(app.Nodes.Select().Where(app.Nodes.ID.Eq(node.ID))).One(ctx)
+	if err != nil || saved.NameLower != "notes.txt" {
+		t.Fatalf("after Save = %+v, %v", saved, err)
+	}
+
+	upsert := app.Nodes.Upsert(app.Nodes.Row().Name("NOTES.txt").Size(5)).
+		OnConflict(app.Nodes.NameLower).Update(app.Nodes.Size)
+	if _, err := db.Run(upsert).Exec(ctx); err != nil {
+		t.Fatalf("upsert on a generated target = %v", err)
+	}
+
+	found, err := db.Run(app.Nodes.Select().Where(app.Nodes.NameLower.Eq("notes.txt")).
+		OrderBy(app.Nodes.NameLower.Asc())).List(ctx)
+	if err != nil || len(found) != 1 || found[0].Size != 5 || found[0].ID != node.ID {
+		t.Fatalf("select by generated column = %+v, %v", found, err)
+	}
+}

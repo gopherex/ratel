@@ -1087,7 +1087,7 @@ var Customers = &customersTable{
 	Meta:        ratel.NewNullCol[Customer, json.RawMessage]("meta"),
 	Previous:    ratel.NewCol[Customer, json.RawMessage]("previous"),
 	Subtotal:    ratel.NewCol[Customer, int64]("subtotal"),
-	Total:       ratel.NewCol[Customer, int64]("total"),
+	Total:       ratel.NewReadCol[Customer, int64]("total"),
 	Phone:       ratel.NewNullCol[Customer, string]("phone"),
 	Fax:         ratel.NewNullCol[Customer, string]("fax"),
 	ContactCase: ratel.NewNullCol[Customer, string]("contact_case"),
@@ -1112,7 +1112,7 @@ type customersTable struct {
 	Meta        ratel.NullCol[Customer, json.RawMessage]
 	Previous    ratel.Col[Customer, json.RawMessage]
 	Subtotal    ratel.Col[Customer, int64]
-	Total       ratel.Col[Customer, int64]
+	Total       ratel.ReadCol[Customer, int64]
 	Phone       ratel.NullCol[Customer, string]
 	Fax         ratel.NullCol[Customer, string]
 	ContactCase ratel.NullCol[Customer, string]

@@ -972,7 +972,7 @@ var Customers = &customersTable{
 	Notes:       ratel.NewCol[Customer, json.RawMessage]("notes"),
 	Pinned:      ratel.NewCol[Customer, json.RawMessage]("pinned"),
 	Subtotal:    ratel.NewCol[Customer, int64]("subtotal"),
-	Total:       ratel.NewCol[Customer, int64]("total"),
+	Total:       ratel.NewReadCol[Customer, int64]("total"),
 	Phone:       ratel.NewNullCol[Customer, string]("phone"),
 	Fax:         ratel.NewNullCol[Customer, string]("fax"),
 	ContactCase: ratel.NewNullCol[Customer, string]("contact_case"),
@@ -1013,7 +1013,7 @@ type customersTable struct {
 	Notes       ratel.Col[Customer, json.RawMessage]
 	Pinned      ratel.Col[Customer, json.RawMessage]
 	Subtotal    ratel.Col[Customer, int64]
-	Total       ratel.Col[Customer, int64]
+	Total       ratel.ReadCol[Customer, int64]
 	Phone       ratel.NullCol[Customer, string]
 	Fax         ratel.NullCol[Customer, string]
 	ContactCase ratel.NullCol[Customer, string]

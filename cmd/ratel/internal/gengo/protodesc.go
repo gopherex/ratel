@@ -97,10 +97,12 @@ func (c column) arrayElement(file *unit) (string, column, bool) {
 // descriptorColumn renders the constructor of the column's descriptor field
 // and the field's type.
 func (s *state) descriptorColumn(file *unit, model string, value column) (string, string) {
-	kind := columnKind(value)
+	// A oneof member is NULL whenever another member is set.
 	if value.proto != nil && value.proto.field.oneof.expr != "" {
-		kind = "NewNullCol"
+		value.nullable = true
 	}
+
+	kind := columnKind(value)
 
 	if value.proto == nil || !value.proto.codec() {
 		typ := file.use(value.goType)

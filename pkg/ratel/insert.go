@@ -45,9 +45,13 @@ func (q Insert[M, I]) Chunk(rows int) Insert[M, I] {
 }
 
 // OnConflict selects the ordered columns of a unique conflict target.
-func (q Insert[M, I]) OnConflict(columns ...WriteColumn[M]) Insert[M, I] {
+func (q Insert[M, I]) OnConflict(columns ...ConflictColumn[M]) Insert[M, I] {
 	q.upsert = true
-	q.conflict = writeColumnNames(columns)
+
+	q.conflict = make([]string, len(columns))
+	for index, column := range columns {
+		q.conflict[index] = column.ratelConflictColumn()
+	}
 
 	return q
 }

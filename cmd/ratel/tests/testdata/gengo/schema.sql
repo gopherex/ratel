@@ -23,3 +23,12 @@ CREATE TABLE app.tags (
   label text NOT NULL,
   kind text NOT NULL DEFAULT 'topic' CHECK (kind IN ('topic', 'brand'))
 );
+-- PostgreSQL computes both id and name_lower: neither is written.
+CREATE TABLE app.nodes (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  parent bigint,
+  name text NOT NULL,
+  name_lower text NOT NULL GENERATED ALWAYS AS (lower(name)) STORED,
+  size bigint NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX nodes_name ON app.nodes (name_lower);

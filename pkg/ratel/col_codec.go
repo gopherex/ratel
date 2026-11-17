@@ -18,7 +18,7 @@ type Codec[V any] struct {
 
 // NewCodecCol constructs a column whose values convert through codec.
 func NewCodecCol[M, V any](name string, codec Codec[V]) Col[M, V] {
-	return Col[M, V]{name: name, codec: &codec}
+	return Col[M, V]{ReadCol: NewCodecReadCol[M](name, codec)}
 }
 
 // NewCodecNullCol constructs a nullable column whose values convert through codec.
@@ -26,8 +26,19 @@ func NewCodecNullCol[M, V any](name string, codec Codec[V]) NullCol[M, V] {
 	return NullCol[M, V]{Col: NewCodecCol[M](name, codec)}
 }
 
+// NewCodecReadCol constructs a computed column whose values convert through codec.
+func NewCodecReadCol[M, V any](name string, codec Codec[V]) ReadCol[M, V] {
+	return ReadCol[M, V]{name: name, codec: &codec}
+}
+
+// NewCodecNullReadCol constructs a nullable computed column whose values
+// convert through codec.
+func NewCodecNullReadCol[M, V any](name string, codec Codec[V]) NullReadCol[M, V] {
+	return NullReadCol[M, V]{ReadCol: NewCodecReadCol[M](name, codec)}
+}
+
 // arg is a value as pgx receives it.
-func (c Col[M, V]) arg(value V) any {
+func (c ReadCol[M, V]) arg(value V) any {
 	if c.codec == nil {
 		return value
 	}

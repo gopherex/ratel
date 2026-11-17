@@ -74,10 +74,17 @@ func (t WriteTable[M, I]) InSchema(schema string) WriteTable[M, I] {
 
 func (t WriteTable[M, I]) ratelWrite() WriteTable[M, I] { return t }
 
-// WriteColumn is a model-typed column used in conflict targets and updates.
+// WriteColumn is a model-typed column an upsert may update: never a
+// computed (ReadCol) one.
 type WriteColumn[M any] interface{ ratelWriteColumn() string }
 
 func (c Col[M, V]) ratelWriteColumn() string { return c.name }
+
+// ConflictColumn is a model-typed column of a conflict target; a computed
+// column can be one (a unique index may cover a generated column).
+type ConflictColumn[M any] interface{ ratelConflictColumn() string }
+
+func (c ReadCol[M, V]) ratelConflictColumn() string { return c.name }
 
 // Assignment is a model-typed SET expression.
 type Assignment[M any] struct {
