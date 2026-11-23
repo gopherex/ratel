@@ -334,11 +334,11 @@ func checkServerVersion(ctx context.Context, t *testing.T, admin *pgxpool.Pool) 
 	t.Helper()
 
 	pool := target(ctx, t, admin)
-	files := directory(migrate.Source{Name: "1_new.sql", SQL: `-- ratel:step id=n1 phase=expand tx=in class=short pg=19
+	files := directory(migrate.Source{Name: "1_new.sql", SQL: `-- ratel:step id=n1 phase=expand tx=in class=short pg=20
 SELECT 1;`})
 
 	if err := migrate.Apply(ctx, pool, files, migrateSettings()); !errors.Is(err, migrate.ErrServer) {
-		t.Fatalf("step for 19 = %v", err)
+		t.Fatalf("step for 20 = %v", err)
 	}
 }
 

@@ -18,8 +18,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// LatestMajor is the newest PostgreSQL major version ratel supports.
-const LatestMajor = 18
+// EarliestMajor and LatestMajor bound the supported PostgreSQL server versions.
+const (
+	EarliestMajor = 16
+	LatestMajor   = 19
+)
 
 // outcomeDone is the journal outcome of a finished step.
 const outcomeDone = "done"
