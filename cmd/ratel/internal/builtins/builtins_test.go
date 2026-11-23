@@ -19,13 +19,13 @@ import (
 func TestFor(t *testing.T) {
 	t.Parallel()
 
-	for _, major := range []int{0, 15, 16, 17, 18, 19} {
+	for _, major := range []int{0, 15, 16, 17, 18, 19, 20} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
 
 			schemas, err := builtins.For(major)
 
-			if major < 16 || major > 18 {
+			if major < 16 || major > 19 {
 				var unsupported *builtins.UnsupportedMajorError
 				if !errors.As(err, &unsupported) || unsupported.Major != major ||
 					!strings.Contains(err.Error(), strconv.Itoa(major)) {
@@ -59,7 +59,7 @@ func TestFor(t *testing.T) {
 func TestExtensions(t *testing.T) {
 	t.Parallel()
 
-	for _, major := range []int{16, 17, 18} {
+	for _, major := range []int{16, 17, 18, 19} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
 
@@ -142,7 +142,7 @@ func checkFunctions(t *testing.T, schema *ir.Schema, major int) {
 		{"default arguments", strconv.FormatUint(uint64(interval.GetDefaultArguments()), 10), "7"},
 		{"ordered aggregate", ordered.GetKind(), "o"},
 		{"direct arguments", strconv.FormatUint(uint64(ordered.GetDirectArguments()), 10), "1"},
-		{"uuidv7", strconv.FormatBool(functions["uuidv7(interval)"] != nil), strconv.FormatBool(major == 18)},
+		{"uuidv7", strconv.FormatBool(functions["uuidv7(interval)"] != nil), strconv.FormatBool(major >= 18)},
 	} {
 		if tc.actual != tc.expected {
 			t.Errorf("%s: got %q, want %q", tc.name, tc.actual, tc.expected)
@@ -199,7 +199,7 @@ func checkCasts(t *testing.T, schema *ir.Schema) {
 func TestSnapshotOrder(t *testing.T) {
 	t.Parallel()
 
-	for _, major := range []int{16, 17, 18} {
+	for _, major := range []int{16, 17, 18, 19} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
 

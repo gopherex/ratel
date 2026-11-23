@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -49,7 +50,7 @@ type project struct {
 	root string
 }
 
-func newProject(t *testing.T, devURL string) project {
+func newProject(t *testing.T, devURL string, major int) project {
 	t.Helper()
 
 	root := t.TempDir()
@@ -57,8 +58,8 @@ func newProject(t *testing.T, devURL string) project {
 		t.Fatal(err)
 	}
 
-	write(t, filepath.Join(root, "ratel.yaml"), "version: 1\npostgres: {version: 18}\nschema: [schema/*.sql]\n"+
-		"dev: {url: '"+devURL+"'}\n")
+	write(t, filepath.Join(root, "ratel.yaml"), "version: 1\npostgres: {version: "+strconv.Itoa(major)+"}\n"+
+		"schema: [schema/*.sql]\ndev: {url: '"+devURL+"'}\n")
 
 	return project{t: t, root: root}
 }
@@ -106,7 +107,7 @@ func TestMigrateCheckRoundTrip(t *testing.T) {
 );`
 
 	server := postgresPool(t, 18)
-	fixture := newProject(t, server.Config().ConnString())
+	fixture := newProject(t, server.Config().ConnString(), 18)
 	fixture.schema(schema)
 	fixture.must("plan", "init")
 
@@ -124,7 +125,19 @@ func TestMigrateCheckRoundTrip(t *testing.T) {
 func TestMigrateCommands(t *testing.T) {
 	t.Parallel()
 
-	server := postgresPool(t, 18)
+	for _, major := range []int{18, 19} {
+		t.Run(strconv.Itoa(major), func(t *testing.T) {
+			t.Parallel()
+
+			checkMigrateCommands(t, major)
+		})
+	}
+}
+
+func checkMigrateCommands(t *testing.T, major int) {
+	t.Helper()
+
+	server := postgresPool(t, major)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 3*startupTimeout)
 	defer cancel()
@@ -144,7 +157,7 @@ func TestMigrateCommands(t *testing.T) {
 
 	defer target.Close()
 
-	proj := newProject(t, server.Config().ConnString())
+	proj := newProject(t, server.Config().ConnString(), major)
 
 	proj.schema(schemaV1)
 	proj.must("plan", "init")

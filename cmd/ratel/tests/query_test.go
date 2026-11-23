@@ -53,7 +53,7 @@ func TestQuerySignatures(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, major := range []int{16, 17, 18} {
+	for _, major := range []int{16, 17, 18, 19} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
 

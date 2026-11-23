@@ -52,7 +52,7 @@ a lower-case simple identifier). Functions append the argument type list.
    (not-null constraints, default generated-column kind). For every allowed
    schema statement, `build(DDL, major)` equals `introspect(apply(DDL))` on a
    server of that major, after normalization by PostgreSQL. *Check:* the
-   integration suite applies each fixture to real PostgreSQL 16, 17 and 18 and
+   integration suite applies each fixture to real PostgreSQL 16 through 19 and
    compares.
 3. **Positions.** Every object built from source carries a `SourceSpan`;
    introspected objects carry none. A statement's span starts at its first
@@ -329,7 +329,7 @@ so both produce the same shape.
   after keys and indexes), so with `check_function_bodies = off` it applies to an
   empty database.
 
-`cmd/ratel/tests/introspect_test.go` checks, on PostgreSQL 16, 17 and 18, that
+`cmd/ratel/tests/introspect_test.go` checks, on PostgreSQL 16 through 19, that
 `build(DDL)` equals `Load(apply(DDL))` for `tests/testdata/catalog/schema.sql`
 and `cmd/ratel/tests/testdata/introspect/schema.sql`, after PostgreSQL's
 normalization: expressions are compared without casts (PostgreSQL stores every

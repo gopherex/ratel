@@ -171,7 +171,7 @@ func clearSources(message protoreflect.Message) {
 func testVersion(t *testing.T, parser parse.Parser) {
 	t.Helper()
 
-	for _, major := range []int{0, 15, 19} {
+	for _, major := range []int{0, 15, 20} {
 		t.Run(string(rune('a'+major)), func(t *testing.T) {
 			t.Parallel()
 

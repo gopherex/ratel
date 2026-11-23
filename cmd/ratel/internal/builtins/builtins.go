@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/migrate"
 )
 
 //go:generate go run ./gen -out data
@@ -26,9 +27,7 @@ func (e *UnsupportedMajorError) Error() string {
 
 // For returns a fresh snapshot owned by the caller; no shared protobuf state escapes.
 func For(major int) ([]*ir.Schema, error) {
-	const minMajor, maxMajor = 16, 18
-
-	if major < minMajor || major > maxMajor {
+	if major < migrate.EarliestMajor || major > migrate.LatestMajor {
 		return nil, &UnsupportedMajorError{Major: major}
 	}
 

@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [postgres:16-alpine, postgres:17-alpine, postgres:18-alpine]
+        image: [postgres:16-alpine, postgres:17-alpine, postgres:18-alpine, postgres:19-alpine]
     env:
       RATEL_PG_IMAGE: ${{ matrix.image }}
     steps:

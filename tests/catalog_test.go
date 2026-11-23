@@ -16,7 +16,9 @@ import (
 func TestCatalogFixtureApply(t *testing.T) {
 	t.Parallel()
 
-	for _, image := range []string{"postgres:16-alpine", "postgres:17-alpine", "postgres:18-alpine"} {
+	for _, image := range []string{
+		"postgres:16-alpine", "postgres:17-alpine", "postgres:18-alpine", "postgres:19-alpine",
+	} {
 		t.Run(image, func(t *testing.T) {
 			t.Parallel()
 

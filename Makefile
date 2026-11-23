@@ -127,7 +127,7 @@ proto-example: easyp-bin ## Regenerate examples/proto: Go messages, their schema
 site: ## Serve the documentation site on localhost:3000 (needs Node 20+)
 	( cd website && npm ci && npm start )
 
-builtins: ## Generate builtin signatures from pinned PostgreSQL 16, 17 and 18 containers (needs Docker)
+builtins: ## Generate builtin signatures from pinned PostgreSQL 16 through 19 containers (needs Docker)
 	( cd cmd/ratel && $(GO) generate ./internal/builtins )
 
 check: fmt-check lint test ## Run the CI gates: format check, linter, unit tests

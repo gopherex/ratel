@@ -19,7 +19,7 @@ in `docs/` specify each part.
 
 ## Scope
 
-- PostgreSQL only, versions 16 to the latest release (18 today). The IR models
+- PostgreSQL only, server versions 16 through 19. The IR models
   PostgreSQL faithfully; it is not a dialect-neutral abstraction.
 - Go 1.27 or newer for the runtime and the generated code.
 - One driver: `github.com/jackc/pgx/v5`, native API. `database/sql` is not

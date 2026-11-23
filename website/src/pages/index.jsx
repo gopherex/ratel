@@ -120,7 +120,7 @@ function QuickStart() {
       <CodeBlock language="go">{usage}</CodeBlock>
       <p className={styles.note}>
         The complete program is <Link href="https://github.com/gopherex/ratel/tree/main/examples/shop">examples/shop</Link>;
-        CI runs it against PostgreSQL 16, 17 and 18.
+        CI runs it against PostgreSQL 16 through 19.
       </p>
     </section>
   );

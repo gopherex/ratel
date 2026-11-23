@@ -30,7 +30,7 @@ plugins:
 
 // TestGeneratedCode runs ratel generate on a fixture, builds the generated
 // packages in their own module and runs a program using them against real
-// PostgreSQL 16, 17 and 18: registration, inserts, reads, relations, static
+// PostgreSQL 16 through 19: registration, inserts, reads, relations, static
 // queries, COPY, constraint sentinels and computed columns.
 func TestGeneratedCode(t *testing.T) {
 	t.Parallel()
@@ -69,7 +69,7 @@ func TestGeneratedCode(t *testing.T) {
 		"github.com/shopspring/decimal", "github.com/jackc/pgx-shopspring-decimal")
 	goCommand(t, module, environment, "vet", "./...")
 
-	for _, major := range []int{16, 17, 18} {
+	for _, major := range []int{16, 17, 18, 19} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
 

@@ -44,7 +44,7 @@ func TestIntrospectRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		for _, major := range []int{16, 17, 18} {
+		for _, major := range []int{16, 17, 18, 19} {
 			t.Run(fixture.namespace+"/"+strconv.Itoa(major), func(t *testing.T) {
 				t.Parallel()
 				checkRoundTrip(t, parser, string(ddl), fixture.namespace, major)

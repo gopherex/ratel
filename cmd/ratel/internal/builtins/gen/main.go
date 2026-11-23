@@ -61,6 +61,7 @@ func run(ctx context.Context, output string, timeout time.Duration) error {
 		{16, "postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab"},
 		{17, "postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b"},
 		{18, "postgres:18-alpine@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5"},
+		{19, "postgres:19-alpine@sha256:8b0ff4cdf221f0c53d7fcda681d3b461be725c492cd881c5ec9c0ad25023f188"},
 	}
 	for _, target := range targets {
 		snapshots, err := generate(ctx, target.image, timeout)

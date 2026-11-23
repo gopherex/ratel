@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/migrate"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/mapper"
 	"github.com/gopherex/ratel/cmd/ratel/internal/objectid"
@@ -87,8 +88,7 @@ type (
 func Build(
 	parser parse.Parser, files []File, major int, builtins []*ir.Schema, owned ...string,
 ) (*ir.Catalog, error) {
-	const minMajor, maxMajor = 16, 18
-	if major < minMajor || major > maxMajor {
+	if major < migrate.EarliestMajor || major > migrate.LatestMajor {
 		return nil, &Error{Code: "RTL-C01", Message: "unsupported PostgreSQL major " + strconv.Itoa(major)}
 	}
 

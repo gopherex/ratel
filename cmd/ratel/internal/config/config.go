@@ -101,7 +101,7 @@ func Decode(reader io.Reader) (Config, error) {
 	}
 
 	if value.Dev.Image == "" && value.Dev.URL == "" {
-		value.Dev.Image = "postgres:18-alpine"
+		value.Dev.Image = fmt.Sprintf("postgres:%d-alpine", value.Postgres.Version)
 	}
 
 	if value.Parser.Concurrency == 0 {
@@ -122,10 +122,12 @@ func Decode(reader io.Reader) (Config, error) {
 }
 
 func defaults() Config {
+	const defaultPostgresMajor = 18
+
 	run := migrate.DefaultSettings()
 
 	return Config{
-		Postgres: Postgres{Version: migrate.LatestMajor}, Parser: parse.Config{Concurrency: parse.DefaultConcurrency},
+		Postgres: Postgres{Version: defaultPostgresMajor}, Parser: parse.Config{Concurrency: parse.DefaultConcurrency},
 		Schema: []string{"schema/**/*.sql"}, Migrations: "migrations",
 		Migrate: Migrate{
 			LockTimeout: run.LockTimeout, RetrySchedule: "gitlab", MaxTotalWait: run.MaxTotalWait,
@@ -142,8 +144,9 @@ func validate(value Config) error {
 		return &Error{Message: "version must be 1"}
 	}
 
-	if value.Postgres.Version < 16 || value.Postgres.Version > 18 {
-		return &Error{Message: "postgres.version must be 16, 17 or 18"}
+	if value.Postgres.Version < migrate.EarliestMajor || value.Postgres.Version > migrate.LatestMajor {
+		return &Error{Message: fmt.Sprintf("postgres.version must be between %d and %d",
+			migrate.EarliestMajor, migrate.LatestMajor)}
 	}
 
 	if value.Parser.Concurrency < 0 {

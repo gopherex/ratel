@@ -184,7 +184,8 @@ Rules:
   the upstream pool retains every instance and its grown linear memory.
 - `version: 1` is required. Omitted `postgres.version` defaults to `18`,
   `schema` to `[schema/**/*.sql]`, `migrations` to `migrations`, and `dev.image`
-  to `postgres:18-alpine` when neither dev setting is supplied. Explicit
+  to `postgres:<postgres.version>-alpine` when neither dev setting is supplied
+  (`postgres:18-alpine` by default). Explicit
   `dev.image` and `dev.url` are mutually exclusive. Query groups and plugins
   default to empty lists.
   Migration defaults are exactly the values in the example above. Explicit
@@ -201,7 +202,7 @@ Rules:
   by the host. `Info` describes options; `Generate` validates them. No options
   exist in the Info request. Unknown host keys and multiple YAML documents
   are errors; duplicate keys are errors as well.
-- `postgres.version` must be between 16 and the latest major this ratel
-  version supports. A planned step records it; `migrate apply` refuses a
+- `postgres.version` must be between 16 and 19. The server target does not
+  change the SQL grammar accepted by the parser. A planned step records it; `migrate apply` refuses a
   server whose major is lower than the step's or higher than the latest
   supported one.

@@ -22,7 +22,7 @@ type diffCase struct {
 	current, desired string
 	intents          diff.Intents
 	kinds            []diff.Kind
-	kinds18          []diff.Kind // on PostgreSQL 18, when they differ
+	kindsSince18     []diff.Kind // since PostgreSQL 18, when they differ
 	namespace        string      // "app" when empty
 }
 
@@ -84,7 +84,7 @@ func objectCases() []diffCase {
 			},
 			// PostgreSQL 18 names the primary key's not-null constraint after
 			// the table.
-			kinds18: []diff.Kind{
+			kindsSince18: []diff.Kind{
 				diff.RenameTable, diff.RenameConstraint, diff.RenameColumn, diff.RenameConstraint, diff.CreateIndex,
 				diff.RenameIndex, diff.DropIndex,
 			},
@@ -111,7 +111,7 @@ func objectCases() []diffCase {
 				diff.AlterPersistence,
 			},
 			// PostgreSQL 18 partitions keep their own not-null constraint names.
-			kinds18: []diff.Kind{
+			kindsSince18: []diff.Kind{
 				diff.RenameConstraint, diff.AttachPartition, diff.DetachPartition, diff.AttachPartition,
 				diff.DetachPartition, diff.RenameConstraint, diff.AlterPersistence,
 			},
@@ -191,7 +191,7 @@ func TestDiff(t *testing.T) {
 
 	cases := diffCases(t)
 
-	for _, major := range []int{16, 17, 18} {
+	for _, major := range []int{16, 17, 18, 19} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
 
@@ -243,8 +243,8 @@ func checkDiff(ctx context.Context, t *testing.T, server *devdb.Server, item dif
 	}
 
 	expected := item.kinds
-	if item.kinds18 != nil && want.Major == 18 {
-		expected = item.kinds18
+	if item.kindsSince18 != nil && want.Major >= 18 {
+		expected = item.kindsSince18
 	}
 
 	if expected != nil {

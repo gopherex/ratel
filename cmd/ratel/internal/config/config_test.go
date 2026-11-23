@@ -20,7 +20,8 @@ func TestDecode(t *testing.T) {
 		{"unknown", "version: 1\nwat: 2", true},
 		{"nested unknown", "version: 1\nparser: {wat: 2}", true},
 		{"negative", "version: 1\nparser: {concurrency: -1}", true},
-		{"postgres", "version: 1\npostgres: {version: 19}", true},
+		{"postgres 19", "version: 1\npostgres: {version: 19}", false},
+		{"postgres 20", "version: 1\npostgres: {version: 20}", true},
 		{"missing version", "{}", true},
 		{"duplicate key", "version: 1\nversion: 1", true},
 		{"zero concurrency", "version: 1\nparser: {concurrency: 0}", false},
@@ -71,6 +72,7 @@ func TestDev(t *testing.T) {
 		fail                   bool
 	}{
 		{"default", "version: 1", "postgres:18-alpine", "", false},
+		{"postgres 19", "version: 1\npostgres: {version: 19}", "postgres:19-alpine", "", false},
 		{"image", "version: 1\ndev: {image: postgres:16-alpine}", "postgres:16-alpine", "", false},
 		{"url", "version: 1\ndev: {url: postgres://localhost/test}", "", "postgres://localhost/test", false},
 		{"both", "version: 1\ndev: {image: postgres:16-alpine, url: postgres://localhost/test}", "", "", true},

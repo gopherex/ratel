@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/gopherex/ratel/actions/workflows/ci.yml"><img src="https://github.com/gopherex/ratel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/Go-1.27.3%2B-00ADD8" alt="Go 1.27.3+">
-  <img src="https://img.shields.io/badge/PostgreSQL-16%20%7C%2017%20%7C%2018-336791" alt="PostgreSQL 16, 17, 18">
+  <img src="https://img.shields.io/badge/PostgreSQL-16%20%7C%2017%20%7C%2018%20%7C%2019-336791" alt="PostgreSQL 16 through 19">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
 </p>
 
@@ -244,7 +244,7 @@ Reproduce with `make bench-compare`; the raw results are
   in batches, kept in sync by triggers and swapped in atomically.
 - **The PostgreSQL 18 grammar.** Generated virtual columns and `NOT NULL ...
   NOT VALID` in schema files, as soon as libpg_query ships the 18 grammar
-  (the parser is on 17 today; plans already target 18 servers).
+  (the parser is on 17 today; plans can target PostgreSQL 18 and 19 servers).
 
 ## Documentation
 

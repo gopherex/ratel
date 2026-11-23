@@ -32,7 +32,7 @@ suite without global state; separate top-level suites own separate containers.
 ### PostgreSQL configuration and schema
 
 `WithImage` overrides `RATEL_PG_IMAGE`; without either, the image is
-`postgres:18-alpine`. Use PostgreSQL 16, 17 or 18. `WithTimeout` bounds startup,
+`postgres:18-alpine`. Use PostgreSQL 16 through 19. `WithTimeout` bounds startup,
 database setup and each cleanup independently; its default is five minutes.
 `RollbackTx` accepts one optional positive timeout, also defaulting to five
 minutes. Cleanup uses a fresh context, not the test's cancelled context.
@@ -138,7 +138,7 @@ includes container startup and teardown; the clone benchmark reuses one server.
 The container tests live beside the helpers under the `integration` build tag.
 `make test-integration` runs them and the suite in `tests/`. Run the PostgreSQL
 matrix with `RATEL_PG_IMAGE=postgres:16-alpine make test-integration`, then repeat
-with `postgres:17-alpine` and `postgres:18-alpine`. Helper integration covers
+with `postgres:17-alpine`, `postgres:18-alpine` and `postgres:19-alpine`. Helper integration covers
 phase ordering, parallel database isolation, pool type registration, rollback,
 real pgx tracing and recovery after a terminated connection.
 
@@ -154,7 +154,7 @@ Gates, in order; a gate starts only after the previous one passes:
    before/after numbers when changed.
 3. **Linter**: golangci-lint with the repository config, no suppressions.
 4. **Integration** in `tests/`, one module against real infrastructure in
-   testcontainers, on PostgreSQL 16, 17 and 18:
+   testcontainers, on PostgreSQL 16 through 19:
    - catalog round trip (`build` equals `introspect(apply)`), per fixture;
    - the lock and effect table replayed against `pg_locks` and `relfilenode`;
    - every safe recipe applied under a concurrent long transaction and a

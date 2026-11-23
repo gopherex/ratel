@@ -146,7 +146,7 @@ func TestPlan(t *testing.T) {
 
 	cases := planCases(t)
 
-	for _, major := range []int{16, 17, 18} {
+	for _, major := range []int{16, 17, 18, 19} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
 

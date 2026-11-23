@@ -8,7 +8,7 @@ divergence is a code bug or a spec change made in the same commit.
 ## Toolchain
 
 - Go 1.27.3 or newer (generic methods). gopls v0.24.0 or newer understands them.
-- PostgreSQL 16 to 18 for integration tests (testcontainers, Docker).
+- PostgreSQL 16 to 19 for integration tests (testcontainers, Docker).
 - Proto: easyp v1 built from source into `./bin/easyp` (gitignored); plugins
   such as `protoc-gen-go` from `PATH`; generated Go is committed.
 

@@ -45,7 +45,7 @@ CREATE INDEX packs_literal ON packs (length(title || 'x'));`
 		"packs_literal": {"length(text)"},
 	}
 
-	for _, major := range []int{16, 17, 18} {
+	for _, major := range []int{16, 17, 18, 19} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
 

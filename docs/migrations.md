@@ -27,7 +27,7 @@ migrations dir ─► apply to dev DB ─► render ─► current rendering ┘
    reports drop plus create. An index or constraint dropped and created with
    the same definition under a new name is a rename. *Check:* an integration
    test applies the changes of each case to the current database on
-   PostgreSQL 16, 17 and 18 and compares its rendering with the desired one.
+   PostgreSQL 16 through 19 and compares its rendering with the desired one.
 2. **Assess** is a pure function `Assess(operations, env) Safety` over the
    operations of one statement.
 3. **Planner** rewrites each change into safe steps and assigns phases.
@@ -56,7 +56,7 @@ type Safety struct {
   statements are classified from their parse tree, and an unknown statement
   is assessed as the worst case.
 - The lock and effect table is data keyed by operation kind. *Check:* an
-  integration test replays every entry against PostgreSQL 16, 17 and 18 and
+  integration test replays every entry against PostgreSQL 16 through 19 and
   compares the observed `pg_locks` modes, `relfilenode` changes and waiting
   with the table. Statements that commit a first phase before waiting
   (`DETACH CONCURRENTLY`, `FINALIZE`) are checked against the locks they
