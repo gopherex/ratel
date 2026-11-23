@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -81,7 +82,7 @@ func TestGeneratedCode(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			goCommand(t, module, append(environment, "RATEL_E2E_DSN="+pool.Config().ConnString()),
+			goCommand(t, module, append(slices.Clone(environment), "RATEL_E2E_DSN="+pool.Config().ConnString()),
 				"test", "-count=1", "./...")
 		})
 	}

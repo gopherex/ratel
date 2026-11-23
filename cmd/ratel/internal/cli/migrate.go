@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	tclog "github.com/testcontainers/testcontainers-go/log"
 
 	"github.com/gopherex/ratel/pkg/ir"
 	"github.com/gopherex/ratel/pkg/migrate"
@@ -19,7 +18,6 @@ import (
 	"github.com/gopherex/ratel/cmd/ratel/internal/builtins"
 	"github.com/gopherex/ratel/cmd/ratel/internal/catalog"
 	"github.com/gopherex/ratel/cmd/ratel/internal/config"
-	"github.com/gopherex/ratel/cmd/ratel/internal/devdb"
 	"github.com/gopherex/ratel/cmd/ratel/internal/ident"
 	"github.com/gopherex/ratel/cmd/ratel/internal/parse"
 	"github.com/gopherex/ratel/cmd/ratel/internal/safety"
@@ -77,8 +75,6 @@ records at --log-level.`,
 	command.AddCommand(
 		flags.local("plan <name>", "Diff the schema against the migrations and write the planned steps",
 			cobra.ExactArgs(1), func(ctx context.Context, w *workspace, operands []string) error {
-				w.devServer()
-
 				return w.plan(ctx, operands[0])
 			}),
 		flags.local("new <name>", "Write an empty hand-written migration file", cobra.ExactArgs(1),
@@ -87,8 +83,6 @@ records at --log-level.`,
 			func(_ context.Context, w *workspace, _ []string) error { return w.hash() }),
 		flags.local("lint [<file>...]", "Run the RTL rules over planned and hand-written migrations",
 			cobra.ArbitraryArgs, func(ctx context.Context, w *workspace, operands []string) error {
-				w.devServer()
-
 				return w.lint(ctx, operands)
 			}),
 		flags.local("verify", "Check ratel.sum and that every step is sealed", cobra.NoArgs,
@@ -101,8 +95,6 @@ records at --log-level.`,
 			func(ctx context.Context, w *workspace, url string) error { return w.apply(ctx, url, migrate.Contract) }),
 		flags.target("drift", "Diff the target against the state its applied migrations produce",
 			func(ctx context.Context, w *workspace, url string) error {
-				w.devServer()
-
 				return w.drift(ctx, url)
 			}),
 	)
@@ -146,13 +138,6 @@ func (f *migrateFlags) target(use, short string, run func(context.Context, *work
 	}
 
 	return command
-}
-
-// devServer routes testcontainers' messages into the command's log: the
-// library prints its Docker banner and container messages through a
-// process-wide default logger, and this process runs one command.
-func (w *workspace) devServer() {
-	tclog.SetDefault(devdb.DebugLogger(w.log))
 }
 
 // newLogger writes records at level and above to out, one line each,

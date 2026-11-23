@@ -9,9 +9,10 @@ package introspect
 // defaults are omitted, so the rendered DDL maps to the same IR as
 // hand-written DDL that leaves them out.
 type section struct {
-	name     string
-	query    string
-	database bool
+	name       string
+	query      string
+	database   bool
+	comparison bool // the query also returns a normalized comparison key
 }
 
 // Every query skips objects created by an extension, which belong to the
@@ -25,7 +26,7 @@ func sections() []section {
 		{name: "routines", query: routines},
 		{name: "sequences", query: sequences},
 		{name: "tables", query: tables},
-		{name: "constraints", query: constraints},
+		{name: "constraints", query: constraints, comparison: true},
 		{name: "row security", query: rowSecurity},
 		{name: "views", query: views},
 		{name: "indexes", query: indexes},
@@ -313,7 +314,8 @@ ORDER BY n.nspname, c.relname, a.attnum`
 const constraints = `
 SELECT format('constraint %I.%I.%I', n.nspname, c.relname, k.conname),
        format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s;', n.nspname, c.relname, k.conname,
-         pg_catalog.pg_get_constraintdef(k.oid))
+         pg_catalog.pg_get_constraintdef(k.oid)),
+       CASE WHEN k.contype = 'c' THEN pg_catalog.pg_get_constraintdef(k.oid, true) ELSE '' END
 FROM pg_catalog.pg_constraint k
 JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace

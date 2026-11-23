@@ -32,7 +32,12 @@ type delta struct{ changes, drops []Change }
 // in reverse.
 func Diff(current, desired introspect.Rendering, intents Intents) []Change {
 	changes, current := renameTables(current, desired, intents)
-	before := statements(current)
+
+	before := make(map[string]introspect.Object, len(current.Objects))
+	for _, object := range current.Objects {
+		before[object.Key] = object
+	}
+
 	after := statements(desired)
 	deferred := make(map[string][]Change)
 
@@ -42,8 +47,8 @@ func Diff(current, desired introspect.Rendering, intents Intents) []Change {
 		switch {
 		case !exists:
 			changes = append(changes, Created(object))
-		case previous != object.SQL || columnsDiffer(current, desired, object.Key):
-			step := altered(current, desired, intents, object.Key, previous, object.SQL)
+		case !sameDefinition(previous, object) || columnsDiffer(current, desired, object.Key):
+			step := altered(current, desired, intents, object.Key, previous.SQL, object.SQL)
 			changes = append(changes, step.changes...)
 			deferred[object.Key] = step.drops
 		default:
@@ -61,6 +66,16 @@ func Diff(current, desired introspect.Rendering, intents Intents) []Change {
 	}
 
 	return renamedObjects(changes, drops)
+}
+
+// sameDefinition ignores redundant boolean grouping from PostgreSQL's BETWEEN
+// rewrite while preserving the original CHECK SQL for migration steps.
+func sameDefinition(previous, desired introspect.Object) bool {
+	if previous.Comparison != "" && desired.Comparison != "" {
+		return previous.Comparison == desired.Comparison
+	}
+
+	return previous.SQL == desired.SQL
 }
 
 // columnsDiffer reports a table whose columns differ although its statement

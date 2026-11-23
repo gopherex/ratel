@@ -207,9 +207,14 @@ func (s *state) userGoType(key, pkg string) (goType, error) {
 // @go.type.
 func (s *state) columnType(table *ir.QualifiedName, column *ir.Column, pkg string) (goType, error) {
 	key := strings.Join(append(slices.Clone(table.GetParts()), column.GetName()), ".")
+
+	return s.typeWithOverride(key, column.GetType(), pkg)
+}
+
+func (s *state) typeWithOverride(key string, typ *ir.TypeRef, pkg string) (goType, error) {
 	if configured, ok := s.columns[key]; ok {
 		return override(configured), nil
 	}
 
-	return s.goType(column.GetType(), pkg)
+	return s.goType(typ, pkg)
 }

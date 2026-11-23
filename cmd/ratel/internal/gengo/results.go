@@ -226,7 +226,9 @@ func (s *state) groupTargets(file *unit, value *ir.Query, group tableGroup, pref
 func (s *state) column(file *unit, value *ir.Query, index int) (resultColumn, error) {
 	column := value.GetColumns()[index]
 
-	mapped, err := s.goType(column.GetType(), file.pkg)
+	key := strings.Join(column.GetSourceColumn().GetName().GetParts(), ".")
+
+	mapped, err := s.typeWithOverride(key, column.GetType(), file.pkg)
 	if err != nil {
 		return resultColumn{}, err
 	}

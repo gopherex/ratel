@@ -217,4 +217,9 @@ func TestComputedColumns(t *testing.T) {
 	if err != nil || len(found) != 1 || found[0].Size != 5 || found[0].ID != node.ID {
 		t.Fatalf("select by generated column = %+v, %v", found, err)
 	}
+
+	projected, err := db.Run(queries.NodeSize().ID(node.ID)).One(ctx)
+	if err != nil || projected.ByteCount != uint32(5) {
+		t.Fatalf("projected size = %+v, %v", projected, err)
+	}
 }

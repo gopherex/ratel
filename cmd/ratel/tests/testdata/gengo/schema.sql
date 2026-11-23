@@ -29,6 +29,7 @@ CREATE TABLE app.nodes (
   parent bigint,
   name text NOT NULL,
   name_lower text NOT NULL GENERATED ALWAYS AS (lower(name)) STORED,
+  -- @go.type uint32
   size bigint NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX nodes_name ON app.nodes (name_lower);

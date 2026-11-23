@@ -88,6 +88,9 @@ type Safety struct {
 - Columns are compared by name. A column a migration adds comes last in its
   table whatever its place in the schema files; diff and drift ignore column
   order.
+- Table `CHECK` constraints compare the definition PostgreSQL renders without
+  redundant parentheses. Equivalent `BETWEEN` rewrites do not trigger new
+  migrations; emitted DDL keeps the full PostgreSQL definition.
 - Tables created in the same plan are exempt from lock rules.
 
 ## Safe recipes

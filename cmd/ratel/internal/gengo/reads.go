@@ -1,17 +1,30 @@
 package gengo
 
 import (
+	"fmt"
 	"go/token"
 	"strconv"
 	"strings"
 
 	"github.com/gopherex/ratel/pkg/ir"
+	"github.com/gopherex/ratel/pkg/plugin"
 )
 
 // writeRead generates a :one or :many query: its row type and scanner, a
 // column descriptor for SELECT queries, and the query builder steps.
 func (s *state) writeRead(file *unit, value *ir.Query, parameters []parameter) error {
 	name := value.GetName()
+
+	for index, column := range value.GetColumns() {
+		field := pascal(column.GetName())
+		if !token.IsIdentifier(field) || !token.IsExported(field) {
+			return &plugin.Error{
+				Code: "RTL-G12", Source: value.GetMeta().GetSource(),
+				Message: fmt.Sprintf("query %s: result column %d (%q) has no usable Go field name; give it an alias with AS",
+					name, index+1, column.GetName()),
+			}
+		}
+	}
 
 	result, err := s.resultShape(file, value)
 	if err != nil {

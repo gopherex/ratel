@@ -62,9 +62,10 @@ func Requalified(rendering introspect.Rendering, from, target string) introspect
 	}
 
 	for _, object := range rendering.Objects {
-		result.Objects = append(result.Objects, introspect.Object{
-			Key: requalify(object.Key, from, target), SQL: requalify(object.SQL, from, target),
-		})
+		object.Key = requalify(object.Key, from, target)
+		object.SQL = requalify(object.SQL, from, target)
+		object.Comparison = requalify(object.Comparison, from, target)
+		result.Objects = append(result.Objects, object)
 	}
 
 	for index := range rendering.Columns {

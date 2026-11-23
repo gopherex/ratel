@@ -94,6 +94,33 @@ func (p project) must(args ...string) string {
 	return result.output
 }
 
+func TestMigrateCheckRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	const schema = `CREATE TABLE test_ranges (
+  id bigint PRIMARY KEY,
+  a integer NOT NULL,
+  b integer NOT NULL,
+  c integer NOT NULL,
+  CONSTRAINT modes CHECK (a BETWEEN 0 AND 3 AND b BETWEEN 0 AND 3 AND c NOT BETWEEN 4 AND 8)
+);`
+
+	server := postgresPool(t, 18)
+	fixture := newProject(t, server.Config().ConnString())
+	fixture.schema(schema)
+	fixture.must("plan", "init")
+
+	if output := fixture.must("plan", "again"); !strings.Contains(output, "no changes\n") {
+		t.Fatalf("replayed CHECK differs from desired schema:\n%s", output)
+	}
+
+	fixture.schema(strings.Replace(schema, "c NOT BETWEEN 4 AND 8", "c NOT BETWEEN 4 AND 9", 1))
+
+	if output := fixture.must("plan", "changed"); !strings.Contains(output, "_changed.sql") {
+		t.Fatalf("changed CHECK did not produce a migration:\n%s", output)
+	}
+}
+
 func TestMigrateCommands(t *testing.T) {
 	t.Parallel()
 

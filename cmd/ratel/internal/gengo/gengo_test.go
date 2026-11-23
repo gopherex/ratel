@@ -186,6 +186,67 @@ func TestPackageCycle(t *testing.T) {
 	}
 }
 
+func TestQueryResultColumns(t *testing.T) {
+	parser := newParser(t)
+	t.Parallel()
+
+	const schema = `CREATE TABLE events (
+  id bigint PRIMARY KEY,
+  -- @go.type uint32
+  kind bigint NOT NULL
+);`
+
+	for _, tc := range []struct{ name, projection, field, typ string }{
+		{name: "source", projection: "kind", field: "Kind", typ: "uint32"},
+		{name: "alias", projection: "kind AS event_kind", field: "EventKind", typ: "uint32"},
+		{name: "cast", projection: "kind::bigint AS event_kind", field: "EventKind", typ: "int64"},
+		{name: "expression", projection: "kind + 1 AS event_kind", field: "EventKind", typ: "int64"},
+		{name: "aliased exists", projection: "EXISTS (SELECT 1) AS found", field: "Found", typ: "bool"},
+		{name: "unnamed exists", projection: "EXISTS (SELECT 1)"},
+		{name: "invalid alias", projection: `kind AS "?"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			path := filepath.Join(dir, "schema.sql")
+
+			if err := os.WriteFile(path, []byte(schema), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			sql := "-- name: Load :one\nSELECT " + tc.projection + " FROM events;"
+			if err := os.WriteFile(filepath.Join(dir, "queries.sql"), []byte(sql), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			response := respond(t, parser, path)
+			if tc.field == "" {
+				for _, diag := range response.GetDiagnostics() {
+					if diag.GetCode() == "RTL-G12" && strings.Contains(diag.GetMessage(), "with AS") &&
+						diag.GetSource().GetFile() != "" {
+						return
+					}
+				}
+
+				t.Fatalf("expected an alias diagnostic with source, got %v", response.GetDiagnostics())
+			}
+
+			if plugin.HasErrors(response) {
+				t.Fatalf("diagnostics = %v", response.GetDiagnostics())
+			}
+
+			for _, file := range response.GetGenerate().GetFiles() {
+				if strings.Contains(string(file.GetContents()), "type LoadRow struct {\n\t"+tc.field+" "+tc.typ+"\n}") {
+					return
+				}
+			}
+
+			t.Fatalf("LoadRow should have field %s of type %s", tc.field, tc.typ)
+		})
+	}
+}
+
 // TestDiagnosticCodes checks the code of each generation error a schema or
 // query can cause (docs/runtime.md, Diagnostic codes).
 func TestDiagnosticCodes(t *testing.T) {

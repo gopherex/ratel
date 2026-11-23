@@ -89,7 +89,10 @@ type Domain struct {
 type Check struct{ Name, Definition string }
 
 // Object is one rendered statement and the key of the object it creates.
-type Object struct{ Key, SQL string }
+type Object struct {
+	Key, SQL   string
+	Comparison string // normalized CHECK definition, never used as emitted SQL
+}
 
 // Column is a column as ADD COLUMN takes it and the clauses it is made of;
 // an absent clause is empty.
@@ -252,6 +255,10 @@ func render(ctx context.Context, snapshot pgx.Tx, section section, namespaces []
 
 	objects, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Object, error) {
 		var object Object
+
+		if section.comparison {
+			return object, row.Scan(&object.Key, &object.SQL, &object.Comparison)
+		}
 
 		return object, row.Scan(&object.Key, &object.SQL)
 	})

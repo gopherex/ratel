@@ -115,7 +115,9 @@ unqualified, and all their Go identifiers share one namespace, a clash being
 `RTL-G05` (a query `ArchiveKeys` beside the descriptor of table
 `archive_keys`).
 
-`@go.type <import/path.Type>` on a column overrides its Go type; other `go`
+`@go.type <GoType>` on a column overrides its Go type in the model and in
+direct query projections, including projections renamed with `AS`. Casts and
+computed expressions use their inferred PostgreSQL type instead. Other `go`
 annotations are `@go.row` (below) and `@go.message`, `@go.field` and
 `@go.case`, which the proto frontend emits so tables use proto messages as
 models ([proto-frontend.md](proto-frontend.md#go-models)). Every generated file starts with
@@ -850,6 +852,7 @@ refusal, including serialization failures, cancellation and connection loss.
 | `RTL-G09` | a shared `@ratel.row` type declared with another shape |
 | `RTL-G10` | warning: two queries return the same row shape; share it with `@ratel.row` |
 | `RTL-G11` | generated packages import each other: tables of two packages reference each other through foreign keys |
+| `RTL-G12` | a query result column has no usable Go field name; give it an alias with `AS` |
 
 ## Schemas and tenants
 

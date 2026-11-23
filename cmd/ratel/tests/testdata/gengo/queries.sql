@@ -9,6 +9,9 @@ ORDER BY o.id;
 -- name: Emails :many
 SELECT id, email FROM app.users;
 
+-- name: NodeSize :one
+SELECT size AS byte_count FROM app.nodes WHERE id = @id;
+
 -- name: CreateTag :one
 INSERT INTO app.tags (id, label) VALUES (@id, @label) RETURNING *;
 

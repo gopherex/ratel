@@ -4,7 +4,6 @@ package queries
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"iter"
 	"time"
@@ -51,7 +50,7 @@ var UserByEmailQ = userByEmailQuery{
 	Home:      ratel.NewNullCol[app.User, app.Address]("home"),
 	Type:      ratel.NewNullCol[app.User, string]("type"),
 	CreatedAt: ratel.NewCol[app.User, time.Time]("created_at"),
-	Profile:   ratel.NewNullCol[app.User, json.RawMessage]("profile"),
+	Profile:   ratel.NewNullCol[app.User, doc.Profile]("profile"),
 	Doubled:   ratel.NewNullCol[app.User, int64]("doubled"),
 }
 
@@ -65,7 +64,7 @@ type userByEmailQuery struct {
 	Home      ratel.NullCol[app.User, app.Address]
 	Type      ratel.NullCol[app.User, string]
 	CreatedAt ratel.Col[app.User, time.Time]
-	Profile   ratel.NullCol[app.User, json.RawMessage]
+	Profile   ratel.NullCol[app.User, doc.Profile]
 	Doubled   ratel.NullCol[app.User, int64]
 }
 
@@ -121,7 +120,7 @@ var UsersWithOrderCountQ = usersWithOrderCountQuery{
 	Home:       ratel.NewNullCol[UsersWithOrderCountRow, app.Address]("home"),
 	Type:       ratel.NewNullCol[UsersWithOrderCountRow, string]("type"),
 	CreatedAt:  ratel.NewCol[UsersWithOrderCountRow, time.Time]("created_at"),
-	Profile:    ratel.NewNullCol[UsersWithOrderCountRow, json.RawMessage]("profile"),
+	Profile:    ratel.NewNullCol[UsersWithOrderCountRow, doc.Profile]("profile"),
 	Doubled:    ratel.NewNullCol[UsersWithOrderCountRow, int64]("doubled"),
 	OrderCount: ratel.NewCol[UsersWithOrderCountRow, int64]("order_count"),
 }
@@ -136,7 +135,7 @@ type usersWithOrderCountQuery struct {
 	Home       ratel.NullCol[UsersWithOrderCountRow, app.Address]
 	Type       ratel.NullCol[UsersWithOrderCountRow, string]
 	CreatedAt  ratel.Col[UsersWithOrderCountRow, time.Time]
-	Profile    ratel.NullCol[UsersWithOrderCountRow, json.RawMessage]
+	Profile    ratel.NullCol[UsersWithOrderCountRow, doc.Profile]
 	Doubled    ratel.NullCol[UsersWithOrderCountRow, int64]
 	OrderCount ratel.Col[UsersWithOrderCountRow, int64]
 }
