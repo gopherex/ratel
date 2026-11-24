@@ -27,6 +27,31 @@ func quotedList(values []string) string {
 	return "[]string{" + strings.Join(quoted, ", ") + "}"
 }
 
+// beginDescriptor opens the declaration before its initializer and returns its suffix.
+// A zero-initialized cache lets the linker discard an unused accessor and its constructor.
+func (s *state) beginDescriptor(file *unit, name, typ string) string {
+	if !s.options.LazyDescriptors {
+		file.printf("var %s = ", name)
+
+		return "\n\n"
+	}
+
+	file.imports = append(file.imports, "sync;ratelSync")
+	cache := "ratelCache_" + name
+	file.printf("func %s() %s {\n%s.once.Do(func() {\n%s.value = ", name, typ, cache, cache)
+
+	return "\n})\nreturn " + cache + ".value\n}\n\nvar " + cache +
+		" struct {\nonce ratelSync.Once\nvalue " + typ + "\n}\n\n"
+}
+
+func (s *state) descriptorRef(name string) string {
+	if s.options.LazyDescriptors {
+		return name + "()"
+	}
+
+	return name
+}
+
 // writeDescriptor writes the table's base WriteTable and its descriptor.
 // Relations reference the base of their target, so mutually related tables
 // form no initialization cycle.
@@ -45,7 +70,8 @@ func (s *state) writeDescriptor(file *unit, schema, table string, names identifi
 		embedded, wrap, unwrap = "KeyedTable", "ratel.NewKeyedTable(", ")"
 	}
 
-	file.printf("var %s = %sratel.NewWriteTable(\n", names.base, wrap)
+	endBase := s.beginDescriptor(file, names.base, "ratel."+embedded+"["+names.model+", "+names.insert+"]")
+	file.printf("%sratel.NewWriteTable(\n", wrap)
 	file.printf("\tratel.NewTable(%s, %s, %s, %s%s),\n", strconv.Quote(schema), strconv.Quote(table),
 		quotedList(outputs), names.scanner, tableOptions(names, columns, source))
 	file.printf("\tfunc(insert %s) bool { return insert.valid },\n", names.insert)
@@ -58,8 +84,9 @@ func (s *state) writeDescriptor(file *unit, schema, table string, names identifi
 
 	// The descriptor is a pointer: the writes and sources take it as an
 	// interface, which then holds the pointer instead of a copy.
-	file.printf(")%s\n\n// %s describes %s.%s.\nvar %s = &%s{\n\t%s: %s,\n", unwrap, names.descriptor,
-		schema, table, names.descriptor, names.descriptorType, embedded, names.base)
+	file.printf(")%s%s// %s describes %s.%s.\n", unwrap, endBase, names.descriptor, schema, table)
+	end := s.beginDescriptor(file, names.descriptor, "*"+names.descriptorType)
+	file.printf("&%s{\n\t%s: %s,\n", names.descriptorType, embedded, s.descriptorRef(names.base))
 
 	fieldTypes := make([]string, len(columns))
 
@@ -74,7 +101,7 @@ func (s *state) writeDescriptor(file *unit, schema, table string, names identifi
 		file.printf("\t%s: %s,\n", value.name, value.value)
 	}
 
-	file.printf("}\n\ntype %s struct {\n\tratel.%s[%s, %s]\n", names.descriptorType, embedded, names.model,
+	file.printf("}%stype %s struct {\n\tratel.%s[%s, %s]\n", end, names.descriptorType, embedded, names.model,
 		names.insert)
 
 	for index, value := range columns {

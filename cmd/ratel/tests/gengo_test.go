@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gopherex/ratel/cmd/ratel/internal/cli"
@@ -35,6 +36,22 @@ plugins:
 func TestGeneratedCode(t *testing.T) {
 	t.Parallel()
 
+	lazyConfig := strings.Replace(e2eConfig, "import_path:", "lazy_descriptors: true, import_path:", 1)
+
+	for _, tc := range []struct{ name, config, program string }{
+		{"variables", e2eConfig, "program_test.go.txt"},
+		{"accessors", lazyConfig, "accessors_test.go.txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			testGeneratedCode(t, tc.config, tc.program)
+		})
+	}
+}
+
+func testGeneratedCode(t *testing.T, config, program string) {
+	t.Helper()
+
 	root, err := filepath.Abs("../../..")
 	if err != nil {
 		t.Fatal(err)
@@ -42,12 +59,12 @@ func TestGeneratedCode(t *testing.T) {
 
 	module := t.TempDir()
 	files := map[string]string{
-		"ratel.yaml":      e2eConfig,
+		"ratel.yaml":      config,
 		"go.mod":          "module example.com/e2e\n\ngo 1.27.3\n",
 		"doc/doc.go":      "package doc\n\n// Profile is a JSON document.\ntype Profile struct{ Name string }\n",
 		"schema/app.sql":  read(t, "testdata/gengo/schema.sql"),
 		"queries/app.sql": read(t, "testdata/gengo/queries.sql"),
-		"e2e_test.go":     read(t, "testdata/gengo/program_test.go.txt"),
+		"e2e_test.go":     read(t, filepath.Join("testdata", "gengo", program)),
 	}
 
 	for name, contents := range files {
@@ -69,6 +86,10 @@ func TestGeneratedCode(t *testing.T) {
 		"github.com/shopspring/decimal", "github.com/jackc/pgx-shopspring-decimal")
 	goCommand(t, module, environment, "vet", "./...")
 
+	if program == "accessors_test.go.txt" {
+		testDescriptorLinking(t, module, environment)
+	}
+
 	for _, major := range []int{16, 17, 18, 19} {
 		t.Run(strconv.Itoa(major), func(t *testing.T) {
 			t.Parallel()
@@ -88,15 +109,42 @@ func TestGeneratedCode(t *testing.T) {
 	}
 }
 
-func goCommand(t *testing.T, directory string, environment []string, args ...string) {
+// A process that selects users must retain their scanner and drop the unrelated tags table,
+// even though both tables belong to the same generated Go package.
+func testDescriptorLinking(t *testing.T, module string, environment []string) {
+	t.Helper()
+	write(t, filepath.Join(module, "probe", "main.go"), `package main
+
+import (
+    "fmt"
+    "example.com/e2e/db/app"
+)
+
+func main() { fmt.Println(app.Users().Select().Build()) }
+`)
+
+	binary := filepath.Join(t.TempDir(), "probe")
+	goCommand(t, module, environment, "build", "-ldflags=", "-o", binary, "./probe")
+
+	symbols := goCommand(t, module, environment, "tool", "nm", binary)
+	if !bytes.Contains(symbols, []byte("example.com/e2e/db/app.scanUser")) ||
+		bytes.Contains(symbols, []byte("example.com/e2e/db/app.scanTag")) {
+		t.Fatal("expected the users scanner alone of users and tags in the executable")
+	}
+}
+
+func goCommand(t *testing.T, directory string, environment []string, args ...string) []byte {
 	t.Helper()
 
 	command := exec.CommandContext(t.Context(), "go", args...)
 	command.Dir, command.Env = directory, environment
 
-	if output, err := command.CombinedOutput(); err != nil {
+	output, err := command.CombinedOutput()
+	if err != nil {
 		t.Fatalf("go %v: %v\n%s", args, err, output)
 	}
+
+	return output
 }
 
 func read(t *testing.T, path string) string {

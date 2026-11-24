@@ -137,8 +137,11 @@ func (s *state) writeColumns(file *unit, value *ir.Query, result shape) error {
 	}
 
 	file.printf("// %s describes the result columns of %s for use with ratel.From.\n"+
-		"// Clauses added outside apply to the query's result.\nvar %s = %s{\n%s}\n\ntype %s struct {\n%s}\n\n",
-		descriptor, name, descriptor, descriptorType, values.String(), descriptorType, fields.String())
+		"// Clauses added outside apply to the query's result.\n", descriptor, name)
+
+	end := s.beginDescriptor(file, descriptor, descriptorType)
+	file.printf("%s{\n%s}%stype %s struct {\n%s}\n\n", descriptorType, values.String(), end, descriptorType,
+		fields.String())
 
 	return nil
 }

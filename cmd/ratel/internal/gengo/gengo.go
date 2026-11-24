@@ -33,6 +33,8 @@ type Options struct {
 	// ImportPath is the Go import path of the output directory. Schema and
 	// query packages are its subdirectories.
 	ImportPath string `json:"import_path"`
+	// LazyDescriptors exposes descriptors as functions initialized on first use.
+	LazyDescriptors bool `json:"lazy_descriptors"`
 	// Types maps a PostgreSQL type name ("jsonb", "app.money") to a Go type
 	// ("github.com/acme/doc.Document"), overriding the default mapping.
 	Types map[string]string `json:"types"`
@@ -60,6 +62,7 @@ func (Generator) Info(context.Context, *pluginpb.InfoRequest) (*pluginpb.InfoRes
 		MinProtocolVersion: protocolVersion, MaxProtocolVersion: protocolVersion,
 		OptionsDescription: "import_path (required): Go import path of out; " +
 			"types: PostgreSQL type name to Go type (import/path.Type); " +
+			"lazy_descriptors: expose descriptors as functions (default false); " +
 			"packages: [{tables: [glob], package: name}] places tables and views by name",
 	}, nil
 }

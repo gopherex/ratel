@@ -1,0 +1,61 @@
+package e2e_test
+
+import (
+	"os"
+	"sync"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/gopherex/ratel/pkg/ratel"
+
+	"example.com/e2e/db/app"
+	"example.com/e2e/db/audit"
+	"example.com/e2e/db/queries"
+)
+
+func TestAccessors(t *testing.T) {
+	var reads sync.WaitGroup
+	for range 12 {
+		reads.Go(func() {
+			if app.Users() != app.Users() || app.Orders() != app.Orders() {
+				t.Error("repeated calls must return the same descriptor")
+			}
+		})
+	}
+	reads.Wait()
+
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, os.Getenv("RATEL_E2E_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	db := ratel.New(pool)
+	if _, err := db.Run(app.Tags().Insert(app.Tags().Row().ID(1).Label("go"))).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	entry := audit.Entries().Row().ID(1).TagID(1)
+	if _, err := db.Run(audit.Entries().Insert(entry)).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := db.Run(audit.Entries().Select().With(audit.Entries().Tag)).One(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, err := linked.Tag()
+	if err != nil || tag == nil || tag.Label != "go" {
+		t.Fatalf("cross-package relation = %v, %v", tag, err)
+	}
+	labels, err := db.Run(app.TagLabels().Select().Where(app.TagLabels().Label.Eq("go"))).List(ctx)
+	if err != nil || len(labels) != 1 {
+		t.Fatalf("view = %v, %v", labels, err)
+	}
+	found, err := db.Run(ratel.From(queries.Emails()).Where(queries.EmailsQ().ID.Eq(42))).Exists(ctx)
+	if err != nil || found {
+		t.Fatalf("query columns = %t, %v", found, err)
+	}
+	if _, err := db.Run(app.Users().InSchema("app").Select().With(app.Users().Orders)).List(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

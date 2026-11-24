@@ -33,3 +33,8 @@ CREATE TABLE app.nodes (
   size bigint NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX nodes_name ON app.nodes (name_lower);
+
+CREATE VIEW app.tag_labels AS SELECT label FROM app.tags;
+
+CREATE SCHEMA audit;
+CREATE TABLE audit.entries (id bigint PRIMARY KEY, tag_id int NOT NULL REFERENCES app.tags (id));

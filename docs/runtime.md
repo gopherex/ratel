@@ -91,6 +91,7 @@ one schema can still give a package per area. The plugin options of
 |---|---|
 | `import_path` | required: Go import path of the output directory; packages import each other through it |
 | `types` | PostgreSQL type name (`jsonb`, `app.money`) to a Go type (`github.com/acme/doc.Document`), replacing the default mapping |
+| `lazy_descriptors` | boolean, default `false`. Expose table, view and query-column descriptors as functions initialized on first use |
 | `packages` | rules `{tables: [<glob>...], package: <name>}`: a table or view whose name matches a glob goes to that package; the first matching rule wins, unmatched ones stay in their schema's package |
 
 ```yaml
@@ -102,6 +103,24 @@ options:
     - tables: [public.people_*] # schema.name
       package: people
 ```
+
+For services with many generated models, set `lazy_descriptors: true` under
+the Go plugin's `options` and run `ratel generate`. Call `app.Users()` for
+a table, `app.ActiveUsers()` for a view and `queries.EmailsQ()` for the
+columns of a named query. Each accessor initializes its descriptor once,
+including under concurrent access. The Go linker can discard constructors
+for descriptors the program never reaches. Relations retain the target
+metadata they use.
+
+```go
+users := app.Users()
+active := users.Select().Where(users.Status.Eq(app.UserStatusActive))
+emails := ratel.From(queries.Emails()).Where(queries.EmailsQ().ID.Eq(id))
+```
+
+The examples below use the default variable form. In either mode,
+`db.Run(queries.Emails())` executes the named SQL directly. Use
+`ratel.From(queries.Emails())` to add dynamic clauses to its result.
 
 A glob is a `path.Match` pattern of the table's unqualified name, or of
 `schema.name` when it contains a dot. Enums, domains and composites stay in

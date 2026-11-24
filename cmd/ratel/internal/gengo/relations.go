@@ -180,10 +180,10 @@ func (s *state) targetModel(file *unit, target *ir.Table) string {
 
 func (s *state) targetDescriptor(file *unit, target *ir.Table) string {
 	if owner := s.relationPackage(target.GetName()); owner != file.pkg {
-		return owner + "." + plural(objectOf(target.GetName()))
+		return s.descriptorRef(owner + "." + plural(objectOf(target.GetName())))
 	}
 
-	return camel(plural(objectOf(target.GetName()))) + "Base"
+	return s.descriptorRef(camel(plural(objectOf(target.GetName()))) + "Base")
 }
 
 func (s *state) writeRelations(file *unit, names identifiers, edges []edge) error {

@@ -159,6 +159,7 @@ plugins:
     out: internal/db
     options:
       import_path: github.com/acme/app/internal/db
+      lazy_descriptors: false   # true generates Users() and EmailsQ() accessors
 
 migrate:
   lock_timeout: 100ms         # first attempt; the retry schedule grows it

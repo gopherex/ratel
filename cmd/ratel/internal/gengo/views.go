@@ -47,8 +47,9 @@ func (s *state) view(file *unit, name *ir.QualifiedName, output []*ir.QueryColum
 		outputs = append(outputs, value.name)
 	}
 
-	file.printf("// %s describes the %s %s.%s; it is read-only.\nvar %s = &%s{\n", names.descriptor, kind, schema,
-		object, names.descriptor, names.descriptorType)
+	file.printf("// %s describes the %s %s.%s; it is read-only.\n", names.descriptor, kind, schema, object)
+	end := s.beginDescriptor(file, names.descriptor, "*"+names.descriptorType)
+	file.printf("&%s{\n", names.descriptorType)
 	file.printf("\tTable: ratel.NewTable(%s, %s, %s, %s),\n", strconv.Quote(schema), strconv.Quote(object),
 		quotedList(outputs), names.scanner)
 
@@ -57,7 +58,7 @@ func (s *state) view(file *unit, name *ir.QualifiedName, output []*ir.QueryColum
 			file.use(value.goType), strconv.Quote(value.name))
 	}
 
-	file.printf("}\n\ntype %s struct {\n\tratel.Table[%s]\n", names.descriptorType, names.model)
+	file.printf("}%stype %s struct {\n\tratel.Table[%s]\n", end, names.descriptorType, names.model)
 
 	for _, value := range columns {
 		file.printf("\t%s ratel.%s[%s, %s]\n", value.field, columnKind(value)[3:], names.model, file.use(value.goType))

@@ -141,7 +141,9 @@ and arrays become Go types. Constraint violations are errors you match with
 types are checked at compile time, and the SQL is schema-qualified with
 numbered parameters. It covers joins, subqueries, keyset pagination,
 streaming, `SKIP LOCKED`, upserts, `RETURNING`, batches and `COPY`.
-Relations come from foreign keys and load in one query per depth.
+Relations come from foreign keys and load in one query per depth. Set
+`lazy_descriptors: true` in the Go plugin options to let the linker drop
+unused table, view and query-column descriptors.
 → [runtime](docs/runtime.md)
 
 **Migrations that never lock production.** The schema files are the target
