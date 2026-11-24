@@ -106,7 +106,7 @@ func writeQueryScanner(file *unit, scanner string, result shape) {
 }
 
 // writeColumns writes the descriptor <Name>Q of a SELECT query: its columns
-// only, for the filters and ordering of query.Select().
+// only, for the filters and ordering of ratel.From(query).
 func (s *state) writeColumns(file *unit, value *ir.Query, result shape) error {
 	name := value.GetName()
 
@@ -136,9 +136,9 @@ func (s *state) writeColumns(file *unit, value *ir.Query, result shape) error {
 			file.use(column.goType) + "](" + strconv.Quote(column.name) + "),\n")
 	}
 
-	file.printf("// %s describes the columns of the query %s: %s().Select().Where(%s.Column...).\n"+
+	file.printf("// %s describes the result columns of %s for use with ratel.From.\n"+
 		"// Clauses added outside apply to the query's result.\nvar %s = %s{\n%s}\n\ntype %s struct {\n%s}\n\n",
-		descriptor, name, name, descriptor, descriptor, descriptorType, values.String(), descriptorType, fields.String())
+		descriptor, name, descriptor, descriptorType, values.String(), descriptorType, fields.String())
 
 	return nil
 }

@@ -19,7 +19,7 @@ func scanUserByEmail(row pgx.Row) (app.User, error) {
 	return model, nil
 }
 
-// UserByEmailQ describes the columns of the query UserByEmail: UserByEmail().Select().Where(UserByEmailQ.Column...).
+// UserByEmailQ describes the result columns of UserByEmail for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var UserByEmailQ = userByEmailQuery{
 	ID:    ratel.NewCol[app.User, int64]("id"),
@@ -65,7 +65,7 @@ func scanTopCustomers(row pgx.Row) (TopCustomersRow, error) {
 	return model, nil
 }
 
-// TopCustomersQ describes the columns of the query TopCustomers: TopCustomers().Select().Where(TopCustomersQ.Column...).
+// TopCustomersQ describes the result columns of TopCustomers for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var TopCustomersQ = topCustomersQuery{
 	Email: ratel.NewCol[TopCustomersRow, string]("email"),

@@ -153,7 +153,7 @@ func readSubqueries(t *testing.T, pool *pgxpool.Pool) {
 	source := ratel.NewQuery([]string{"tenant", "id", "email", "manager_id"}, scanAccount,
 		`SELECT tenant, id, email, manager_id FROM read_app.accounts WHERE tenant=$1 ORDER BY id LIMIT $2`, int64(2), 2)
 
-	rows, err = database.Run(source.Select().Where(accounts.ID.Gt(1))).List(t.Context())
+	rows, err = database.Run(ratel.From(source).Where(accounts.ID.Gt(1))).List(t.Context())
 	if err != nil || len(rows) != 1 || rows[0].ID != 2 {
 		t.Fatalf("%+v: %v", rows, err)
 	}
@@ -251,7 +251,7 @@ func readCancellation(t *testing.T, pool *pgxpool.Pool) {
 	source := ratel.NewQuery([]string{"tenant", "id", "email", "manager_id"}, scanAccount,
 		`SELECT 1::bigint tenant, 1::bigint id, ''::text email, NULL::bigint manager_id FROM pg_catalog.pg_sleep(30)`)
 
-	_, err := ratel.New(pool).Run(source.Select()).List(ctx)
+	_, err := ratel.New(pool).Run(ratel.From(source)).List(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lost cancellation cause: %v", err)
 	}

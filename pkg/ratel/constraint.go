@@ -73,13 +73,12 @@ type writeTarget struct {
 	constraints []ConstraintError
 }
 
-func (t Table[M]) target() writeTarget {
-	target := writeTarget{schema: t.schema, name: t.name}
-	if t.tableMeta != nil {
-		target.constraints = t.constraints
+func (t *tableMeta[M]) target() writeTarget {
+	if t == nil {
+		return writeTarget{}
 	}
 
-	return target
+	return t.writeTarget
 }
 
 func mapWriteError(err error, table writeTarget) error {

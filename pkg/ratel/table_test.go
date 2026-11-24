@@ -1,12 +1,39 @@
 package ratel_test
 
 import (
+	"bytes"
 	"errors"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gopherex/ratel/pkg/ratel"
 )
+
+func TestStaticQueryLinksOnlyRowRunner(t *testing.T) {
+	t.Parallel()
+
+	binary := filepath.Join(t.TempDir(), "staticquery")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./testdata/staticquery")
+
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build static query: %v\n%s", err, output)
+	}
+
+	symbols, err := exec.CommandContext(t.Context(), "go", "tool", "nm", binary).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, builder := range []string{"Select", "SelectRunner", "EagerSelect", "EagerRunner"} {
+		for _, receiver := range []string{builder, "(*" + builder} {
+			if bytes.Contains(symbols, []byte("github.com/gopherex/ratel/pkg/ratel."+receiver+"[")) {
+				t.Errorf("static query linked %s methods", receiver)
+			}
+		}
+	}
+}
 
 func (u readUsers) InSchema(schema string) readUsers {
 	u.Table = u.Table.InSchema(schema)
@@ -101,7 +128,7 @@ func TestStaticBuild(t *testing.T) {
 	args[0] = int64(2)
 
 	for name, value := range map[string]buildable{
-		"query": query, "command": command, "query select": query.Select(),
+		"query": query, "command": command, "query select": ratel.From(query),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

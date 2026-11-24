@@ -412,7 +412,7 @@ func (q InsertReturning[M, I]) rowsPlan() rowsPlan[M] {
 		rendered[index] = returning(rendered[index], q.insert.table.Table)
 	}
 
-	return rowsPlan[M]{plan: multiPlan(rendered, err), table: q.insert.table.Table, write: true}
+	return returningRows(multiPlan(rendered, err), q.insert.table.tableMeta)
 }
 
 func (q InsertReturning[M, I]) bind(db *DB) RowRunner[M] {

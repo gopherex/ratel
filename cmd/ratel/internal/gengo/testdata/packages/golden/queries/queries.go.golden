@@ -133,7 +133,7 @@ func scanProfileOf(row pgx.Row) (people.PeopleProfile, error) {
 	return model, nil
 }
 
-// ProfileOfQ describes the columns of the query ProfileOf: ProfileOf().Select().Where(ProfileOfQ.Column...).
+// ProfileOfQ describes the result columns of ProfileOf for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var ProfileOfQ = profileOfQuery{
 	ID:     ratel.NewCol[people.PeopleProfile, int64]("id"),
@@ -169,7 +169,7 @@ func scanSettingOf(row pgx.Row) (Setting, error) {
 	return model, nil
 }
 
-// SettingOfQ describes the columns of the query SettingOf: SettingOf().Select().Where(SettingOfQ.Column...).
+// SettingOfQ describes the result columns of SettingOf for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var SettingOfQ = settingOfQuery{
 	Key:   ratel.NewCol[Setting, string]("key"),

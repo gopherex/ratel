@@ -50,8 +50,17 @@ type execPlan struct {
 // A write plan maps integrity violations to *ConstraintError.
 type rowsPlan[M any] struct {
 	plan
-	table Table[M]
-	write bool
+	scan   Scanner[M]
+	target *writeTarget
+}
+
+// returningRows keeps the write target for constraint errors from RETURNING.
+func returningRows[M any](p plan, table *tableMeta[M]) rowsPlan[M] {
+	if table == nil {
+		return rowsPlan[M]{plan: p}
+	}
+
+	return rowsPlan[M]{plan: p, scan: table.scan, target: &table.writeTarget}
 }
 
 // ExecQuery is a built value that is run for its affected-row count: a write
@@ -115,8 +124,8 @@ type RowRunner[M any] struct {
 const stopped refusal = "ratel: stopped"
 
 func (r RowRunner[M]) fail(err error, phase string) error {
-	if r.plan.write {
-		return mapWriteError(err, r.plan.table.target())
+	if r.plan.target != nil {
+		return mapWriteError(err, *r.plan.target)
 	}
 
 	return fmt.Errorf("ratel: %s: %w", phase, err)
@@ -162,7 +171,7 @@ func (r RowRunner[M]) run(ctx context.Context, options []CallOption, visit func(
 }
 
 func (r RowRunner[M]) scan(rows pgx.Rows) (M, error) {
-	model, err := r.plan.table.scan(rows)
+	model, err := r.plan.scan(rows)
 	if err != nil {
 		return model, r.fail(err, "scan")
 	}

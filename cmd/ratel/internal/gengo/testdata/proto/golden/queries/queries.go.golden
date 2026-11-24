@@ -69,7 +69,7 @@ func scanCustomerByEmail(row pgx.Row) (CustomerByEmailRow, error) {
 	return model, nil
 }
 
-// CustomerByEmailQ describes the columns of the query CustomerByEmail: CustomerByEmail().Select().Where(CustomerByEmailQ.Column...).
+// CustomerByEmailQ describes the result columns of CustomerByEmail for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var CustomerByEmailQ = customerByEmailQuery{
 	ID:          ratel.NewCol[CustomerByEmailRow, int64]("id"),

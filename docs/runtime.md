@@ -325,9 +325,11 @@ physical table references. It is embedded unchanged; outer builder predicates
 continue parameter numbering. `db.Run(query)` runs the query's statement
 verbatim, so DML with `RETURNING`, which cannot be a subquery, runs too; there
 `One` and `First` add no `LIMIT` and stop reading after two rows and one row.
-`query.Select()` starts a SELECT over the query's result, and a builder SELECT
-also implements `ratel.Source[M]`, so `ratel.From(selectBuilder)` nests it
-while preserving its result model and scanner.
+Use `ratel.From(query)` to start a SELECT over a static query's result.
+Direct execution keeps only the statement, arguments and typed scanner on the
+row execution path. The builder constructs the SQL projection when the query
+is used as a source. A builder SELECT also implements `ratel.Source[M]`, so
+`ratel.From(selectBuilder)` nests it while preserving its result model and scanner.
 
 ### Nullable and optional pgx values
 
@@ -469,7 +471,7 @@ Every `:one` and `:many` `SELECT` query also gets a column descriptor
 that the builder does not express (CTEs, window functions, aggregates):
 
 ```go
-active := users.ActiveUsers().Since(since).Select().
+active := ratel.From(users.ActiveUsers().Since(since)).
 	Where(users.ActiveUsersQ.Email.Like("%@acme.com")).
 	OrderBy(users.ActiveUsersQ.CreatedAt.Desc()).Limit(20)
 list, err := db.Run(active).List(ctx)
@@ -510,9 +512,8 @@ sub := ratel.From(app.Users.Select().Where(...)).OrderBy(...)       // SELECT ov
   it filters, orders, joins and names a conflict target like any column, but
   it has no `To` and is not an upsert `Update` column, so a write PostgreSQL
   would refuse does not compile. Insert types and `Save` leave it out.
-- `app.Users.Select()` starts a SELECT over a descriptor, `query.Select()`
-  over a static query, and `ratel.From(source)` over any `ratel.Source[M]`,
-  including another SELECT.
+- `app.Users.Select()` starts a SELECT over a table descriptor.
+  `ratel.From(source)` accepts a descriptor, a bound static query or another SELECT.
 - Verbs after `db.Run`: `One` (exactly one row; `ErrNotFound` for zero,
   `ErrMultipleRows` for more than one), `First` (at most one row;
   `ErrNotFound` for zero), `List` (slice), `All` (`iter.Seq2`),

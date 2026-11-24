@@ -177,10 +177,7 @@ func (q Write[M]) bind(db *DB) ExecRunner { return ExecRunner{db: db, plan: q.ex
 func (q WriteReturning[M]) rowsPlan() rowsPlan[M] {
 	rendered, err := q.render()
 
-	return rowsPlan[M]{
-		plan:  plan{head: rendered, err: err, missing: q.write.missing},
-		table: q.write.table, write: true,
-	}
+	return returningRows(plan{head: rendered, err: err, missing: q.write.missing}, q.write.table.tableMeta)
 }
 
 func (q WriteReturning[M]) bind(db *DB) RowRunner[M] { return RowRunner[M]{db: db, plan: q.rowsPlan()} }

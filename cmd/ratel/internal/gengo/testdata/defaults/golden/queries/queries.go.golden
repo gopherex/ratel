@@ -27,7 +27,7 @@ func scanEventsAfter(row pgx.Row) (EventsAfterRow, error) {
 	return model, nil
 }
 
-// EventsAfterQ describes the columns of the query EventsAfter: EventsAfter().Select().Where(EventsAfterQ.Column...).
+// EventsAfterQ describes the result columns of EventsAfter for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var EventsAfterQ = eventsAfterQuery{
 	ID: ratel.NewCol[EventsAfterRow, int64]("id"),

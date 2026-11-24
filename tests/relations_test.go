@@ -494,7 +494,7 @@ func relationsStatic(t *testing.T, pool *pgxpool.Pool) {
 	counter := &relationCounter{Executor: pool}
 	database := ratel.New(counter)
 
-	models, err := database.Run(source.Select()).List(t.Context())
+	models, err := database.Run(ratel.From(source)).List(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

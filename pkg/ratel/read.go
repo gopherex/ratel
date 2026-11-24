@@ -19,8 +19,11 @@ func (q Select[M]) bind(db *DB) SelectRunner[M] { return SelectRunner[M]{db: db,
 
 func (q Select[M]) rowsPlan() rowsPlan[M] {
 	rendered, err := q.render()
+	if err != nil {
+		return rowsPlan[M]{plan: plan{err: err}}
+	}
 
-	return rowsPlan[M]{plan: plan{head: rendered, err: err}, table: q.source.table}
+	return rowsPlan[M]{plan: plan{head: rendered}, scan: q.source.table.scan}
 }
 
 // All lazily streams rows. Breaking iteration always releases the cursor.

@@ -38,7 +38,7 @@ func scanUserByEmail(row pgx.Row) (app.User, error) {
 	return model, nil
 }
 
-// UserByEmailQ describes the columns of the query UserByEmail: UserByEmail().Select().Where(UserByEmailQ.Column...).
+// UserByEmailQ describes the result columns of UserByEmail for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var UserByEmailQ = userByEmailQuery{
 	ID:        ratel.NewCol[app.User, int64]("id"),
@@ -108,7 +108,7 @@ func scanUsersWithOrderCount(row pgx.Row) (UsersWithOrderCountRow, error) {
 	return model, nil
 }
 
-// UsersWithOrderCountQ describes the columns of the query UsersWithOrderCount: UsersWithOrderCount().Select().Where(UsersWithOrderCountQ.Column...).
+// UsersWithOrderCountQ describes the result columns of UsersWithOrderCount for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var UsersWithOrderCountQ = usersWithOrderCountQuery{
 	ID:         ratel.NewCol[UsersWithOrderCountRow, int64]("id"),
@@ -201,7 +201,7 @@ func scanOrderTotals(row pgx.Row) (Total, error) {
 	return model, nil
 }
 
-// OrderTotalsQ describes the columns of the query OrderTotals: OrderTotals().Select().Where(OrderTotalsQ.Column...).
+// OrderTotalsQ describes the result columns of OrderTotals for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var OrderTotalsQ = orderTotalsQuery{
 	UserID: ratel.NewCol[Total, int64]("user_id"),
@@ -232,7 +232,7 @@ func scanTopTotals(row pgx.Row) (Total, error) {
 	return model, nil
 }
 
-// TopTotalsQ describes the columns of the query TopTotals: TopTotals().Select().Where(TopTotalsQ.Column...).
+// TopTotalsQ describes the result columns of TopTotals for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var TopTotalsQ = topTotalsQuery{
 	UserID: ratel.NewCol[Total, int64]("user_id"),
@@ -265,7 +265,7 @@ func scanEmailsLike(row pgx.Row) (EmailsLikeRow, error) {
 	return model, nil
 }
 
-// EmailsLikeQ describes the columns of the query EmailsLike: EmailsLike().Select().Where(EmailsLikeQ.Column...).
+// EmailsLikeQ describes the result columns of EmailsLike for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var EmailsLikeQ = emailsLikeQuery{
 	ID:    ratel.NewCol[EmailsLikeRow, int64]("id"),
@@ -335,7 +335,7 @@ func scanEmailsOfManagers(row pgx.Row) (EmailsOfManagersRow, error) {
 	return model, nil
 }
 
-// EmailsOfManagersQ describes the columns of the query EmailsOfManagers: EmailsOfManagers().Select().Where(EmailsOfManagersQ.Column...).
+// EmailsOfManagersQ describes the result columns of EmailsOfManagers for use with ratel.From.
 // Clauses added outside apply to the query's result.
 var EmailsOfManagersQ = emailsOfManagersQuery{
 	ID:    ratel.NewCol[EmailsOfManagersRow, int64]("id"),

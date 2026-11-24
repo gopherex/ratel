@@ -148,7 +148,9 @@ Gates, in order; a gate starts only after the previous one passes:
 
 1. **Unit tests** next to every file, table-driven and parallel, mocks
    generated. Parser, catalog, inference, diff, assessment, planner, lint and
-   plugin host are pure and tested without a database.
+   plugin host are pure and tested without a database. The runtime builds a
+   static-query consumer that uses `text/template` for dynamic method lookup.
+   Its linked symbols must exclude the SELECT builder and eager-loading runners.
 2. **Benchmarks** next to every function with logic; hot paths (scanning,
    builder rendering, loader distribution, catalog build, diff) carry
    before/after numbers when changed.

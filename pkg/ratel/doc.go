@@ -9,7 +9,7 @@
 //
 // Every statement is a value built from a descriptor or a generated query,
 // without a database: Table.Select, WriteTable.Insert, Upsert, Update and
-// Delete, KeyedTable.Save and DeleteRow, Query.Select and From. Build renders
+// Delete, KeyedTable.Save and DeleteRow, and From over a static query. Build renders
 // it as SQL and arguments. DB.Run binds it to a database, and the type of the
 // value decides the verbs of the runner it returns: row verbs for a SELECT, a
 // static row query or a write with Returning, Exec for a write without it.

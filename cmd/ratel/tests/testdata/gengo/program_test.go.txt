@@ -108,7 +108,7 @@ func TestGenerated(t *testing.T) {
 		t.Fatalf("OrdersWithUsers = %+v, %v", joined, err)
 	}
 
-	emails, err := db.Run(queries.Emails().Select().Where(queries.EmailsQ.ID.Eq(bob.ID))).List(ctx)
+	emails, err := db.Run(ratel.From(queries.Emails()).Where(queries.EmailsQ.ID.Eq(bob.ID))).List(ctx)
 	if err != nil || len(emails) != 1 || emails[0].Email != "bob@example.com" {
 		t.Fatalf("Emails builder = %+v, %v", emails, err)
 	}
@@ -167,7 +167,7 @@ func TestGenerated(t *testing.T) {
 
 	err = db.Batch(ctx,
 		ratel.List(app.Users.Select().OrderBy(app.Users.ID.Asc()), &everyone),
-		ratel.List(queries.Emails().Select().Where(queries.EmailsQ.ID.Eq(ann.ID)), new([]queries.EmailsRow)),
+		ratel.List(ratel.From(queries.Emails()).Where(queries.EmailsQ.ID.Eq(ann.ID)), new([]queries.EmailsRow)),
 		ratel.One(app.Users.Select().Where(app.Users.ID.Eq(bob.ID)), &single),
 		ratel.Exec(app.Tags.Update().Set(app.Tags.Label.To("relabeled")).All(), &retagged),
 	)

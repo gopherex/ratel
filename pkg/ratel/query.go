@@ -236,7 +236,7 @@ func (q *Select[M]) render() (stmt, error) {
 		return *q.source.static, nil
 	}
 
-	if q.source.table.tableMeta == nil {
+	if q.source.table == nil {
 		return stmt{}, ErrInvalidQuery
 	}
 
