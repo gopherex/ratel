@@ -354,8 +354,13 @@ func (r *runner) finish(ctx context.Context, stepID string, failure error) error
 		outcome = "failed"
 	}
 
+	// A short step records itself done in its own transaction. When the answer
+	// to its COMMIT is lost the step reports an error although the server
+	// committed it, so a done row is never downgraded: the journal keeps what
+	// the server holds.
 	_, err := r.pool.Exec(context.WithoutCancel(ctx), `UPDATE ratel.migrations_journal
-		SET outcome = $2, finished_at = CASE WHEN $2 = 'done' THEN now() END WHERE step_id = $1`, stepID, outcome)
+		SET outcome = $2, finished_at = CASE WHEN $2 = 'done' THEN now() END
+		WHERE step_id = $1 AND outcome IS DISTINCT FROM 'done'`, stepID, outcome)
 
 	return errors.Join(failure, err)
 }

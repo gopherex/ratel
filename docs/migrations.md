@@ -344,7 +344,7 @@ interrupted one:
 | concurrent index build | `pg_index.indisvalid = false`: drop the leftover concurrently, rebuild |
 | validation | `pg_constraint.convalidated`: skip when already validated |
 | concurrent detach | `pg_inherits.inhdetachpending = true`: `ALTER TABLE ... DETACH PARTITION ... FINALIZE` |
-| short step | never half done: its journal row is marked done in the step's own transaction |
+| short step | never half done: its journal row is marked done in the step's own transaction; a `done` row is never rewritten, so a step whose COMMIT answer was lost (cancelled run, broken connection) stays done and the rerun skips it |
 | backfill | resumes after `resume_key` (the statement and the last key of the last committed batch), which every committed batch updates in the same transaction |
 
 A step recorded done whose statements changed since fails the run: an

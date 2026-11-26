@@ -7,7 +7,9 @@ import (
 	"embed"
 	"errors"
 	"io/fs"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -130,7 +132,7 @@ func TestMigrate(t *testing.T) {
 	for name, check := range map[string]func(context.Context, *testing.T, *pgxpool.Pool){
 		"phases and journal": checkPhases, "blocked then free": checkBlocked, "resume": checkResume,
 		"busy": checkBusy, "server version": checkServerVersion, "refused directories": checkRefused,
-		"embedded": checkEmbedded,
+		"embedded": checkEmbedded, "commit answer lost": checkCommitLost,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -252,6 +254,49 @@ ALTER TABLE app.t ADD COLUMN x int;`})
 
 	if err := <-released; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// checkCommitLost loses the answer to a short step's COMMIT: the server
+// committed the step and its journal row, the run sees a broken connection.
+// The journal must keep the step done, so the next run skips it instead of
+// failing on the index that already exists.
+func checkCommitLost(ctx context.Context, t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+
+	pool := target(ctx, t, admin)
+
+	host, port := pool.Config().ConnConfig.Host, pool.Config().ConnConfig.Port
+	cutter := newCommitCutter(ctx, t, net.JoinHostPort(host, strconv.Itoa(int(port))), "SET outcome = 'done'")
+
+	config := pool.Config()
+	config.ConnConfig.Host, config.ConnConfig.Port = cutter.address(t)
+	// Plain text through the proxy only: no TLS it cannot read, no fallback
+	// to the server's own address.
+	config.ConnConfig.TLSConfig, config.ConnConfig.Fallbacks = nil, nil
+
+	proxied, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(proxied.Close)
+
+	files := directory(migrate.Source{Name: "1_index.sql", SQL: "-- ratel:step id=c1 phase=expand tx=in class=short " +
+		"locks=app.t:Share pg=16\nCREATE INDEX t_w ON app.t (w);"})
+
+	if err := migrate.Apply(ctx, proxied, files, migrateSettings()); err == nil {
+		t.Fatal("a run whose COMMIT answer was lost succeeded")
+	}
+
+	var outcome string
+	if err := pool.QueryRow(ctx, `SELECT outcome FROM ratel.migrations_journal WHERE step_id = 'c1'`).
+		Scan(&outcome); err != nil || outcome != "done" {
+		t.Fatalf("journal outcome = %q, %v; want done", outcome, err)
+	}
+
+	if err := migrate.Apply(ctx, pool, files, migrateSettings()); err != nil {
+		t.Fatalf("second run: %v", err)
 	}
 }
 
